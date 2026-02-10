@@ -41,6 +41,7 @@
 - Funzioni disponibili:
   - caricare un `level_draft.json`
   - modificare segmenti in tabella
+  - **anteprima grafica minimap live** (in basso a destra)
   - aggiungere/eliminare/ordinare segmenti
   - esportare o copiare il JSON aggiornato
 - Workflow consigliato:
