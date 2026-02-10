@@ -145,7 +145,6 @@ export class GameScene extends Phaser.Scene {
                 continue;
             enemy.state = updatePatrolEnemy(enemy.state, deltaSeconds);
             enemy.sprite.x = enemy.state.x;
-            enemy.sprite.setFlipX(enemy.state.direction < 0);
         }
     }
     updateFlyingEnemies(nowMs, deltaSeconds) {
