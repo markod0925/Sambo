@@ -281,6 +281,68 @@ Rewind is not undo — it is a **constructive spatial action**.
 
 ---
 
+
+
+## **4.3 Enemy Encounters & Player Lives**
+
+### Enemy Type (Prototype)
+
+The prototype includes two enemy archetypes:
+
+* **Patrol Block Enemy** (ground)
+* **Hunter Flyer** (airborne)
+
+**Interaction Rules:**
+
+* Jumping on top of an enemy defeats it.
+* Touching an enemy from the side or from below damages the player.
+
+This provides immediate readability and supports platforming skill checks without introducing complex AI.
+
+
+
+### Patrol Block Enemy (Ground)
+
+Ground enemies move back and forth on platform surfaces.
+
+**Movement Rules:**
+
+* They walk continuously left/right.
+* They reverse direction when they hit a wall.
+* They reverse direction when platform support ends (edge detection).
+
+**Combat Rules:**
+
+* Jumping on top defeats them.
+* Side / below contact damages the player.
+
+### Hunter Flyer (Airborne)
+
+A flying enemy periodically enters from the **right side** of the screen and travels **right-to-left**.
+
+**Movement Rules:**
+
+* Horizontal motion is always right-to-left.
+* It adjusts vertically to collide with the player (light homing).
+* It does not interact with terrain/platform collision.
+* If not defeated, it despawns after exiting the left side of the screen.
+
+**Combat Rules:**
+
+* The player can avoid it, or defeat it by jumping on top.
+* Any non-stomp contact damages the player.
+
+### Player Lives
+
+The player starts each run with **5 lives**.
+
+* Each damaging enemy contact removes 1 life.
+* A short invulnerability window after a hit prevents instant multi-hit loss.
+* Lives are shown directly in the HUD as hearts plus numeric count.
+
+This system introduces light stakes while keeping the prototype accessible.
+
+
 ## **5. Procedural Level Generation (Audio-Driven)**
 
 ---
@@ -378,6 +440,8 @@ Procedural variation occurs **within authored constraints**.
 **Included**
 
 * One procedurally generated level
+* Basic enemy encounters + 5-life HUD
+* Patrol and flying enemy variants
 * Beat-snapped movement
 * Intensity-driven lighting
 * Beat-sensitive platforms
@@ -386,7 +450,7 @@ Procedural variation occurs **within authored constraints**.
 **Excluded**
 
 * Narrative systems
-* Enemy AI
+* Advanced enemy AI
 * Polished art assets
 
 ---

@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sambo - Level Draft Editor</title>
+    <style>
+      :root { color-scheme: dark; }
+      body { margin: 0; font-family: system-ui, sans-serif; background: #0a0e19; color: #dbe6ff; }
+      .layout { display: grid; grid-template-columns: 320px 1fr; min-height: 100vh; }
+      .panel { border-right: 1px solid #1d2a45; padding: 16px; background: #10182a; }
+      .panel h1 { font-size: 18px; margin: 0 0 12px; }
+      .panel button, .panel input { width: 100%; margin: 6px 0; padding: 10px; border-radius: 8px; border: 1px solid #2b3d63; background: #13203a; color: #dbe6ff; }
+      .panel button { cursor: pointer; }
+      .main { position: relative; padding: 16px; overflow: auto; }
+      table { width: 100%; border-collapse: collapse; padding-right: 360px; }
+      th, td { border-bottom: 1px solid #1d2a45; padding: 8px; text-align: left; }
+      select, input[type='number'], input[type='text'] { width: 100%; padding: 6px; border-radius: 6px; border: 1px solid #2b3d63; background: #13203a; color: #dbe6ff; }
+      .small { font-size: 12px; opacity: 0.8; }
+      .tag { border-radius: 999px; padding: 2px 8px; font-size: 12px; }
+      .low { background: #334155; }
+      .medium { background: #1d4ed8; }
+      .high { background: #7c2d12; }
+
+      .minimap {
+        position: sticky;
+        margin-left: auto;
+        bottom: 12px;
+        right: 12px;
+        width: 340px;
+        background: rgba(12, 19, 34, 0.96);
+        border: 1px solid #2b3d63;
+        border-radius: 10px;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+        padding: 10px;
+      }
+      .minimap h3 { margin: 0 0 6px; font-size: 14px; }
+      .minimap canvas { width: 320px; height: 180px; display: block; border-radius: 6px; border: 1px solid #32466f; background: #0b1224; }
+      .legend { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+      .legend span { font-size: 11px; padding: 2px 8px; border-radius: 999px; }
+      .l-low { background: #4b5563; }
+      .l-medium { background: #2563eb; }
+      .l-high { background: #b45309; }
+    </style>
+  </head>
+  <body>
+    <div class="layout">
+      <div class="panel">
+        <h1>Level Draft Editor</h1>
+        <p class="small">Modifica rapida dei segmenti generati da <code>audio_to_level.py</code>.</p>
+        <input id="fileInput" type="file" accept="application/json" />
+        <button id="loadSample">Carica esempio</button>
+        <button id="addSegment">Aggiungi segmento</button>
+        <button id="sortSegments">Ordina per index</button>
+        <button id="saveJson">Esporta JSON</button>
+        <button id="copyJson">Copia JSON</button>
+        <p class="small">URL: <code>/editor.html</code></p>
+      </div>
+      <div class="main">
+        <h2>Segmenti</h2>
+        <div id="summary" class="small"></div>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>energy_state</th>
+              <th>duration_beats</th>
+              <th>platform_types (csv)</th>
+              <th>vertical_min</th>
+              <th>vertical_max</th>
+              <th>rhythm_density</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+
+        <section class="minimap">
+          <h3>Anteprima minimap (live)</h3>
+          <canvas id="minimap" width="320" height="180"></canvas>
+          <div class="legend">
+            <span class="l-low">Low</span>
+            <span class="l-medium">Medium</span>
+            <span class="l-high">High</span>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <script>
+      const rowsEl = document.getElementById('rows');
+      const summaryEl = document.getElementById('summary');
+      const fileInput = document.getElementById('fileInput');
+      const minimap = document.getElementById('minimap');
+      const mapCtx = minimap.getContext('2d');
+      let model = { segments: [] };
+
+      const defaultSegment = (index = 0) => ({
+        index,
+        duration_beats: 8,
+        energy_state: 'medium',
+        platform_types: ['static', 'beat'],
+        vertical_range: [0, 2],
+        rhythm_density: 0.5
+      });
+
+      function energyColor(state) {
+        if (state === 'low') return '#6b7280';
+        if (state === 'medium') return '#3b82f6';
+        return '#f59e0b';
+      }
+
+      function renderMinimap() {
+        if (!mapCtx) return;
+        const w = minimap.width;
+        const h = minimap.height;
+
+        mapCtx.clearRect(0, 0, w, h);
+        mapCtx.fillStyle = '#0b1224';
+        mapCtx.fillRect(0, 0, w, h);
+
+        mapCtx.strokeStyle = '#243457';
+        mapCtx.lineWidth = 1;
+        for (let i = 0; i <= 4; i++) {
+          const y = 14 + i * ((h - 28) / 4);
+          mapCtx.beginPath();
+          mapCtx.moveTo(6, y);
+          mapCtx.lineTo(w - 6, y);
+          mapCtx.stroke();
+        }
+
+        const segments = [...model.segments].sort((a, b) => a.index - b.index);
+        if (segments.length === 0) {
+          mapCtx.fillStyle = '#8ea2cf';
+          mapCtx.font = '12px monospace';
+          mapCtx.fillText('Nessun segmento: carica o crea dati', 52, h / 2);
+          return;
+        }
+
+        const totalBeats = Math.max(1, segments.reduce((acc, s) => acc + Math.max(1, Number(s.duration_beats) || 1), 0));
+        let cursorX = 8;
+
+        for (const seg of segments) {
+          const segBeats = Math.max(1, Number(seg.duration_beats) || 1);
+          const width = Math.max(6, ((w - 16) * segBeats) / totalBeats);
+          const minV = Number(seg.vertical_range[0] || 0);
+          const maxV = Number(seg.vertical_range[1] || 1);
+          const maxHeightUnits = 4;
+          const top = 14 + (Math.max(0, maxHeightUnits - maxV) / maxHeightUnits) * (h - 28);
+          const bottom = 14 + (Math.max(0, maxHeightUnits - minV) / maxHeightUnits) * (h - 28);
+          const segHeight = Math.max(6, bottom - top);
+
+          mapCtx.fillStyle = energyColor(seg.energy_state);
+          mapCtx.fillRect(cursorX, top, width - 2, segHeight);
+
+          mapCtx.fillStyle = '#0e172d';
+          mapCtx.font = '10px monospace';
+          mapCtx.fillText(String(seg.index), cursorX + 2, Math.max(12, top - 2));
+
+          if ((seg.platform_types || []).includes('ghost')) {
+            mapCtx.strokeStyle = '#67e8f9';
+            mapCtx.strokeRect(cursorX + 1, top + 1, width - 4, segHeight - 2);
+          }
+
+          cursorX += width;
+        }
+      }
+
+      function render() {
+        rowsEl.innerHTML = '';
+        model.segments.forEach((segment, i) => {
+          const tr = document.createElement('tr');
+          const badgeClass = segment.energy_state === 'low' ? 'low' : segment.energy_state === 'medium' ? 'medium' : 'high';
+          tr.innerHTML = `
+            <td><input type="number" value="${segment.index}" data-k="index" data-i="${i}" /></td>
+            <td>
+              <span class="tag ${badgeClass}">${segment.energy_state}</span>
+              <select data-k="energy_state" data-i="${i}">
+                <option ${segment.energy_state === 'low' ? 'selected' : ''}>low</option>
+                <option ${segment.energy_state === 'medium' ? 'selected' : ''}>medium</option>
+                <option ${segment.energy_state === 'high' ? 'selected' : ''}>high</option>
+              </select>
+            </td>
+            <td><input type="number" min="1" value="${segment.duration_beats}" data-k="duration_beats" data-i="${i}" /></td>
+            <td><input type="text" value="${segment.platform_types.join(',')}" data-k="platform_types" data-i="${i}" /></td>
+            <td><input type="number" value="${segment.vertical_range[0]}" data-k="vertical_min" data-i="${i}" /></td>
+            <td><input type="number" value="${segment.vertical_range[1]}" data-k="vertical_max" data-i="${i}" /></td>
+            <td><input type="number" min="0" max="1" step="0.05" value="${segment.rhythm_density}" data-k="rhythm_density" data-i="${i}" /></td>
+            <td><button data-k="delete" data-i="${i}">Elimina</button></td>
+          `;
+          rowsEl.appendChild(tr);
+        });
+
+        const counts = model.segments.reduce((acc, s) => {
+          acc[s.energy_state] = (acc[s.energy_state] || 0) + 1;
+          return acc;
+        }, {});
+        summaryEl.textContent = `Totale segmenti: ${model.segments.length} | low: ${counts.low || 0}, medium: ${counts.medium || 0}, high: ${counts.high || 0}`;
+        renderMinimap();
+      }
+
+      function normalizeModel(raw) {
+        if (!raw || !Array.isArray(raw.segments)) {
+          throw new Error('Formato non valido: atteso { segments: [] }');
+        }
+        return {
+          segments: raw.segments.map((s, idx) => ({
+            index: Number.isFinite(+s.index) ? +s.index : idx,
+            duration_beats: Math.max(1, Number.isFinite(+s.duration_beats) ? +s.duration_beats : 8),
+            energy_state: ['low', 'medium', 'high'].includes(s.energy_state) ? s.energy_state : 'medium',
+            platform_types: Array.isArray(s.platform_types)
+              ? s.platform_types
+              : String(s.platform_types || 'static')
+                  .split(',')
+                  .map((v) => v.trim())
+                  .filter(Boolean),
+            vertical_range:
+              Array.isArray(s.vertical_range) && s.vertical_range.length === 2
+                ? [Number(s.vertical_range[0]), Number(s.vertical_range[1])]
+                : [0, 2],
+            rhythm_density: Math.max(0, Math.min(1, Number.isFinite(+s.rhythm_density) ? +s.rhythm_density : 0.5))
+          }))
+        };
+      }
+
+      document.getElementById('loadSample').onclick = () => {
+        model = {
+          segments: [
+            defaultSegment(0),
+            { ...defaultSegment(1), energy_state: 'high', platform_types: ['beat', 'ghost'], vertical_range: [1, 3], rhythm_density: 0.8 },
+            { ...defaultSegment(2), energy_state: 'low', platform_types: ['static'], vertical_range: [0, 1], rhythm_density: 0.2 }
+          ]
+        };
+        render();
+      };
+
+      document.getElementById('addSegment').onclick = () => {
+        const next = model.segments.length ? Math.max(...model.segments.map((s) => s.index)) + 1 : 0;
+        model.segments.push(defaultSegment(next));
+        render();
+      };
+
+      document.getElementById('sortSegments').onclick = () => {
+        model.segments.sort((a, b) => a.index - b.index);
+        render();
+      };
+
+      document.getElementById('saveJson').onclick = () => {
+        const blob = new Blob([JSON.stringify(model, null, 2)], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'level_draft.edited.json';
+        a.click();
+      };
+
+      document.getElementById('copyJson').onclick = async () => {
+        await navigator.clipboard.writeText(JSON.stringify(model, null, 2));
+        alert('JSON copiato negli appunti');
+      };
+
+      fileInput.onchange = async (ev) => {
+        const file = ev.target.files && ev.target.files[0];
+        if (!file) return;
+        const text = await file.text();
+        try {
+          model = normalizeModel(JSON.parse(text));
+          render();
+        } catch (err) {
+          alert(err.message || 'Errore parsing JSON');
+        }
+      };
+
+      rowsEl.addEventListener('input', (ev) => {
+        const t = ev.target;
+        const i = Number(t.dataset.i);
+        const key = t.dataset.k;
+        if (!Number.isInteger(i) || !key || !model.segments[i]) return;
+        const s = model.segments[i];
+
+        if (key === 'index') s.index = Number(t.value);
+        if (key === 'energy_state') s.energy_state = t.value;
+        if (key === 'duration_beats') s.duration_beats = Math.max(1, Number(t.value));
+        if (key === 'platform_types') s.platform_types = t.value.split(',').map((v) => v.trim()).filter(Boolean);
+        if (key === 'vertical_min') s.vertical_range[0] = Number(t.value);
+        if (key === 'vertical_max') s.vertical_range[1] = Number(t.value);
+        if (key === 'rhythm_density') s.rhythm_density = Math.max(0, Math.min(1, Number(t.value)));
+
+        render();
+      });
+
+      rowsEl.addEventListener('click', (ev) => {
+        const t = ev.target;
+        if (t.dataset.k !== 'delete') return;
+        const i = Number(t.dataset.i);
+        if (!Number.isInteger(i)) return;
+        model.segments.splice(i, 1);
+        render();
+      });
+
+      render();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "name": "sambo",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/**/*.test.js",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "start": "npm run build && node scripts/serve.mjs"
+  }
+}
