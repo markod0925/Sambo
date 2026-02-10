@@ -55,8 +55,35 @@ npm run start
 ```
 
 Then open:
-- Game: `http://localhost:4173/`
+- Game (Start Screen): `http://localhost:4173/`
+- Direct level start still supported: `http://localhost:4173/?level=1`, `http://localhost:4173/?level=2`
 - Built files are served from the project root (`dist/` after TypeScript build).
+
+### Start Screen
+- Shows game title and a dimmed non-interactive gameplay preview in the background.
+- Lets the player select level and start it.
+- Shows per-level best time (if present).
+- Includes a volume slider (saved in localStorage).
+- Includes a direct link to `editor.html`.
+
+### CLI test mode (no browser)
+```bash
+npm run play:cli
+```
+
+This mode runs a text simulation of core gameplay systems (beat-synced movement, intensity, beat/ghost platform states) directly in terminal.
+Useful for quick behavior checks when you cannot use the browser renderer.
+
+Commands in CLI mode:
+- `d` / `right` / `forward`
+- `a` / `left` / `backward`
+- `jump` / `j` / `up`
+- `wait`
+- `tick <ms> [azioni...]` (example: `tick 250 d jump`)
+- `status`
+- `restart`
+- `help`
+- `quit`
 
 ### Useful commands
 ```bash
@@ -69,7 +96,7 @@ npm run test    # build + node test runner
 
 ## Level editor usage
 
-The repository includes a lightweight browser editor for `level_draft.json` files.
+The repository includes a lightweight browser editor for `level_draft.json` files, with optional MIDI association and playback.
 
 ### Open the editor
 1. Start the local server:
@@ -80,7 +107,11 @@ The repository includes a lightweight browser editor for `level_draft.json` file
    - `http://localhost:4173/editor.html`
 
 ### What you can do in the editor
-- Load a draft JSON (`{ "segments": [...] }`) from your machine.
+- Load a draft JSON (`{ "segments": [...], "midi_file": "track.mid" }`) from your machine.
+- Load a MIDI from project folder `MIDI/` (or from local file) and play/stop it directly in the editor.
+- Generate the first level draft automatically from the loaded MIDI.
+- Configure runtime output (`bpm`, `gridColumns`, optional `reverseGhost`) and save/copy a runtime level JSON:
+  - `{ "bpm": number, "gridColumns": number, "notes": number[], "platforms": [...], "enemies": { "patrolCount": number, "flyingSpawnIntervalMs": number } }`
 - Add segments.
 - Delete segments.
 - Reorder by `index`.
@@ -93,7 +124,10 @@ The repository includes a lightweight browser editor for `level_draft.json` file
 - Preview a live minimap:
   - color-coded by energy state
   - ghost segments outlined when `platform_types` includes `ghost`
-- Export updated JSON (`level_draft.edited.json`) or copy JSON to clipboard.
+- Save updated draft JSON directly in `Levels/` (plus clipboard copy).
+  - If a MIDI file has been loaded, the editor stores its filename in `midi_file` (the binary MIDI is not embedded in JSON).
+  - Runtime save uses sampled notes from the loaded MIDI when available; otherwise it generates fallback notes from segment energy.
+  - Level-related JSON output is written to `Levels/`.
 
 ### Suggested workflow with audio analysis script
 1. Generate draft data from a WAV file:
@@ -101,8 +135,9 @@ The repository includes a lightweight browser editor for `level_draft.json` file
    python scripts/audio_to_level.py --input path/to/track.wav --output-dir data
    ```
 2. Open the editor and import `data/level_draft.json`.
-3. Refine the segments.
-4. Export as `level_draft.edited.json`.
+3. Put your MIDI file in `MIDI/` and load it from the editor list.
+4. Generate the initial draft from MIDI, then refine the segments.
+5. Save draft/runtime JSON into `Levels/`.
 
 Optional BPM override:
 ```bash

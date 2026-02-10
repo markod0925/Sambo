@@ -19,6 +19,17 @@ export class BeatSnapMover {
     get currentStep() {
         return this.activeStep;
     }
+    get queuedCount() {
+        return this.queue.length;
+    }
+    get stepSize() {
+        return this.cellSize;
+    }
+    stopAt(position) {
+        this.position = position;
+        this.activeStep = null;
+        this.queue = [];
+    }
     update(nowMs) {
         if (!this.activeStep && this.queue.length > 0) {
             const direction = this.queue.shift();
@@ -38,16 +49,14 @@ export class BeatSnapMover {
         if (!this.activeStep) {
             return { x: this.position, arrived: false, direction: 'idle' };
         }
-        const duration = this.activeStep.arrivalTime - this.activeStep.startTime;
-        const elapsed = Math.min(duration, nowMs - this.activeStep.startTime);
-        const t = duration <= 0 ? 1 : elapsed / duration;
-        this.position = this.activeStep.fromX + (this.activeStep.toX - this.activeStep.fromX) * t;
         if (nowMs >= this.activeStep.arrivalTime) {
             this.position = this.activeStep.toX;
             const direction = this.activeStep.direction;
             this.activeStep = null;
             return { x: this.position, arrived: true, direction };
         }
+        // Grid-anchored movement: hold position until beat subdivision, then snap.
+        this.position = this.activeStep.fromX;
         return { x: this.position, arrived: false, direction: this.activeStep.direction };
     }
 }

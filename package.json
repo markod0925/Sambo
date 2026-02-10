@@ -4,9 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node node_modules/typescript/bin/tsc -p tsconfig.json",
     "test": "npm run build && node --test test/**/*.test.js",
-    "check": "tsc -p tsconfig.json --noEmit",
-    "start": "npm run build && node scripts/serve.mjs"
+    "check": "node node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
+    "start": "npm run build && node scripts/serve.mjs",
+    "play:cli": "npm run build && node scripts/play-cli.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
   }
 }
