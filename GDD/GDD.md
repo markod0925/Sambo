@@ -270,6 +270,19 @@ Ghost Platforms are **solid only during backward musical articulation**.
 
 ---
 
+## **4.3 Elevator Platforms (Beat Step Motion)**
+
+Elevator platforms move vertically in a repeating beat-driven staircase loop.
+
+**Rules:**
+
+* Move by exactly 1 vertical grid level on each beat.
+* Climb for 4 beats (`+1, +2, +3, +4` levels).
+* Descend for the next 4 beats (`+3, +2, +1, +0` levels).
+* Repeat continuously on an 8-beat cycle.
+
+---
+
 ### Example Puzzle Pattern
 
 1. Player moves forward → writes music
@@ -310,6 +323,7 @@ Ground enemies move back and forth on platform surfaces.
 * They walk continuously left/right.
 * They reverse direction when they hit a wall.
 * They reverse direction when platform support ends (edge detection).
+* They use a subtle vertical squash animation (`scale.y`) while patrolling to improve movement readability.
 
 **Combat Rules:**
 
@@ -326,6 +340,7 @@ A flying enemy periodically enters from the **right side** of the screen and tra
 * It adjusts vertically to collide with the player (light homing).
 * It does not interact with terrain/platform collision.
 * If not defeated, it despawns after exiting the left side of the screen.
+* It uses a subtle horizontal stretch animation (`scale.x`) to communicate airborne motion.
 
 **Combat Rules:**
 
@@ -435,6 +450,132 @@ Procedural variation occurs **within authored constraints**.
 
 ---
 
+## **6.1 Implemented Visual Language (Current Phaser Build)**
+
+### Global Look & UI Theme
+
+* Runtime resolution: **960x540**
+* Dark atmospheric base palette:
+  * Background: `#05070f` / `#0b0f1a`
+  * Main text: `#d7e2ff`
+  * Accent glow/shadow: soft cyan-blue bloom
+* Typeface strategy:
+  * In-game HUD/menus: **monospace**
+  * Web shell (`index.html`): system sans + framed game canvas
+* The moon remains the primary diegetic visual anchor and pulses on beat changes.
+
+### Start Screen (Implemented)
+
+* Dedicated start scene with:
+  * scrollable level list loaded from `Levels/*.runtime.json`
+  * per-level best-time readout
+  * volume slider with immediate audible preview
+  * direct link to level editor (`/editor.html`)
+* A dimmed gameplay **preview mode** runs in the background behind the start UI.
+
+### Gameplay Overlay & States (Implemented)
+
+* Darkness overlay alpha is driven by intensity with a non-zero visibility floor.
+* HUD includes:
+  * lives as hearts + numeric counter
+  * timer
+  * kill score
+* Implemented state overlays:
+  * pause menu (`ESC`)
+  * game over panel
+  * victory panel (time + best time + next level action)
+* Victory time rule:
+  * each defeated enemy grants a `0.2s` completion-time reduction
+
+### Platform Visual Identity (Fill, Border, Alpha)
+
+* **Segment platform**: neutral desaturated tones, energy-influenced coloration.
+* **Beat platform** (`solid/fadeOut/gone/fadeIn`):
+  * high-contrast yellow/orange fill changes by phase
+  * explicit border/stroke updates per phase
+  * alpha drops near zero in `gone`
+* **Alternate beat platform**:
+  * solid on beats `1` and `3`, dimmed otherwise
+  * warm orange family distinct from beat platform
+* **Ghost platform**:
+  * cyan family
+  * when active (backward latch): bright fill + clear stroke
+  * when inactive: dark fill, faint stroke, very low alpha
+* **Reverse ghost platform** (implemented extension):
+  * magenta family
+  * complementary latch to ghost (solid while forward, weak while backward)
+* **Elevator platform**:
+  * blue family
+  * moves one vertical grid level per beat
+  * loops with 4-beat rise and 4-beat descent
+
+---
+
+## **6.2 Level Editor (Implemented Tooling)**
+
+The project includes a browser editor at `/editor.html` for draft and runtime level authoring.
+
+### Editor UX and Style Direction
+
+* Same dark style family as runtime:
+  * `#05070f` background
+  * layered panel surfaces (`#0c1322`, `#0f182a`)
+  * cool blue borders (`#1b2a45`, `#2a3e66`)
+  * monospace typography
+* Left control panel + right workspace layout.
+* User-facing sections:
+  * MIDI/Levels folder loaders
+  * quality mode selector (`fast`, `balanced`, `accurate`)
+  * runtime export box
+  * segment table editor
+  * live minimap
+  * runtime platform layout canvas
+
+### Minimap and Layout Editor
+
+* Minimap renders segment energy with fixed color legend:
+  * Low: gray-blue
+  * Medium: blue
+  * High: amber
+* Layout editor supports:
+  * camera scroll left/right
+  * center on spawn
+  * regenerate from segments
+  * delete selected platform
+  * left-click select/drag
+  * right-click cycle platform type or create platform
+* Platform type cycle:
+  * `segment -> beat -> alternateBeat -> ghost -> reverseGhost -> elevator`
+* Canvas rendering includes visible platform borders, selected-state highlight stroke, spawn guide line, and kind labels.
+
+### Runtime Export Features
+
+* Runtime export parameters:
+  * BPM (20–300)
+  * grid columns (1–128)
+  * platform kinds are exported from explicit layout/platform type definitions
+* Runtime generation guarantees:
+  * spawn-support segment at player start
+  * default platform width is 2 horizontal grid cells
+  * auto-generation uses 2 beats per platform slot (8-beat segments -> 4 platforms)
+  * each generated platform picks a random type from that segment's `platform_types`
+  * each generated platform picks a random vertical level between `vertical_min` and `vertical_max`
+  * generation avoids overlapping placements while building the lane
+  * no forced moon-approach sequence is appended at runtime
+  * moon reachability is authored by level design
+* Enemy authoring per segment:
+  * `patrol_enemies`
+  * `flying_spawn_interval_ms`
+  * runtime maps authored `segmentIndex` across available segment platforms to avoid front-loading on long mixed-platform levels
+  * patrol spawn enforces local spacing/capacity so enemies do not overlap at spawn time
+  * patrol allocation is spread across nearby segment platforms to reduce repeated same-segment clustering
+* Moon movement boundary:
+  * moon horizontal stop is tied to authored platform extent (level layout end), not synthetic grid coverage
+* World bounds:
+  * gameplay/camera width is derived from authored platform extent (grid columns are only a fallback when no platforms exist)
+
+---
+
 ## **7. Prototype Scope**
 
 **Included**
@@ -468,6 +609,19 @@ Codex can assist with:
 * Audio preprocessing scripts
 * Generator tuning
 * Rapid iteration on thresholds and curves
+
+---
+
+## **8.1 Technical Notes (Implemented Stack: Phaser 3 + TypeScript)**
+
+* Current playable prototype stack is **Phaser 3** (`src/game/*`, `src/core/*`) with TypeScript build output in `dist/`.
+* Beat/movement/intensity/platform logic is implemented in shared core modules and reused by:
+  * browser runtime
+  * CLI smoke simulator (`npm run play:cli`)
+* Runtime level loading path:
+  * start scene fetches `Levels/*.runtime.json`
+  * selected level is passed to gameplay scene
+* Editor and game are served by local Node server scripts under `scripts/`.
 
 ---
 

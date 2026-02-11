@@ -20,7 +20,20 @@ export class StartScene extends Phaser.Scene {
   private sliderHandle!: any;
   private loadingText!: any;
   private readonly sliderWidth = 280;
+  private levelEntries: LevelEntry[] = [];
   private levels: LevelDefinition[] = [];
+
+  private levelListContainer!: any;
+  private levelMaskGraphics!: any;
+  private levelScrollbarTrack!: any;
+  private levelScrollbarThumb!: any;
+  private levelScrollOffset = 0;
+  private levelScrollMax = 0;
+  private levelScrollThumbHeight = 28;
+  private readonly levelRowHeight = 34;
+  private readonly levelViewport = { left: 260, top: 220, width: 430, height: 130 };
+  private volumePreviewContext: AudioContext | null = null;
+  private lastVolumePreviewMs = 0;
 
   constructor() {
     super('start');
@@ -69,29 +82,36 @@ export class StartScene extends Phaser.Scene {
   }
 
   private async initLevels(levelsFromData: LevelDefinition[] | undefined, levelIndexFromData: number | undefined): Promise<void> {
-    // Always refresh from Levels/ first, so new files appear immediately in Start Screen.
-    this.levels = await this.fetchLevelsFromApi();
-    if (this.levels.length === 0 && Array.isArray(levelsFromData) && levelsFromData.length > 0) {
-      this.levels = levelsFromData;
+    const apiEntries = await this.fetchLevelsFromApi();
+    if (apiEntries.length > 0) {
+      this.levelEntries = apiEntries;
+    } else if (Array.isArray(levelsFromData) && levelsFromData.length > 0) {
+      this.levelEntries = levelsFromData.map((data, i) => ({ name: `level_${i + 1}.runtime.json`, data }));
+    } else {
+      this.levelEntries = LEVELS.map((data, i) => ({ name: `level_${i + 1}.runtime.json`, data }));
     }
-    if (this.levels.length === 0) this.levels = LEVELS;
+
+    this.levels = this.levelEntries.map((entry) => entry.data);
     this.selectedLevel = this.resolveInitialLevel(levelIndexFromData);
   }
 
-  private async fetchLevelsFromApi(): Promise<LevelDefinition[]> {
+  private async fetchLevelsFromApi(): Promise<LevelEntry[]> {
     try {
       const response = await fetch('/api/levels');
       if (!response.ok) return [];
       const payload = await response.json();
-      const rows = Array.isArray(payload.levels) ? (payload.levels as LevelEntry[]) : [];
-      const out: LevelDefinition[] = [];
+      const rows = Array.isArray(payload.levels) ? payload.levels : [];
+      const out: LevelEntry[] = [];
+
       for (const row of rows) {
-        if (!row || !row.data) continue;
-        const level = row.data;
+        if (!row || typeof row !== 'object') continue;
+        const name = typeof row.name === 'string' ? row.name : '';
+        const level = (row as { data?: LevelDefinition }).data;
+        if (!name || !level) continue;
         if (!Number.isFinite(Number(level.bpm))) continue;
         if (!Number.isFinite(Number(level.gridColumns))) continue;
         if (!Array.isArray(level.notes) || !Array.isArray(level.platforms)) continue;
-        out.push(level);
+        out.push({ name, data: level });
       }
       return out;
     } catch {
@@ -109,20 +129,28 @@ export class StartScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(6);
 
-    const baseY = 230;
-    this.levels.forEach((_, idx) => {
+    this.levelListContainer = this.add.container(0, 0).setDepth(6);
+    this.levelButtons = [];
+
+    for (let idx = 0; idx < this.levelEntries.length; idx++) {
       const level = idx + 1;
       const best = this.readBest(level);
       const bestLabel = best === null ? '--:--.--' : this.formatElapsedTime(best);
+      const entry = this.levelEntries[idx];
       const row = this.add
-        .text(480, baseY + idx * 34, `Level ${level}   Best: ${bestLabel}`, {
-          color: level === this.selectedLevel ? '#0f172a' : '#dbeafe',
-          backgroundColor: level === this.selectedLevel ? '#bfdbfe' : '#1f355b',
-          fontFamily: 'monospace',
-          fontSize: '20px',
-          padding: { left: 10, right: 10, top: 4, bottom: 4 }
-        })
-        .setOrigin(0.5)
+        .text(
+          this.levelViewport.left + 8,
+          this.levelViewport.top + idx * this.levelRowHeight + this.levelRowHeight / 2,
+          `${this.displayLevelName(entry.name)}   Best: ${bestLabel}`,
+          {
+            color: level === this.selectedLevel ? '#0f172a' : '#dbeafe',
+            backgroundColor: level === this.selectedLevel ? '#bfdbfe' : '#1f355b',
+            fontFamily: 'monospace',
+            fontSize: '16px',
+            padding: { left: 10, right: 10, top: 4, bottom: 4 }
+          }
+        )
+        .setOrigin(0, 0.5)
         .setDepth(6)
         .setInteractive({ useHandCursor: true });
 
@@ -134,7 +162,99 @@ export class StartScene extends Phaser.Scene {
         this.scene.bringToTop('start');
       });
       this.levelButtons.push(row);
+      this.levelListContainer.add(row);
+    }
+
+    this.levelMaskGraphics = this.make.graphics({});
+    this.levelMaskGraphics.fillStyle(0xffffff, 1);
+    this.levelMaskGraphics.fillRect(
+      this.levelViewport.left,
+      this.levelViewport.top,
+      this.levelViewport.width,
+      this.levelViewport.height
+    );
+    this.levelMaskGraphics.setVisible(false);
+    this.levelListContainer.setMask(this.levelMaskGraphics.createGeometryMask());
+
+    this.levelScrollbarTrack = this.add
+      .rectangle(
+        this.levelViewport.left + this.levelViewport.width + 16,
+        this.levelViewport.top + this.levelViewport.height / 2,
+        10,
+        this.levelViewport.height,
+        0x1f355b,
+        0.95
+      )
+      .setDepth(6)
+      .setInteractive({ useHandCursor: true });
+
+    this.levelScrollbarThumb = this.add
+      .rectangle(
+        this.levelScrollbarTrack.x,
+        this.levelViewport.top + 14,
+        12,
+        28,
+        0x93c5fd,
+        0.95
+      )
+      .setDepth(7)
+      .setInteractive({ draggable: true, useHandCursor: true });
+
+    this.input.setDraggable(this.levelScrollbarThumb);
+    this.levelScrollbarThumb.on('drag', (pointer: any) => this.scrollFromThumbY(pointer.y));
+    this.levelScrollbarTrack.on('pointerdown', (pointer: any) => this.scrollFromThumbY(pointer.y));
+    this.input.on('wheel', (pointer: any, _gos: any, _dx: number, dy: number) => {
+      if (
+        pointer.x >= this.levelViewport.left &&
+        pointer.x <= this.levelViewport.left + this.levelViewport.width + 30 &&
+        pointer.y >= this.levelViewport.top &&
+        pointer.y <= this.levelViewport.top + this.levelViewport.height
+      ) {
+        this.scrollLevelsBy(dy * 0.35);
+      }
     });
+
+    const contentHeight = this.levelEntries.length * this.levelRowHeight;
+    this.levelScrollMax = Math.max(0, contentHeight - this.levelViewport.height);
+    this.levelScrollOffset = 0;
+    this.updateLevelListScrollVisuals();
+    this.refreshLevelButtons();
+  }
+
+  private scrollLevelsBy(delta: number): void {
+    this.levelScrollOffset = Phaser.Math.Clamp(this.levelScrollOffset + delta, 0, this.levelScrollMax);
+    this.updateLevelListScrollVisuals();
+  }
+
+  private scrollFromThumbY(pointerY: number): void {
+    if (this.levelScrollMax <= 0) return;
+    const top = this.levelViewport.top + this.levelScrollThumbHeight / 2;
+    const bottom = this.levelViewport.top + this.levelViewport.height - this.levelScrollThumbHeight / 2;
+    const clamped = Phaser.Math.Clamp(pointerY, top, bottom);
+    const ratio = (clamped - top) / Math.max(1, bottom - top);
+    this.levelScrollOffset = ratio * this.levelScrollMax;
+    this.updateLevelListScrollVisuals();
+  }
+
+  private updateLevelListScrollVisuals(): void {
+    if (this.levelListContainer) this.levelListContainer.y = -this.levelScrollOffset;
+
+    if (this.levelScrollMax <= 0) {
+      this.levelScrollbarThumb.setVisible(false);
+      return;
+    }
+
+    this.levelScrollbarThumb.setVisible(true);
+    const contentHeight = this.levelEntries.length * this.levelRowHeight;
+    this.levelScrollThumbHeight = Math.max(
+      28,
+      Math.min(this.levelViewport.height, (this.levelViewport.height * this.levelViewport.height) / Math.max(1, contentHeight))
+    );
+    this.levelScrollbarThumb.height = this.levelScrollThumbHeight;
+    const top = this.levelViewport.top + this.levelScrollThumbHeight / 2;
+    const bottom = this.levelViewport.top + this.levelViewport.height - this.levelScrollThumbHeight / 2;
+    const ratio = this.levelScrollOffset / Math.max(1, this.levelScrollMax);
+    this.levelScrollbarThumb.y = top + ratio * (bottom - top);
   }
 
   private refreshLevelButtons(): void {
@@ -146,28 +266,30 @@ export class StartScene extends Phaser.Scene {
   }
 
   private createVolumeSlider(): void {
-    const y = 360;
+    const y = 54;
+    const xCenter = 790;
     this.volumeLabel = this.add
-      .text(480, y - 30, `Volume: ${Math.round(this.volume * 100)}%`, {
+      .text(xCenter, y - 24, `Volume: ${Math.round(this.volume * 100)}%`, {
         color: '#d6e8ff',
         fontFamily: 'monospace',
-        fontSize: '20px'
+        fontSize: '16px'
       })
       .setOrigin(0.5)
       .setDepth(6);
 
-    this.sliderTrack = this.add.rectangle(480, y, this.sliderWidth, 10, 0x1e3a66, 0.95).setDepth(6);
-    this.sliderFill = this.add.rectangle(480 - this.sliderWidth / 2, y, 0, 10, 0x7dd3fc, 0.95).setOrigin(0, 0.5).setDepth(6);
-    this.sliderHandle = this.add.circle(480, y, 11, 0xe2e8f0, 0.95).setDepth(6).setInteractive({ draggable: true, useHandCursor: true });
+    this.sliderTrack = this.add.rectangle(xCenter, y, 220, 8, 0x1e3a66, 0.95).setDepth(6);
+    this.sliderFill = this.add.rectangle(xCenter - 110, y, 0, 8, 0x7dd3fc, 0.95).setOrigin(0, 0.5).setDepth(6);
+    this.sliderHandle = this.add.circle(xCenter, y, 9, 0xe2e8f0, 0.95).setDepth(6).setInteractive({ draggable: true, useHandCursor: true });
 
-    const setFromPointerX = (pointerX: number): void => {
-      const left = 480 - this.sliderWidth / 2;
-      const right = 480 + this.sliderWidth / 2;
+    const setFromPointerX = (pointerX: number, playPreview = true): void => {
+      const left = xCenter - 110;
+      const right = xCenter + 110;
       const clamped = Phaser.Math.Clamp(pointerX, left, right);
-      this.volume = Phaser.Math.Clamp((clamped - left) / this.sliderWidth, 0, 1);
+      this.volume = Phaser.Math.Clamp((clamped - left) / 220, 0, 1);
       this.sliderHandle.x = clamped;
       this.sliderFill.width = clamped - left;
       this.volumeLabel.setText(`Volume: ${Math.round(this.volume * 100)}%`);
+      if (playPreview) this.playVolumePreviewTone();
       this.saveVolume(this.volume);
       if (this.scene.isActive('game')) {
         this.scene.stop('game');
@@ -179,12 +301,56 @@ export class StartScene extends Phaser.Scene {
     this.input.setDraggable(this.sliderHandle);
     this.sliderHandle.on('drag', (pointer: any) => setFromPointerX(pointer.x));
     this.sliderTrack.setInteractive({ useHandCursor: true }).on('pointerdown', (pointer: any) => setFromPointerX(pointer.x));
-    setFromPointerX(480 - this.sliderWidth / 2 + this.sliderWidth * this.volume);
+    setFromPointerX(xCenter - 110 + 220 * this.volume, false);
+  }
+
+  private playVolumePreviewTone(): void {
+    try {
+      const nowMs = performance.now();
+      if (nowMs - this.lastVolumePreviewMs < 90) return;
+      this.lastVolumePreviewMs = nowMs;
+
+      if (!this.volumePreviewContext) this.volumePreviewContext = new AudioContext();
+      if (this.volumePreviewContext.state === 'suspended') {
+        this.volumePreviewContext.resume().catch(() => undefined);
+        return;
+      }
+
+      const ctx = this.volumePreviewContext;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const filter = ctx.createBiquadFilter();
+
+      const midi = 48 + Math.round(this.volume * 24);
+      const frequency = 440 * Math.pow(2, (midi - 69) / 12);
+      osc.type = 'triangle';
+      osc.frequency.value = frequency;
+
+      filter.type = 'lowpass';
+      filter.frequency.value = 800 + this.volume * 2200;
+      filter.Q.value = 1.2;
+
+      const peak = Math.max(0.0001, 0.05 + this.volume * 0.2);
+      const start = ctx.currentTime;
+
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(ctx.destination);
+
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(peak, start + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.14);
+
+      osc.start(start);
+      osc.stop(start + 0.16);
+    } catch {
+      // Ignore audio context failures.
+    }
   }
 
   private createActions(): void {
     this.playButton = this.add
-      .text(480, 430, 'Play Selected Level', {
+      .text(480, 440, 'Play Selected Level', {
         color: '#091221',
         backgroundColor: '#a7f3d0',
         fontFamily: 'monospace',
@@ -201,7 +367,7 @@ export class StartScene extends Phaser.Scene {
     });
 
     const editorLink = this.add
-      .text(480, 490, 'Open Level Editor', {
+      .text(480, 500, 'Open Level Editor', {
         color: '#93c5fd',
         fontFamily: 'monospace',
         fontSize: '20px'
@@ -274,5 +440,9 @@ export class StartScene extends Phaser.Scene {
     } catch {
       return 1;
     }
+  }
+
+  private displayLevelName(fileName: string): string {
+    return String(fileName || '').replace(/\.runtime\.json$/i, '').replace(/\.json$/i, '');
   }
 }

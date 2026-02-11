@@ -3,7 +3,12 @@ import assert from 'node:assert/strict';
 import { Metronome } from '../dist/src/core/metronome.js';
 import { updateIntensity, defaultIntensityConfig } from '../dist/src/core/intensity.js';
 import { BeatSnapMover } from '../dist/src/core/beatMovement.js';
-import { getBeatPlatformState, isGhostPlatformSolid } from '../dist/src/core/platforms.js';
+import {
+  getBeatPlatformState,
+  getElevatorOffsetSteps,
+  isAlternateBeatPlatformSolid,
+  isGhostPlatformSolid
+} from '../dist/src/core/platforms.js';
 import { classifyEnergy, generateSegments } from '../dist/src/core/levelGenerator.js';
 import { resolveIntent } from '../dist/src/core/input.js';
 import { applyDamage, resolveEnemyCollision, updateFlyingEnemy, updatePatrolEnemy } from '../dist/src/core/enemies.js';
@@ -44,8 +49,18 @@ test('beat and ghost platform state transitions', () => {
   assert.equal(getBeatPlatformState(3), 'gone');
   assert.equal(getBeatPlatformState(4), 'fadeIn');
 
+  assert.equal(isAlternateBeatPlatformSolid(1), true);
+  assert.equal(isAlternateBeatPlatformSolid(2), false);
+  assert.equal(isAlternateBeatPlatformSolid(3), true);
+  assert.equal(isAlternateBeatPlatformSolid(4), false);
+
   assert.equal(isGhostPlatformSolid('backward'), true);
   assert.equal(isGhostPlatformSolid('forward'), false);
+});
+
+test('elevator platform follows 4-up and 4-down beat loop', () => {
+  const offsets = Array.from({ length: 10 }, (_, beat) => getElevatorOffsetSteps(beat));
+  assert.deepEqual(offsets, [0, 1, 2, 3, 4, 3, 2, 1, 0, 1]);
 });
 
 test('energy classification and segment generation follow templates', () => {
@@ -55,8 +70,8 @@ test('energy classification and segment generation follow templates', () => {
 
   const segments = generateSegments({ bpm: 120, energy_curve: [0.1, 0.2, 0.8, 0.9] }, 2);
   assert.equal(segments.length, 2);
-  assert.deepEqual(segments[0].platformTypes, ['static']);
-  assert.deepEqual(segments[1].platformTypes, ['beat', 'ghost']);
+  assert.deepEqual(segments[0].platformTypes, ['static', 'beat', 'alternateBeat']);
+  assert.deepEqual(segments[1].platformTypes, ['static', 'beat', 'alternateBeat', 'ghost', 'reverseGhost', 'elevator']);
 });
 
 test('input resolver supports movement and jump intent', () => {

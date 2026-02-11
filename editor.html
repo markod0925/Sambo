@@ -5,25 +5,45 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Sambo - Level Draft Editor</title>
     <style>
-      :root { color-scheme: dark; }
-      body { margin: 0; font-family: system-ui, sans-serif; background: #0a0e19; color: #dbe6ff; }
+      :root {
+        color-scheme: dark;
+        --font-game: monospace;
+        --bg: #05070f;
+        --surface: #0c1322;
+        --surface-2: #0f182a;
+        --text: #d7e2ff;
+        --border: #1b2a45;
+        --border-2: #2a3e66;
+        --shadow: 0 0 24px rgba(173, 208, 255, 0.2);
+      }
+      body {
+        margin: 0;
+        font-family: var(--font-game);
+        background: var(--bg);
+        color: var(--text);
+      }
       .layout { display: grid; grid-template-columns: 320px 1fr; min-height: 100vh; }
-      .panel { border-right: 1px solid #1d2a45; padding: 16px; background: #10182a; }
+      .panel {
+        border-right: 1px solid var(--border);
+        padding: 16px;
+        background: var(--surface);
+        box-shadow: var(--shadow);
+      }
       .panel h1 { font-size: 18px; margin: 0 0 12px; }
-      .panel button, .panel input { width: 100%; margin: 6px 0; padding: 10px; border-radius: 8px; border: 1px solid #2b3d63; background: #13203a; color: #dbe6ff; box-sizing: border-box; }
+      .panel button, .panel input { width: 100%; margin: 6px 0; padding: 10px; border-radius: 8px; border: 1px solid var(--border-2); background: var(--surface-2); color: var(--text); box-sizing: border-box; }
       .panel button { cursor: pointer; }
       .button-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
       .panel label { display: block; margin-top: 10px; font-size: 12px; opacity: 0.85; }
       .panel input[type='checkbox'] { width: auto; margin-right: 8px; }
-      .panel select { width: 100%; margin: 6px 0; padding: 10px; border-radius: 8px; border: 1px solid #2b3d63; background: #13203a; color: #dbe6ff; box-sizing: border-box; }
+      .panel select { width: 100%; margin: 6px 0; padding: 10px; border-radius: 8px; border: 1px solid var(--border-2); background: var(--surface-2); color: var(--text); box-sizing: border-box; }
       .hidden-file-input { display: none; }
-      .runtime-box { margin-top: 12px; border: 1px solid #2b3d63; border-radius: 10px; padding: 10px; background: #0f1a31; }
+      .runtime-box { margin-top: 12px; border: 1px solid var(--border-2); border-radius: 10px; padding: 10px; background: var(--surface-2); }
       .runtime-box h3 { margin: 0 0 6px; font-size: 14px; }
       .runtime-box input[type='number'] { width: 130px; max-width: 100%; }
       .main { position: relative; padding: 16px; overflow: auto; }
-      table { width: 100%; border-collapse: collapse; padding-right: 360px; }
-      th, td { border-bottom: 1px solid #1d2a45; padding: 8px; text-align: left; }
-      select, input[type='number'], input[type='text'] { width: 100%; padding: 6px; border-radius: 6px; border: 1px solid #2b3d63; background: #13203a; color: #dbe6ff; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { border-bottom: 1px solid var(--border); padding: 8px; text-align: left; }
+      select, input[type='number'], input[type='text'] { width: 100%; padding: 6px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--surface-2); color: var(--text); }
       .small { font-size: 12px; opacity: 0.8; }
       .tag { border-radius: 999px; padding: 2px 8px; font-size: 12px; }
       .low { background: #334155; }
@@ -31,24 +51,54 @@
       .high { background: #7c2d12; }
 
       .minimap {
-        position: sticky;
-        margin-left: auto;
-        bottom: 12px;
-        right: 12px;
-        width: 340px;
+        width: 100%;
+        margin: 0 0 12px;
+        box-sizing: border-box;
         background: rgba(12, 19, 34, 0.96);
-        border: 1px solid #2b3d63;
+        border: 1px solid var(--border-2);
         border-radius: 10px;
-        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+        box-shadow: var(--shadow);
         padding: 10px;
       }
       .minimap h3 { margin: 0 0 6px; font-size: 14px; }
-      .minimap canvas { width: 320px; height: 180px; display: block; border-radius: 6px; border: 1px solid #32466f; background: #0b1224; }
+      .minimap canvas {
+        width: 100%;
+        height: 180px;
+        display: block;
+        box-sizing: border-box;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: #0b1224;
+        box-shadow: var(--shadow);
+      }
       .legend { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
       .legend span { font-size: 11px; padding: 2px 8px; border-radius: 999px; }
       .l-low { background: #4b5563; }
       .l-medium { background: #2563eb; }
       .l-high { background: #b45309; }
+      .level-layout-editor {
+        width: 100%;
+        margin: 0 0 14px;
+        box-sizing: border-box;
+        background: rgba(12, 19, 34, 0.96);
+        border: 1px solid var(--border-2);
+        border-radius: 10px;
+        box-shadow: var(--shadow);
+        padding: 10px;
+      }
+      .level-layout-editor h3 { margin: 0 0 6px; font-size: 14px; }
+      .level-layout-actions { grid-template-columns: repeat(5, minmax(0, 1fr)); margin-bottom: 8px; }
+      .level-layout-editor canvas {
+        width: 100%;
+        height: 280px;
+        display: block;
+        box-sizing: border-box;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: #091121;
+        box-shadow: var(--shadow);
+      }
+      button, input, select, textarea { font-family: inherit; }
     </style>
   </head>
   <body>
@@ -62,7 +112,7 @@
         </select>
         <div class="button-row">
           <button id="refreshMidiFolder">Refresh MIDI list</button>
-          <button id="loadMidiFromFolder">Load from MIDI/</button>
+          <button id="loadMidiFromFolder">Load MIDI file</button>
         </div>
         <input id="fileInput" class="hidden-file-input" type="file" accept="application/json" />
         <input id="midiInput" class="hidden-file-input" type="file" accept=".mid,.midi,audio/midi,audio/x-midi" />
@@ -72,29 +122,33 @@
           <button id="playMidi">Play MIDI</button>
           <button id="stopMidi">Stop MIDI</button>
         </div>
+        <label for="levelsFolderSelect">Level files available in <code>Levels/</code></label>
+        <select id="levelsFolderSelect">
+          <option value="">(no file)</option>
+        </select>
+        <div class="button-row">
+          <button id="refreshLevelsFolder">Refresh level list</button>
+          <button id="loadLevelFromFolder">Load level file</button>
+        </div>
+        <label for="qualityMode">Quality mode</label>
+        <select id="qualityMode">
+          <option value="balanced" selected>Balanced</option>
+          <option value="fast">Fast</option>
+          <option value="accurate">Accurate</option>
+        </select>
         <label for="levelBaseName">Level base name (saved in <code>Levels/</code>)</label>
         <input id="levelBaseName" type="text" value="level_01" />
         <p id="midiStatus" class="small">MIDI: no file loaded</p>
         <button id="loadSample">Load sample</button>
         <button id="addSegment">Add segment</button>
         <button id="saveJson">Save draft to Levels</button>
+        <button id="backToGameStart">Back to game start</button>
         <section class="runtime-box">
           <h3>Runtime export</h3>
           <label for="runtimeBpm">BPM runtime</label>
           <input id="runtimeBpm" type="number" min="20" max="300" value="120" />
           <label for="runtimeGridColumns">Grid columns</label>
           <input id="runtimeGridColumns" type="number" min="1" max="128" value="29" />
-          <label for="runtimePatrolCount">Patrol enemies</label>
-          <input id="runtimePatrolCount" type="number" min="0" max="30" value="2" />
-          <label for="runtimeFlyingSpawnMs">Flying spawn interval (ms)</label>
-          <input id="runtimeFlyingSpawnMs" type="number" min="500" max="30000" value="3400" />
-          <label for="qualityMode">Quality mode</label>
-          <select id="qualityMode">
-            <option value="balanced" selected>Balanced</option>
-            <option value="fast">Fast</option>
-            <option value="accurate">Accurate</option>
-          </select>
-          <label><input id="runtimeIncludeReverseGhost" type="checkbox" checked />Include reverseGhost</label>
           <div class="button-row">
             <button id="exportRuntime">Save runtime to Levels</button>
             <button id="copyRuntime">Copy runtime</button>
@@ -103,6 +157,29 @@
         <p class="small">URL: <code>/editor.html</code></p>
       </div>
       <div class="main">
+        <section class="minimap">
+          <h3>Minimap preview (live)</h3>
+          <canvas id="minimap" width="320" height="180"></canvas>
+          <div class="legend">
+            <span class="l-low">Low</span>
+            <span class="l-medium">Medium</span>
+            <span class="l-high">High</span>
+          </div>
+        </section>
+        <section class="level-layout-editor">
+          <h3>Layout editor (runtime platforms)</h3>
+          <div class="button-row level-layout-actions">
+            <button id="layoutScrollLeft">View left</button>
+            <button id="layoutScrollRight">View right</button>
+            <button id="layoutCenterSpawn">Center spawn</button>
+            <button id="layoutRegenerate">Regenerate from segments</button>
+            <button id="layoutDeleteSelected">Delete selected</button>
+          </div>
+          <canvas id="layoutEditorCanvas" width="960" height="280"></canvas>
+          <p class="small">
+            Left click selects/drags a platform. Right click changes platform type, or adds a platform if empty.
+          </p>
+        </section>
         <h2>Segments</h2>
         <div id="summary" class="small"></div>
         <table>
@@ -115,21 +192,13 @@
               <th>vertical_min</th>
               <th>vertical_max</th>
               <th>rhythm_density</th>
+              <th>patrol_enemies</th>
+              <th>flying_spawn_interval_ms</th>
               <th></th>
             </tr>
           </thead>
           <tbody id="rows"></tbody>
         </table>
-
-        <section class="minimap">
-          <h3>Minimap preview (live)</h3>
-          <canvas id="minimap" width="320" height="180"></canvas>
-          <div class="legend">
-            <span class="l-low">Low</span>
-            <span class="l-medium">Medium</span>
-            <span class="l-high">High</span>
-          </div>
-        </section>
       </div>
     </div>
 
@@ -138,20 +207,35 @@
       const summaryEl = document.getElementById('summary');
       const fileInput = document.getElementById('fileInput');
       const midiFolderSelect = document.getElementById('midiFolderSelect');
+      const levelsFolderSelect = document.getElementById('levelsFolderSelect');
       const levelBaseNameInput = document.getElementById('levelBaseName');
       const midiInput = document.getElementById('midiInput');
       const localMidiStatusEl = document.getElementById('localMidiStatus');
       const midiStatusEl = document.getElementById('midiStatus');
       const runtimeBpmInput = document.getElementById('runtimeBpm');
       const runtimeGridColumnsInput = document.getElementById('runtimeGridColumns');
-      const runtimePatrolCountInput = document.getElementById('runtimePatrolCount');
-      const runtimeFlyingSpawnMsInput = document.getElementById('runtimeFlyingSpawnMs');
       const qualityModeSelect = document.getElementById('qualityMode');
-      const runtimeIncludeReverseGhostInput = document.getElementById('runtimeIncludeReverseGhost');
       const minimap = document.getElementById('minimap');
+      const minimapContainer = minimap ? minimap.closest('.minimap') : null;
       const mapCtx = minimap.getContext('2d');
+      const layoutEditorCanvas = document.getElementById('layoutEditorCanvas');
+      const layoutEditorContainer = layoutEditorCanvas ? layoutEditorCanvas.closest('.level-layout-editor') : null;
+      const layoutCtx = layoutEditorCanvas ? layoutEditorCanvas.getContext('2d') : null;
       let model = { segments: [], midi_file: null };
+      const GRID_STEP = 32;
+      const PLATFORM_WIDTH = GRID_STEP * 2;
+      const PLATFORM_BLOCK_HEIGHT = 18;
       let midiFolderFiles = [];
+      let levelsFolderEntries = [];
+      let customRuntimePlatforms = null;
+      const layoutEditorState = {
+        cameraX: 0,
+        selectedIndex: -1,
+        dragging: false,
+        dragOffsetX: 0,
+        dragOffsetY: 0
+      };
+      const platformKindCycle = ['segment', 'beat', 'alternateBeat', 'ghost', 'reverseGhost', 'elevator'];
       let midiPlayback = {
         fileName: null,
         notes: [],
@@ -172,10 +256,56 @@
         index,
         duration_beats: 8,
         energy_state: 'medium',
-        platform_types: ['static', 'beat'],
+        platform_types: platformTypesByEnergy('medium'),
         vertical_range: [0, 2],
-        rhythm_density: 0.5
+        rhythm_density: 0.5,
+        patrol_enemies: 2,
+        flying_spawn_interval_ms: 2600
       });
+
+      function enemyDefaultsByEnergy(energyState) {
+        if (energyState === 'low') return { patrol: 1, flyingSpawnIntervalMs: 3400 };
+        if (energyState === 'high') return { patrol: 3, flyingSpawnIntervalMs: 1800 };
+        return { patrol: 2, flyingSpawnIntervalMs: 2600 };
+      }
+
+      function platformTypesByEnergy(energyState) {
+        if (energyState === 'low') return ['static', 'beat', 'alternateBeat'];
+        if (energyState === 'medium') return ['static', 'beat', 'alternateBeat', 'ghost', 'reverseGhost'];
+        return ['static', 'beat', 'alternateBeat', 'ghost', 'reverseGhost', 'elevator'];
+      }
+
+      function mapPlatformTypeToKind(platformType) {
+        const raw = String(platformType || '').trim();
+        if (raw === 'static') return 'segment';
+        if (platformKindCycle.includes(raw)) return raw;
+        return 'segment';
+      }
+
+      function deterministicUnit(seed) {
+        const x = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
+        return x - Math.floor(x);
+      }
+
+      function deterministicInt(seed, min, max) {
+        const low = Math.floor(Math.min(min, max));
+        const high = Math.floor(Math.max(min, max));
+        if (high <= low) return low;
+        return low + Math.floor(deterministicUnit(seed) * (high - low + 1));
+      }
+
+      function platformDefaultsByKind(kind) {
+        return { width: PLATFORM_WIDTH, height: PLATFORM_BLOCK_HEIGHT };
+      }
+
+      function platformColor(kind) {
+        if (kind === 'beat') return '#94a3b8';
+        if (kind === 'alternateBeat') return '#38bdf8';
+        if (kind === 'ghost') return '#67e8f9';
+        if (kind === 'reverseGhost') return '#f472b6';
+        if (kind === 'elevator') return '#60a5fa';
+        return '#879abf';
+      }
 
       function sanitizeBaseName(value) {
         const clean = String(value || '')
@@ -191,12 +321,122 @@
         levelBaseNameInput.value = sanitizeBaseName(noExt || levelBaseNameInput.value);
       }
 
+      function setLevelBaseNameFromLevelFile(fileName) {
+        const noExt = String(fileName || '')
+          .replace(/\.runtime\.json$/i, '')
+          .replace(/\.draft\.json$/i, '')
+          .replace(/\.json$/i, '');
+        levelBaseNameInput.value = sanitizeBaseName(noExt || levelBaseNameInput.value);
+      }
+
       function setMidiStatus(text) {
         midiStatusEl.textContent = `MIDI: ${text}`;
       }
 
       function setLocalMidiStatus(text) {
         localMidiStatusEl.textContent = text;
+      }
+
+      function clonePlatform(platform) {
+        const kind = platformKindCycle.includes(String(platform?.kind)) ? String(platform.kind) : 'segment';
+        const defaults = platformDefaultsByKind(kind);
+        return {
+          kind,
+          x: Number.isFinite(Number(platform?.x)) ? snapWorldX(Number(platform.x)) : 150,
+          y: Number.isFinite(Number(platform?.y)) ? snapWorldY(Number(platform.y)) : snapWorldY(405),
+          width: defaults.width,
+          height: defaults.height
+        };
+      }
+
+      function clonePlatforms(platforms) {
+        return (Array.isArray(platforms) ? platforms : []).map((platform) => clonePlatform(platform));
+      }
+
+      function getCurrentGeneratedPlatforms() {
+        const gridColumns = Math.max(1, Math.min(128, Number(runtimeGridColumnsInput.value) || 29));
+        return buildRuntimePlatforms(gridColumns);
+      }
+
+      function getEditablePlatforms() {
+        return Array.isArray(customRuntimePlatforms) ? customRuntimePlatforms : getCurrentGeneratedPlatforms();
+      }
+
+      function ensureCustomRuntimePlatforms() {
+        if (!Array.isArray(customRuntimePlatforms)) {
+          customRuntimePlatforms = clonePlatforms(getCurrentGeneratedPlatforms());
+        }
+        return customRuntimePlatforms;
+      }
+
+      function sortPlatformsForExport(platforms) {
+        return [...platforms].sort((a, b) => Number(a.x) - Number(b.x));
+      }
+
+      function snapWorldX(x) {
+        const spawnX = 150;
+        const platformAnchorX = spawnX + GRID_STEP;
+        return Math.round(platformAnchorX + Math.round((x - platformAnchorX) / PLATFORM_WIDTH) * PLATFORM_WIDTH);
+      }
+
+      function snapWorldY(y) {
+        return Math.round(y / GRID_STEP) * GRID_STEP;
+      }
+
+      function layoutWorldYFromCanvas(yCanvas) {
+        const top = 80;
+        const bottom = 460;
+        const normalized = Math.max(0, Math.min(1, yCanvas / Math.max(1, layoutEditorCanvas.height)));
+        return Math.round(top + normalized * (bottom - top));
+      }
+
+      function layoutCanvasYFromWorld(yWorld) {
+        const top = 80;
+        const bottom = 460;
+        const normalized = (yWorld - top) / Math.max(1, bottom - top);
+        return Math.round(Math.max(0, Math.min(1, normalized)) * layoutEditorCanvas.height);
+      }
+
+      function getLayoutCanvasPoint(ev) {
+        const rect = layoutEditorCanvas.getBoundingClientRect();
+        const sx = layoutEditorCanvas.width / Math.max(1, rect.width);
+        const sy = layoutEditorCanvas.height / Math.max(1, rect.height);
+        return {
+          x: (ev.clientX - rect.left) * sx,
+          y: (ev.clientY - rect.top) * sy
+        };
+      }
+
+      function getLayoutWorldWidth(platforms) {
+        const gridColumns = Math.max(1, Math.min(128, Number(runtimeGridColumnsInput.value) || 29));
+        const fromGrid = 150 + Math.max(0, gridColumns - 1) * 32 + 260;
+        const fromPlatforms = platforms.reduce((max, p) => Math.max(max, Number(p.x) + Number(p.width) / 2), 0) + 220;
+        return Math.max(960, Math.ceil(fromGrid), Math.ceil(fromPlatforms));
+      }
+
+      function clampLayoutCamera() {
+        if (!layoutEditorCanvas) return;
+        const platforms = getEditablePlatforms();
+        const maxCamera = Math.max(0, getLayoutWorldWidth(platforms) - layoutEditorCanvas.width);
+        layoutEditorState.cameraX = clampNumber(layoutEditorState.cameraX, 0, maxCamera);
+      }
+
+      function findPlatformIndexAtWorld(platforms, worldX, worldY) {
+        for (let i = platforms.length - 1; i >= 0; i--) {
+          const p = platforms[i];
+          const left = Number(p.x) - Number(p.width) / 2;
+          const right = Number(p.x) + Number(p.width) / 2;
+          const top = Number(p.y) - Number(p.height) / 2;
+          const bottom = Number(p.y) + Number(p.height) / 2;
+          if (worldX >= left && worldX <= right && worldY >= top && worldY <= bottom) return i;
+        }
+        return -1;
+      }
+
+      function cyclePlatformKind(kind) {
+        const at = platformKindCycle.indexOf(String(kind));
+        if (at < 0) return platformKindCycle[0];
+        return platformKindCycle[(at + 1) % platformKindCycle.length];
       }
 
       function getQualityConfig() {
@@ -251,6 +491,39 @@
           midiFolderSelect.appendChild(errorOption);
           const message = err instanceof Error ? err.message : 'error while loading MIDI folder';
           setMidiStatus(`${message}. If you are not using http://127.0.0.1:4173, folder API is unavailable.`);
+        }
+      }
+
+      async function refreshLevelsFolderList() {
+        try {
+          const res = await fetch('/api/levels');
+          if (!res.ok) {
+            const detail = await res.text().catch(() => '');
+            throw new Error(`Unable to read Levels folder (${res.status})${detail ? `: ${detail}` : ''}`);
+          }
+          const data = await res.json();
+          levelsFolderEntries = Array.isArray(data.levels) ? data.levels.filter((row) => row && row.name && row.data) : [];
+          levelsFolderSelect.innerHTML = '';
+          if (levelsFolderEntries.length === 0) {
+            const empty = document.createElement('option');
+            empty.value = '';
+            empty.textContent = '(no level files found)';
+            levelsFolderSelect.appendChild(empty);
+          } else {
+            for (const entry of levelsFolderEntries) {
+              const option = document.createElement('option');
+              option.value = String(entry.name);
+              option.textContent = String(entry.name);
+              levelsFolderSelect.appendChild(option);
+            }
+          }
+        } catch (err) {
+          levelsFolderEntries = [];
+          levelsFolderSelect.innerHTML = '';
+          const errorOption = document.createElement('option');
+          errorOption.value = '';
+          errorOption.textContent = '(Level loading error - run npm run start)';
+          levelsFolderSelect.appendChild(errorOption);
         }
       }
 
@@ -542,11 +815,13 @@
           let platformTypes = ['static'];
           let verticalRange = [0, 1];
           if (energyState === 'medium') {
-            platformTypes = ['static', 'beat'];
+            platformTypes = platformTypesByEnergy('medium');
             verticalRange = [0, 2];
           } else if (energyState === 'high') {
-            platformTypes = ['beat', 'ghost'];
+            platformTypes = platformTypesByEnergy('high');
             verticalRange = [1, 3];
+          } else {
+            platformTypes = platformTypesByEnergy('low');
           }
 
           if (counts[i] > 0) {
@@ -563,7 +838,9 @@
             energy_state: energyState,
             platform_types: platformTypes,
             vertical_range: verticalRange,
-            rhythm_density: Math.max(0, Math.min(1, counts[i] > 0 ? velocitySums[i] / counts[i] : 0))
+            rhythm_density: Math.max(0, Math.min(1, counts[i] > 0 ? velocitySums[i] / counts[i] : 0)),
+            patrol_enemies: enemyDefaultsByEnergy(energyState).patrol,
+            flying_spawn_interval_ms: enemyDefaultsByEnergy(energyState).flyingSpawnIntervalMs
           });
         }
 
@@ -716,6 +993,113 @@
         return notes;
       }
 
+      function clampNumber(value, min, max) {
+        return Math.max(min, Math.min(max, value));
+      }
+
+      function runtimeLevelToDraftModel(raw) {
+        if (!raw || typeof raw !== 'object') throw new Error('Invalid level file format');
+        const runtimePlatforms = Array.isArray(raw.platforms) ? raw.platforms : [];
+        const segmentPlatforms = runtimePlatforms
+          .filter((platform) => platform && platform.kind === 'segment')
+          .sort((a, b) => Number(a.x) - Number(b.x));
+        const segmentEnemies = Array.isArray(raw.segmentEnemies) ? raw.segmentEnemies : [];
+        const enemyBySegment = new Map();
+        for (const item of segmentEnemies) {
+          const idx = Number(item?.segmentIndex);
+          if (!Number.isFinite(idx)) continue;
+          enemyBySegment.set(Math.max(0, Math.floor(idx)), item);
+        }
+
+        const segmentsSource = segmentPlatforms.length > 0 ? segmentPlatforms : [{ x: 150, y: 405, width: 96, height: 18 }];
+        const widths = segmentsSource.map((platform) => Math.max(1, Number(platform.width) || 1));
+        const totalWidth = widths.reduce((sum, width) => sum + width, 0);
+        const targetTotalBeats = Math.max(
+          segmentsSource.length * 4,
+          Math.round(clampNumber(Number(raw.gridColumns) || 29, 1, 128))
+        );
+        const durationBeats = widths.map((width) =>
+          Math.max(1, Math.round((width / Math.max(1, totalWidth)) * targetTotalBeats))
+        );
+        let beatsDiff = targetTotalBeats - durationBeats.reduce((sum, beats) => sum + beats, 0);
+        let beatsFixIdx = 0;
+        while (beatsDiff !== 0 && durationBeats.length > 0) {
+          const at = beatsFixIdx % durationBeats.length;
+          if (beatsDiff > 0) {
+            durationBeats[at] += 1;
+            beatsDiff -= 1;
+          } else if (durationBeats[at] > 1) {
+            durationBeats[at] -= 1;
+            beatsDiff += 1;
+          }
+          beatsFixIdx += 1;
+        }
+
+        const segments = segmentsSource.map((platform, idx) => {
+          const avgV = clampNumber((415 - Number(platform.y || 405)) / 32, 0, 4);
+          const minV = clampNumber(Math.floor(avgV), 0, 3);
+          const maxV = clampNumber(Math.max(minV + 1, Math.ceil(avgV + 0.5)), 1, 4);
+          const enemy = enemyBySegment.get(idx);
+          const patrolFromEnemy = Math.max(0, Math.floor(Number(enemy?.patrolCount) || 0));
+          let energyState = avgV >= 2.5 ? 'high' : avgV >= 1.25 ? 'medium' : 'low';
+          if (patrolFromEnemy >= 3) energyState = 'high';
+          else if (patrolFromEnemy === 2) energyState = 'medium';
+          else if (patrolFromEnemy === 1) energyState = 'low';
+          const defaults = enemyDefaultsByEnergy(energyState);
+          const patrolEnemies = patrolFromEnemy > 0 ? patrolFromEnemy : defaults.patrol;
+          const rawSpawn = Number(enemy?.flyingSpawnIntervalMs);
+          const flyingSpawnIntervalMs =
+            Number.isFinite(rawSpawn) && rawSpawn > 0
+              ? clampNumber(Math.floor(rawSpawn), 500, 30000)
+              : defaults.flyingSpawnIntervalMs;
+
+          const platformTypes = platformTypesByEnergy(energyState);
+
+          return {
+            index: idx,
+            duration_beats: durationBeats[idx] || 8,
+            energy_state: energyState,
+            platform_types: [...new Set(platformTypes)],
+            vertical_range: [minV, maxV],
+            rhythm_density: energyState === 'high' ? 0.8 : energyState === 'medium' ? 0.55 : 0.3,
+            patrol_enemies: patrolEnemies,
+            flying_spawn_interval_ms: flyingSpawnIntervalMs
+          };
+        });
+
+        return {
+          midi_file: typeof raw.midi_file === 'string' && raw.midi_file.trim() ? raw.midi_file.trim() : null,
+          segments
+        };
+      }
+
+      function applyLoadedLevel(rawLevel, sourceName) {
+        const nextModel = Array.isArray(rawLevel?.segments) ? normalizeModel(rawLevel) : runtimeLevelToDraftModel(rawLevel);
+        model = nextModel;
+        customRuntimePlatforms = Array.isArray(rawLevel?.platforms) ? clonePlatforms(rawLevel.platforms) : null;
+        layoutEditorState.selectedIndex = -1;
+        layoutEditorState.dragging = false;
+        layoutEditorState.cameraX = 0;
+
+        stopMidiPlayback();
+        midiPlayback.fileName = null;
+        midiPlayback.notes = [];
+        midiPlayback.playbackNotes = [];
+        midiPlayback.durationSec = 0;
+        midiPlayback.initialBpm = null;
+        if (midiInput) midiInput.value = '';
+        setLocalMidiStatus('No local MIDI selected');
+        if (nextModel.midi_file) setMidiStatus(`linked MIDI file ${nextModel.midi_file} (not loaded in editor)`);
+        else setMidiStatus('no file loaded');
+
+        const bpm = Number(rawLevel?.bpm);
+        const gridColumns = Number(rawLevel?.gridColumns);
+        if (Number.isFinite(bpm)) runtimeBpmInput.value = String(clampNumber(Math.round(bpm), 20, 300));
+        if (Number.isFinite(gridColumns)) runtimeGridColumnsInput.value = String(clampNumber(Math.round(gridColumns), 1, 128));
+        setLevelBaseNameFromLevelFile(sourceName);
+        render();
+      }
+
       function buildRuntimeNotes(gridColumns) {
         if (!midiPlayback.notes.length || !midiPlayback.durationSec) {
           return buildFallbackRuntimeNotes(gridColumns);
@@ -745,62 +1129,119 @@
         return Number.isInteger(idx) ? idx : -1;
       }
 
-      function buildRuntimePlatforms() {
-        const sorted = [...model.segments].sort((a, b) => a.index - b.index);
+      function buildRuntimePlatforms(gridColumns) {
+        const sortedRaw = [...model.segments].sort((a, b) => a.index - b.index);
+        const sorted =
+          sortedRaw.length > 0
+            ? sortedRaw
+            : [
+                {
+                  index: 0,
+                  duration_beats: 8,
+                  energy_state: 'medium',
+                  platform_types: ['static'],
+                  vertical_range: [0, 2],
+                  rhythm_density: 0.5
+                }
+              ];
         const platforms = [];
-        let cursorX = 120;
-        const gap = 18;
+        const step = GRID_STEP;
+        const platformWidth = PLATFORM_WIDTH;
+        const playerStartX = 150;
+        const startLeft = playerStartX + platformWidth / 2;
+        const beatsPerPlatform = 2;
+        let cursorPlatform = 0;
 
-        for (const seg of sorted) {
-          const beats = Math.max(1, Number(seg.duration_beats) || 1);
-          const width = Math.max(56, Math.min(180, Math.round(beats * 9.5)));
-          const minV = Number(seg.vertical_range[0] || 0);
-          const maxV = Number(seg.vertical_range[1] || 0);
-          const avgV = (minV + maxV) / 2;
-          const y = Math.round(415 - avgV * 32);
-          platforms.push({
+        for (let i = 0; i < sorted.length; i++) {
+          const seg = sorted[i];
+          const minV = clampNumber(Math.floor(Number(seg.vertical_range[0] || 0)), 0, 4);
+          const maxV = clampNumber(Math.floor(Number(seg.vertical_range[1] || 0)), 0, 4);
+          const lowV = Math.min(minV, maxV);
+          const highV = Math.max(minV, maxV);
+          const durationBeats = Math.max(2, Math.floor(Number(seg.duration_beats) || 8));
+          const platformCount = Math.max(1, Math.floor(durationBeats / beatsPerPlatform));
+          const requestedTypes = Array.isArray(seg.platform_types) ? seg.platform_types : [];
+          const templateTypes = platformTypesByEnergy(seg.energy_state);
+          const kindPool = (requestedTypes.length > 0 ? requestedTypes : templateTypes)
+            .map((platformType) => mapPlatformTypeToKind(platformType))
+            .filter((kind) => platformKindCycle.includes(kind));
+          const uniqueKindPool = [...new Set(kindPool)];
+          const fallbackPool = templateTypes.map((platformType) => mapPlatformTypeToKind(platformType));
+          const usablePool = uniqueKindPool.length > 0 ? uniqueKindPool : fallbackPool;
+
+          for (let b = 0; b < platformCount; b++) {
+            let selectedKind =
+              usablePool[deterministicInt((i + 1) * 1000 + (b + 1) * 37, 0, usablePool.length - 1)] || 'segment';
+            if (b === 0 && usablePool.includes('segment')) selectedKind = 'segment';
+            const level = deterministicInt((i + 1) * 5000 + (b + 1) * 97, lowV, highV);
+            const y = snapWorldY(Math.round(415 - level * 32));
+            platforms.push({
+              kind: selectedKind,
+              x: Math.round(startLeft + cursorPlatform * platformWidth),
+              y,
+              width: platformWidth,
+              height: PLATFORM_BLOCK_HEIGHT
+            });
+            cursorPlatform += 1;
+          }
+        }
+
+        // Guarantee a spawn-support segment at player start (x=150).
+        const hasSpawnSegment = platforms.some((p) => {
+          if (p.kind !== 'segment') return false;
+          const half = (Number(p.width) || 0) / 2;
+          return playerStartX >= p.x - half && playerStartX <= p.x + half;
+        });
+        if (!hasSpawnSegment) {
+          const firstSegment = platforms.find((p) => p.kind === 'segment');
+          const spawnY = firstSegment ? snapWorldY(firstSegment.y) : snapWorldY(405);
+          platforms.unshift({
             kind: 'segment',
-            x: cursorX,
-            y,
-            width,
-            height: 18
+            x: playerStartX,
+            y: spawnY,
+            width: platformWidth,
+            height: PLATFORM_BLOCK_HEIGHT
           });
-          cursorX += width + gap;
-        }
-
-        const hasBeat = sorted.some((s) => (s.platform_types || []).includes('beat'));
-        const hasGhost = sorted.some((s) => (s.platform_types || []).includes('ghost'));
-        const includeReverseGhost = !!runtimeIncludeReverseGhostInput.checked;
-
-        if (hasBeat) {
-          platforms.push({ kind: 'beat', x: 560, y: 340, width: 120, height: 16 });
-        }
-        if (hasGhost) {
-          platforms.push({ kind: 'ghost', x: 720, y: 290, width: 100, height: 14 });
-        }
-        if (includeReverseGhost) {
-          platforms.push({ kind: 'reverseGhost', x: 820, y: 250, width: 100, height: 14 });
         }
 
         return platforms;
       }
 
+      function buildRuntimeSegmentEnemies() {
+        const sorted = [...model.segments].sort((a, b) => a.index - b.index);
+        const result = [];
+        for (let i = 0; i < sorted.length; i++) {
+          const seg = sorted[i];
+          const patrolCount = Math.max(0, Math.floor(Number(seg.patrol_enemies) || 0));
+          const flyingSpawnIntervalMs = Math.max(500, Math.min(30000, Math.floor(Number(seg.flying_spawn_interval_ms) || 3400)));
+          if (patrolCount <= 0 && !Number.isFinite(flyingSpawnIntervalMs)) continue;
+          result.push({
+            segmentIndex: i,
+            patrolCount,
+            flyingSpawnIntervalMs
+          });
+        }
+        return result;
+      }
+
       function buildRuntimeModel() {
         const bpm = Math.max(20, Math.min(300, Number(runtimeBpmInput.value) || 120));
         const gridColumns = Math.max(1, Math.min(128, Number(runtimeGridColumnsInput.value) || 29));
-        const patrolCount = Math.max(0, Math.min(30, Math.floor(Number(runtimePatrolCountInput.value) || 0)));
-        const flyingSpawnIntervalMs = Math.max(500, Math.min(30000, Math.floor(Number(runtimeFlyingSpawnMsInput.value) || 3400)));
         const notes = buildRuntimeNotes(gridColumns);
-        const platforms = buildRuntimePlatforms();
+        const generatedPlatforms = buildRuntimePlatforms(gridColumns);
+        const platforms = sortPlatformsForExport(
+          Array.isArray(customRuntimePlatforms) ? clonePlatforms(customRuntimePlatforms) : generatedPlatforms
+        );
+        const segmentEnemies = buildRuntimeSegmentEnemies();
+        const midiFile =
+          typeof model.midi_file === 'string' && model.midi_file.trim() ? model.midi_file.trim() : undefined;
         return {
           bpm,
           gridColumns,
           notes,
           platforms,
-          enemies: {
-            patrolCount,
-            flyingSpawnIntervalMs
-          }
+          segmentEnemies,
+          ...(midiFile ? { midi_file: midiFile } : {})
         };
       }
 
@@ -817,8 +1258,31 @@
         return payload.path || `Levels/${filename}`;
       }
 
+      function resizeMinimapCanvas() {
+        if (!minimap || !minimapContainer) return;
+        const style = window.getComputedStyle(minimapContainer);
+        const leftPadding = Number.parseFloat(style.paddingLeft) || 0;
+        const rightPadding = Number.parseFloat(style.paddingRight) || 0;
+        const targetWidth = Math.max(320, Math.floor(minimapContainer.clientWidth - leftPadding - rightPadding));
+        const targetHeight = 180;
+        if (minimap.width !== targetWidth) minimap.width = targetWidth;
+        if (minimap.height !== targetHeight) minimap.height = targetHeight;
+      }
+
+      function resizeLayoutEditorCanvas() {
+        if (!layoutEditorCanvas || !layoutEditorContainer) return;
+        const style = window.getComputedStyle(layoutEditorContainer);
+        const leftPadding = Number.parseFloat(style.paddingLeft) || 0;
+        const rightPadding = Number.parseFloat(style.paddingRight) || 0;
+        const targetWidth = Math.max(480, Math.floor(layoutEditorContainer.clientWidth - leftPadding - rightPadding));
+        const targetHeight = 280;
+        if (layoutEditorCanvas.width !== targetWidth) layoutEditorCanvas.width = targetWidth;
+        if (layoutEditorCanvas.height !== targetHeight) layoutEditorCanvas.height = targetHeight;
+      }
+
       function renderMinimap() {
         if (!mapCtx) return;
+        resizeMinimapCanvas();
         const w = minimap.width;
         const h = minimap.height;
 
@@ -873,6 +1337,84 @@
         }
       }
 
+      function renderLayoutEditor() {
+        if (!layoutCtx || !layoutEditorCanvas) return;
+        resizeLayoutEditorCanvas();
+        clampLayoutCamera();
+        const platforms = getEditablePlatforms();
+        const cameraX = layoutEditorState.cameraX;
+        const width = layoutEditorCanvas.width;
+        const height = layoutEditorCanvas.height;
+        const worldWidth = getLayoutWorldWidth(platforms);
+
+        layoutCtx.clearRect(0, 0, width, height);
+        layoutCtx.fillStyle = '#091121';
+        layoutCtx.fillRect(0, 0, width, height);
+
+        layoutCtx.strokeStyle = '#1f2d4f';
+        layoutCtx.lineWidth = 1;
+        const gridStep = GRID_STEP;
+        const gridStart = Math.floor(cameraX / gridStep) * gridStep;
+        for (let x = gridStart; x <= cameraX + width; x += gridStep) {
+          const px = Math.round(x - cameraX) + 0.5;
+          layoutCtx.beginPath();
+          layoutCtx.moveTo(px, 0);
+          layoutCtx.lineTo(px, height);
+          layoutCtx.stroke();
+        }
+        for (let i = 0; i <= 6; i++) {
+          const y = Math.round((i / 6) * height) + 0.5;
+          layoutCtx.beginPath();
+          layoutCtx.moveTo(0, y);
+          layoutCtx.lineTo(width, y);
+          layoutCtx.stroke();
+        }
+
+        const spawnX = 150;
+        const spawnCanvasX = spawnX - cameraX;
+        layoutCtx.strokeStyle = '#fbbf24';
+        layoutCtx.lineWidth = 2;
+        layoutCtx.beginPath();
+        layoutCtx.moveTo(spawnCanvasX, 0);
+        layoutCtx.lineTo(spawnCanvasX, height);
+        layoutCtx.stroke();
+        layoutCtx.fillStyle = '#fbbf24';
+        layoutCtx.font = '12px monospace';
+        layoutCtx.fillText('SPAWN', spawnCanvasX + 6, 16);
+
+        platforms.forEach((platform, idx) => {
+          const x = Number(platform.x);
+          const y = Number(platform.y);
+          const w = Number(platform.width);
+          const h = Number(platform.height);
+          const left = x - w / 2 - cameraX;
+          const top = layoutCanvasYFromWorld(y - h / 2);
+          const bottom = layoutCanvasYFromWorld(y + h / 2);
+          const drawH = Math.max(6, bottom - top);
+          const fill = platformColor(platform.kind);
+          layoutCtx.fillStyle = fill;
+          layoutCtx.globalAlpha = layoutEditorState.selectedIndex === idx ? 0.95 : 0.8;
+          layoutCtx.fillRect(left, top, w, drawH);
+          layoutCtx.globalAlpha = 1;
+          layoutCtx.strokeStyle = layoutEditorState.selectedIndex === idx ? '#f8fafc' : '#0b1326';
+          layoutCtx.lineWidth = layoutEditorState.selectedIndex === idx ? 2 : 1;
+          layoutCtx.strokeRect(left, top, w, drawH);
+          layoutCtx.fillStyle = '#dbeafe';
+          layoutCtx.font = '11px monospace';
+          layoutCtx.fillText(String(platform.kind), left + 4, Math.max(12, top - 4));
+        });
+
+        layoutCtx.fillStyle = '#9db6de';
+        layoutCtx.font = '12px monospace';
+        layoutCtx.fillText(
+          `X: ${Math.round(cameraX)} / ${Math.max(0, worldWidth - width)} | platforms: ${platforms.length} | mode: ${
+            Array.isArray(customRuntimePlatforms) ? 'manual layout' : 'generated from segments'
+          }`,
+          10,
+          height - 10
+        );
+      }
+
       function render() {
         rowsEl.innerHTML = '';
         model.segments.forEach((segment, i) => {
@@ -893,6 +1435,8 @@
             <td><input type="number" value="${segment.vertical_range[0]}" data-k="vertical_min" data-i="${i}" /></td>
             <td><input type="number" value="${segment.vertical_range[1]}" data-k="vertical_max" data-i="${i}" /></td>
             <td><input type="number" min="0" max="1" step="0.05" value="${segment.rhythm_density}" data-k="rhythm_density" data-i="${i}" /></td>
+            <td><input type="number" min="0" step="1" value="${Math.max(0, Math.floor(Number(segment.patrol_enemies) || 0))}" data-k="patrol_enemies" data-i="${i}" /></td>
+            <td><input type="number" min="500" max="30000" step="100" value="${Math.max(500, Math.min(30000, Math.floor(Number(segment.flying_spawn_interval_ms) || 3400)))}" data-k="flying_spawn_interval_ms" data-i="${i}" /></td>
             <td><button data-k="delete" data-i="${i}">Delete</button></td>
           `;
           rowsEl.appendChild(tr);
@@ -904,6 +1448,7 @@
         }, {});
         summaryEl.textContent = `Total segments: ${model.segments.length} | low: ${counts.low || 0}, medium: ${counts.medium || 0}, high: ${counts.high || 0}`;
         renderMinimap();
+        renderLayoutEditor();
       }
 
       function normalizeModel(raw) {
@@ -926,19 +1471,44 @@
               Array.isArray(s.vertical_range) && s.vertical_range.length === 2
                 ? [Number(s.vertical_range[0]), Number(s.vertical_range[1])]
                 : [0, 2],
-            rhythm_density: Math.max(0, Math.min(1, Number.isFinite(+s.rhythm_density) ? +s.rhythm_density : 0.5))
+            rhythm_density: Math.max(0, Math.min(1, Number.isFinite(+s.rhythm_density) ? +s.rhythm_density : 0.5)),
+            patrol_enemies: Math.max(0, Math.floor(Number.isFinite(+s.patrol_enemies) ? +s.patrol_enemies : 0)),
+            flying_spawn_interval_ms: Math.max(
+              500,
+              Math.min(30000, Math.floor(Number.isFinite(+s.flying_spawn_interval_ms) ? +s.flying_spawn_interval_ms : 3400))
+            )
           }))
         };
       }
 
       document.getElementById('loadSample').onclick = () => {
         resetMidiState();
+        customRuntimePlatforms = null;
+        layoutEditorState.selectedIndex = -1;
+        layoutEditorState.dragging = false;
+        layoutEditorState.cameraX = 0;
         model = {
           midi_file: null,
           segments: [
             defaultSegment(0),
-            { ...defaultSegment(1), energy_state: 'high', platform_types: ['beat', 'ghost'], vertical_range: [1, 3], rhythm_density: 0.8 },
-            { ...defaultSegment(2), energy_state: 'low', platform_types: ['static'], vertical_range: [0, 1], rhythm_density: 0.2 }
+            {
+              ...defaultSegment(1),
+              energy_state: 'high',
+              platform_types: platformTypesByEnergy('high'),
+              vertical_range: [1, 3],
+              rhythm_density: 0.8,
+              patrol_enemies: enemyDefaultsByEnergy('high').patrol,
+              flying_spawn_interval_ms: enemyDefaultsByEnergy('high').flyingSpawnIntervalMs
+            },
+            {
+              ...defaultSegment(2),
+              energy_state: 'low',
+              platform_types: platformTypesByEnergy('low'),
+              vertical_range: [0, 1],
+              rhythm_density: 0.2,
+              patrol_enemies: enemyDefaultsByEnergy('low').patrol,
+              flying_spawn_interval_ms: enemyDefaultsByEnergy('low').flyingSpawnIntervalMs
+            }
           ]
         };
         render();
@@ -956,6 +1526,11 @@
           const current = Number(model.segments[i].index);
           model.segments[i].index = Number.isFinite(current) ? current + 1 : i;
         }
+        if (!Array.isArray(customRuntimePlatforms)) {
+          layoutEditorState.selectedIndex = -1;
+          layoutEditorState.dragging = false;
+          layoutEditorState.cameraX = 0;
+        }
         render();
       };
 
@@ -968,6 +1543,10 @@
           .catch((err) => {
             alert(err.message || 'Error while saving draft');
           });
+      };
+
+      document.getElementById('backToGameStart').onclick = () => {
+        if (typeof window !== 'undefined') window.location.href = '/';
       };
 
       document.getElementById('exportRuntime').onclick = () => {
@@ -1008,6 +1587,10 @@
         refreshMidiFolderList();
       };
 
+      document.getElementById('refreshLevelsFolder').onclick = () => {
+        refreshLevelsFolderList();
+      };
+
       document.getElementById('loadMidiFromFolder').onclick = async () => {
         const selected = midiFolderSelect.value;
         if (!selected) {
@@ -1029,6 +1612,24 @@
         }
       };
 
+      document.getElementById('loadLevelFromFolder').onclick = () => {
+        const selected = String(levelsFolderSelect.value || '').trim();
+        if (!selected) {
+          alert('Select a level file from the list');
+          return;
+        }
+        const entry = levelsFolderEntries.find((row) => String(row?.name) === selected);
+        if (!entry || !entry.data) {
+          alert('Selected level file is not available');
+          return;
+        }
+        try {
+          applyLoadedLevel(entry.data, selected);
+        } catch (err) {
+          alert(err.message || 'Error while loading level file');
+        }
+      };
+
       document.getElementById('playMidi').onclick = () => {
         playMidiLoaded().catch((err) => {
           alert(err.message || 'Error during MIDI playback');
@@ -1037,6 +1638,42 @@
 
       document.getElementById('stopMidi').onclick = () => {
         stopMidiPlayback();
+      };
+
+      document.getElementById('layoutScrollLeft').onclick = () => {
+        layoutEditorState.cameraX = Math.max(0, layoutEditorState.cameraX - 320);
+        renderLayoutEditor();
+      };
+
+      document.getElementById('layoutScrollRight').onclick = () => {
+        layoutEditorState.cameraX += 320;
+        clampLayoutCamera();
+        renderLayoutEditor();
+      };
+
+      document.getElementById('layoutCenterSpawn').onclick = () => {
+        if (!layoutEditorCanvas) return;
+        layoutEditorState.cameraX = Math.max(0, 150 - layoutEditorCanvas.width / 2);
+        clampLayoutCamera();
+        renderLayoutEditor();
+      };
+
+      document.getElementById('layoutRegenerate').onclick = () => {
+        customRuntimePlatforms = null;
+        layoutEditorState.selectedIndex = -1;
+        layoutEditorState.dragging = false;
+        renderLayoutEditor();
+      };
+
+      document.getElementById('layoutDeleteSelected').onclick = () => {
+        const idx = Number(layoutEditorState.selectedIndex);
+        if (!Number.isInteger(idx) || idx < 0) return;
+        const mutable = ensureCustomRuntimePlatforms();
+        if (idx >= mutable.length) return;
+        mutable.splice(idx, 1);
+        layoutEditorState.selectedIndex = -1;
+        layoutEditorState.dragging = false;
+        renderLayoutEditor();
       };
 
       qualityModeSelect.onchange = () => {
@@ -1056,26 +1693,132 @@
         const s = model.segments[i];
 
         if (key === 'index') s.index = Number(t.value);
-        if (key === 'energy_state') s.energy_state = t.value;
         if (key === 'duration_beats') s.duration_beats = Math.max(1, Number(t.value));
         if (key === 'platform_types') s.platform_types = t.value.split(',').map((v) => v.trim()).filter(Boolean);
         if (key === 'vertical_min') s.vertical_range[0] = Number(t.value);
         if (key === 'vertical_max') s.vertical_range[1] = Number(t.value);
         if (key === 'rhythm_density') s.rhythm_density = Math.max(0, Math.min(1, Number(t.value)));
+        if (key === 'energy_state') {
+          s.energy_state = t.value;
+          const defaults = enemyDefaultsByEnergy(s.energy_state);
+          s.patrol_enemies = defaults.patrol;
+          s.flying_spawn_interval_ms = defaults.flyingSpawnIntervalMs;
+        }
+        if (key === 'patrol_enemies') s.patrol_enemies = Math.max(0, Math.floor(Number(t.value) || 0));
+        if (key === 'flying_spawn_interval_ms') {
+          s.flying_spawn_interval_ms = Math.max(500, Math.min(30000, Math.floor(Number(t.value) || 3400)));
+        }
 
         render();
       });
 
       rowsEl.addEventListener('click', (ev) => {
-        const t = ev.target;
-        if (t.dataset.k !== 'delete') return;
-        const i = Number(t.dataset.i);
+        const btn = ev.target.closest('button[data-k="delete"]');
+        if (!btn) return;
+        const i = Number(btn.dataset.i);
         if (!Number.isInteger(i)) return;
         model.segments.splice(i, 1);
         render();
       });
 
+      window.addEventListener('keydown', (ev) => {
+        if (ev.key !== 'Delete' && ev.key !== 'Backspace') return;
+        const tag = String(document.activeElement?.tagName || '').toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+        const idx = Number(layoutEditorState.selectedIndex);
+        if (!Number.isInteger(idx) || idx < 0) return;
+        const mutable = ensureCustomRuntimePlatforms();
+        if (idx >= mutable.length) return;
+        mutable.splice(idx, 1);
+        layoutEditorState.selectedIndex = -1;
+        layoutEditorState.dragging = false;
+        ev.preventDefault();
+        renderLayoutEditor();
+      });
+
+      if (layoutEditorCanvas) {
+        layoutEditorCanvas.addEventListener('contextmenu', (ev) => {
+          ev.preventDefault();
+        });
+
+        layoutEditorCanvas.addEventListener('mousedown', (ev) => {
+          const point = getLayoutCanvasPoint(ev);
+          const worldX = layoutEditorState.cameraX + point.x;
+          const worldY = layoutWorldYFromCanvas(point.y);
+
+          if (ev.button === 0) {
+            const active = getEditablePlatforms();
+            const hit = findPlatformIndexAtWorld(active, worldX, worldY);
+            layoutEditorState.selectedIndex = hit;
+            if (hit >= 0) {
+              const mutable = ensureCustomRuntimePlatforms();
+              const selected = mutable[hit];
+              layoutEditorState.dragging = true;
+              layoutEditorState.dragOffsetX = worldX - Number(selected.x);
+              layoutEditorState.dragOffsetY = worldY - Number(selected.y);
+            } else {
+              layoutEditorState.dragging = false;
+            }
+            renderLayoutEditor();
+            return;
+          }
+
+          if (ev.button === 2) {
+            const mutable = ensureCustomRuntimePlatforms();
+            const hit = findPlatformIndexAtWorld(mutable, worldX, worldY);
+            if (hit >= 0) {
+              const current = mutable[hit];
+              const nextKind = cyclePlatformKind(current.kind);
+              const defaults = platformDefaultsByKind(nextKind);
+              current.kind = nextKind;
+              if (!Number.isFinite(Number(current.width)) || Number(current.width) < 10) current.width = defaults.width;
+              if (!Number.isFinite(Number(current.height)) || Number(current.height) < 8) current.height = defaults.height;
+              layoutEditorState.selectedIndex = hit;
+            } else {
+              const kind = 'segment';
+              const defaults = platformDefaultsByKind(kind);
+              mutable.push({
+                kind,
+                x: snapWorldX(worldX),
+                y: clampNumber(snapWorldY(worldY), 120, 440),
+                width: defaults.width,
+                height: defaults.height
+              });
+              layoutEditorState.selectedIndex = mutable.length - 1;
+            }
+            renderLayoutEditor();
+          }
+        });
+
+        layoutEditorCanvas.addEventListener('mousemove', (ev) => {
+          if (!layoutEditorState.dragging) return;
+          const mutable = ensureCustomRuntimePlatforms();
+          const idx = layoutEditorState.selectedIndex;
+          if (!Number.isInteger(idx) || idx < 0 || idx >= mutable.length) return;
+          const point = getLayoutCanvasPoint(ev);
+          const worldX = layoutEditorState.cameraX + point.x - layoutEditorState.dragOffsetX;
+          const worldY = layoutWorldYFromCanvas(point.y) - layoutEditorState.dragOffsetY;
+          mutable[idx].x = snapWorldX(worldX);
+          mutable[idx].y = clampNumber(snapWorldY(Math.round(worldY)), 120, 440);
+          renderLayoutEditor();
+        });
+
+        const stopDrag = () => {
+          layoutEditorState.dragging = false;
+        };
+        layoutEditorCanvas.addEventListener('mouseup', stopDrag);
+        layoutEditorCanvas.addEventListener('mouseleave', stopDrag);
+      }
+
+      window.addEventListener('resize', () => {
+        resizeMinimapCanvas();
+        renderMinimap();
+        resizeLayoutEditorCanvas();
+        renderLayoutEditor();
+      });
+
       refreshMidiFolderList();
+      refreshLevelsFolderList();
       render();
     </script>
   </body>

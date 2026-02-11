@@ -1,7 +1,8 @@
 import { BeatSnapMover } from '../core/beatMovement.js';
 import { generateSegments } from '../core/levelGenerator.js';
 import { Metronome } from '../core/metronome.js';
-import { getBeatPlatformState } from '../core/platforms.js';
+import { buildGridNotesFromMidi, parseMidiFile } from '../core/midi.js';
+import { getBeatPlatformState, getElevatorOffsetSteps, isAlternateBeatPlatformSolid } from '../core/platforms.js';
 import { defaultIntensityConfig } from '../core/intensity.js';
 import { MovementDirection } from '../core/types.js';
 import { getLevelByOneBasedIndex, LEVELS } from '../data/levels.js';
@@ -19,6 +20,7 @@ import {
 
 const DEFAULT_ENERGY_CURVE = [0.1, 0.2, 0.3, 0.45, 0.55, 0.65, 0.75, 0.9];
 const BEST_TIME_STORAGE_PREFIX = 'sambo.level';
+const CONTROL_HINT_TEXT = 'A/D or Arrows: move | W/Space/Up: jump.';
 
 interface PatrolEnemy {
   sprite: any;
@@ -37,17 +39,39 @@ interface WorldPlatform {
   solid: boolean;
 }
 
+interface ElevatorPlatform {
+  shape: any;
+  baseY: number;
+}
+
+interface SegmentEnemyPlan {
+  segmentIndex: number;
+  triggerX: number;
+  leftX: number;
+  rightX: number;
+  platformTopY: number;
+  patrolCount: number;
+  flyingCount: number;
+  flyingSpawnIntervalMs: number;
+  pendingFlyingSpawns: number;
+  nextFlyingSpawnMs: number;
+  triggered: boolean;
+}
+
 export class GameScene extends Phaser.Scene {
   private metronome!: Metronome;
   private mover!: BeatSnapMover;
   private player!: any;
   private moon!: any;
   private infoText!: any;
+  private scoreText!: any;
   private livesText!: any;
   private timerText!: any;
-  private beatPlatform!: any;
-  private ghostPlatform!: any;
-  private reverseGhostPlatform!: any;
+  private beatPlatforms: any[] = [];
+  private alternateBeatPlatforms: any[] = [];
+  private ghostPlatforms: any[] = [];
+  private reverseGhostPlatforms: any[] = [];
+  private elevatorPlatforms: ElevatorPlatform[] = [];
   private segmentPlatforms: WorldPlatform[] = [];
   private darknessOverlay!: any;
   private gameOverBackdrop!: any;
@@ -76,8 +100,11 @@ export class GameScene extends Phaser.Scene {
   private cursors!: any;
   private keys!: any;
   private synth: AudioContext | null = null;
-  private readonly worldWidth = 960;
+  private worldWidth = 960;
+  private moonMaxWorldX = 820;
   private readonly playerStartX = 150;
+  private readonly minEnemySpawnDistanceFromPlayerStart = 150;
+  private readonly platformBlockHeight = 18;
   private readonly movementEpsilon = 0.01;
   private readonly intensityGainPerStep = 0.06;
   private readonly intensityLossPerStep = 0.08;
@@ -90,10 +117,12 @@ export class GameScene extends Phaser.Scene {
   private verticalVelocity = 0;
   private lastGroundedAtMs = 0;
   private lastBeatInBar: 1 | 2 | 3 | 4 | null = null;
+  private lastElevatorOffsetSteps = 0;
   private moonBeatPulse = 0;
   private runStartMs = 0;
   private elapsedAtEndMs = 0;
   private bestTimeMs: number | null = null;
+  private enemyKills = 0;
   private currentLevel: LevelDefinition = LEVELS[0];
   private currentLevelOneBasedIndex = 1;
   private availableLevels: LevelDefinition[] = LEVELS;
@@ -104,20 +133,32 @@ export class GameScene extends Phaser.Scene {
   private previewDirection: MovementDirection = 'forward';
   private patrolCount = 2;
   private flyingSpawnIntervalMs = 3400;
+  private segmentEnemyPlans: SegmentEnemyPlan[] = [];
+  private useSegmentEnemySpawns = false;
+  private activeSegmentFlyingSpawnIntervalMs = 0;
+  private levelMidiCacheKey: string | null = null;
+  private readonly patrolSquashBaseScaleY = 0.93;
+  private readonly patrolSquashAmplitude = 0.05;
+  private readonly flyingStretchBaseScaleX = 1.03;
+  private readonly flyingStretchAmplitude = 0.07;
 
   constructor() {
     super('game');
   }
 
-  preload(): void {}
+  preload(): void {
+    this.resolveLevelFromInputs();
+    this.queueLevelMidiLoad();
+  }
 
   create(): void {
     this.resolveLevelFromInputs();
+    this.applyLoadedMidiToLevelNotes();
     this.resetGameplayState();
     this.validateLevelDefinition();
 
     this.cameras.main.setBackgroundColor('#0b0f1a');
-    this.add.rectangle(480, 520, 960, 240, 0x0f1323).setOrigin(0.5);
+    this.cameras.main.setBounds(0, 0, this.worldWidth, 540);
 
     const segments = generateSegments({ bpm: this.currentLevel.bpm, energy_curve: DEFAULT_ENERGY_CURVE });
     const segmentByIndex = segments.length > 0 ? segments : [{ energyState: 'medium' as const, verticalRange: [0, 2] as [number, number] }];
@@ -127,44 +168,71 @@ export class GameScene extends Phaser.Scene {
         const segment = segmentByIndex[Math.min(segmentCursor, segmentByIndex.length - 1)];
         segmentCursor += 1;
         const x = this.snapXToGrid(platform.x);
-        const y = platform.y;
+        const y = this.snapYToGrid(platform.y);
         const color = segment.energyState === 'low' ? 0x4b5d67 : segment.energyState === 'medium' ? 0x6a7f89 : 0x9ca3af;
-        const shape = this.add.rectangle(x, y, this.snapLengthToGrid(platform.width), platform.height, color, 0.85);
+        const shape = this.add.rectangle(x, y, this.snapLengthToGrid(platform.width), this.platformBlockHeight, color, 0.85);
         this.segmentPlatforms.push({ shape, solid: true });
       } else if (platform.kind === 'beat') {
-        this.beatPlatform = this.add.rectangle(
+        const beat = this.add.rectangle(
           this.snapXToGrid(platform.x),
-          platform.y,
+          this.snapYToGrid(platform.y),
           this.snapLengthToGrid(platform.width),
-          platform.height,
+          this.platformBlockHeight,
           0x8b93aa,
           0.95
         );
-      } else if (platform.kind === 'ghost') {
-        this.ghostPlatform = this.add.rectangle(
+        this.beatPlatforms.push(beat);
+      } else if (platform.kind === 'alternateBeat') {
+        const alternateBeat = this.add.rectangle(
           this.snapXToGrid(platform.x),
-          platform.y,
+          this.snapYToGrid(platform.y),
           this.snapLengthToGrid(platform.width),
-          platform.height,
+          this.platformBlockHeight,
+          0xffb86c,
+          0.95
+        );
+        this.alternateBeatPlatforms.push(alternateBeat);
+      } else if (platform.kind === 'ghost') {
+        const ghost = this.add.rectangle(
+          this.snapXToGrid(platform.x),
+          this.snapYToGrid(platform.y),
+          this.snapLengthToGrid(platform.width),
+          this.platformBlockHeight,
           0x73f7ff,
           0.15
         );
+        this.ghostPlatforms.push(ghost);
       } else if (platform.kind === 'reverseGhost') {
-        this.reverseGhostPlatform = this.add.rectangle(
+        const reverseGhost = this.add.rectangle(
           this.snapXToGrid(platform.x),
-          platform.y,
+          this.snapYToGrid(platform.y),
           this.snapLengthToGrid(platform.width),
-          platform.height,
+          this.platformBlockHeight,
           0xff8cf7,
           0.85
         );
+        this.reverseGhostPlatforms.push(reverseGhost);
+      } else if (platform.kind === 'elevator') {
+        const elevator = this.add.rectangle(
+          this.snapXToGrid(platform.x),
+          this.snapYToGrid(platform.y),
+          this.snapLengthToGrid(platform.width),
+          this.platformBlockHeight,
+          0x60a5fa,
+          0.95
+        );
+        this.elevatorPlatforms.push({ shape: elevator, baseY: elevator.y });
       }
     }
+    this.syncElevatorPlatforms(performance.now());
+    this.playerY = this.getInitialPlayerYFromPlatforms();
 
-    this.player = this.add.rectangle(150, this.groundY, 24, 38, 0xffffff, 1);
+    this.player = this.add.rectangle(150, this.playerY, 24, 38, 0xffffff, 1);
+    this.cameras.main.startFollow(this.player, false, 0.12, 0.12);
     this.initializeGridBounds();
-    this.moon = this.add.circle(820, 90, 42, 0xdde8ff, 0.35);
+    this.moon = this.add.circle(this.moonMaxWorldX, 90, 42, 0xdde8ff, 0.35);
 
+    this.buildSegmentEnemyPlans();
     this.spawnPatrolEnemiesFromLevel();
 
     this.livesText = this.add.text(20, 14, '', {
@@ -185,13 +253,26 @@ export class GameScene extends Phaser.Scene {
       fontFamily: 'monospace',
       fontSize: '16px'
     });
+    this.scoreText = this.add
+      .text(480, 520, '0', {
+        color: '#d7e2ff',
+        fontFamily: 'monospace',
+        fontSize: '24px'
+      })
+      .setOrigin(0.5, 1);
 
     this.darknessOverlay = this.add
-      .rectangle(this.worldWidth / 2, 270, this.worldWidth, 540, 0x000000, 1)
-      .setDepth(10);
+      .rectangle(480, 270, 960, 540, 0x000000, 1)
+      .setDepth(10)
+      .setScrollFactor(0);
     this.livesText.setDepth(11);
     this.timerText.setDepth(11);
     this.infoText.setDepth(11);
+    this.scoreText.setDepth(11);
+    this.livesText.setScrollFactor(0);
+    this.timerText.setScrollFactor(0);
+    this.infoText.setScrollFactor(0);
+    this.scoreText.setScrollFactor(0);
 
     this.cursors = this.input.keyboard.createCursorKeys();
     this.keys = this.input.keyboard.addKeys('W,A,S,D,SPACE,UP,LEFT,RIGHT,ESC');
@@ -201,6 +282,7 @@ export class GameScene extends Phaser.Scene {
     this.runStartMs = performance.now();
     this.bestTimeMs = this.loadBestTimeMs();
     this.updateLivesLabel();
+    this.updateScoreLabel();
     this.updateTimerLabel(this.runStartMs);
     this.createGameOverUI();
     this.createPauseUI();
@@ -270,11 +352,19 @@ export class GameScene extends Phaser.Scene {
 
     const beatInBar = this.metronome.beatInBarAt(now);
     const beatState = getBeatPlatformState(beatInBar);
+    const alternateBeatSolid = isAlternateBeatPlatformSolid(beatInBar);
     this.handleBeatPulse(beatInBar);
+    const wasStandingOnElevator = this.isStandingOnAnyElevator();
+    const elevatorDeltaY = this.syncElevatorPlatforms(now);
+    if (wasStandingOnElevator && elevatorDeltaY !== 0) {
+      this.playerY += elevatorDeltaY;
+      this.player.y = this.playerY;
+      this.verticalVelocity = Math.min(0, this.verticalVelocity);
+    }
     const beatSolid = beatState !== 'gone';
     const ghostSolid = this.ghostPlatformLatchedSolid;
     const reverseGhostSolid = this.reverseGhostPlatformLatchedSolid;
-    const groundedBeforeJump = this.isPlayerGrounded(beatSolid, ghostSolid, reverseGhostSolid);
+    const groundedBeforeJump = this.isPlayerGrounded(beatSolid, alternateBeatSolid, ghostSolid, reverseGhostSolid, true);
     if (groundedBeforeJump) this.lastGroundedAtMs = now;
 
     const deltaSeconds = delta / 1000;
@@ -284,8 +374,13 @@ export class GameScene extends Phaser.Scene {
     const previousPlayerY = this.playerY;
     this.verticalVelocity += 1400 * deltaSeconds;
     this.playerY += this.verticalVelocity * deltaSeconds;
-    this.resolveVerticalCollisions(previousPlayerY, beatSolid, ghostSolid, reverseGhostSolid);
+    this.resolveVerticalCollisions(previousPlayerY, beatSolid, alternateBeatSolid, ghostSolid, reverseGhostSolid, true);
+    if (this.playerY > 620) {
+      this.triggerGameOver();
+      return;
+    }
 
+    this.triggerSegmentEnemyPlansAt(this.player.x);
     this.updatePatrolEnemies(deltaSeconds);
     this.updateFlyingEnemies(now, deltaSeconds);
     this.handleEnemyCollisions(now);
@@ -296,67 +391,128 @@ export class GameScene extends Phaser.Scene {
 
     this.updateMoonVisual(deltaSeconds);
     this.applyBeatPlatformVisual(beatState);
-    this.ghostPlatform.setAlpha(ghostSolid ? 0.85 : 0.15);
-    if (this.reverseGhostPlatform) this.reverseGhostPlatform.setAlpha(reverseGhostSolid ? 0.85 : 0.15);
+    this.applyAlternateBeatPlatformVisual(alternateBeatSolid);
+    this.applyElevatorPlatformVisual();
+    for (const ghostPlatform of this.ghostPlatforms) {
+      if (ghostSolid) {
+        ghostPlatform.setFillStyle(0x67e8f9, 0.95);
+        ghostPlatform.setStrokeStyle(2, 0xe0faff, 0.95);
+        ghostPlatform.setAlpha(1);
+      } else {
+        ghostPlatform.setFillStyle(0x1b3f4a, 0.3);
+        ghostPlatform.setStrokeStyle(1, 0x2b6b78, 0.25);
+        ghostPlatform.setAlpha(0.12);
+      }
+    }
+    for (const reverseGhostPlatform of this.reverseGhostPlatforms) {
+      reverseGhostPlatform.setAlpha(reverseGhostSolid ? 0.85 : 0.15);
+    }
 
-    const livingPatrol = this.patrolEnemies.filter((e) => e.alive).length;
-    const livingFlying = this.flyingEnemies.filter((e) => e.alive && e.state.active).length;
-    this.infoText.setText([
-      'Sambo Phaser Prototype',
-      'A/D or Arrows: move | W/Space/Up: jump',
-      `Level: ${this.currentLevelOneBasedIndex}/${this.availableLevels.length}`,
-      `Intensity: ${this.intensity.toFixed(2)}`,
-      `Direction: ${this.currentDirection}`,
-      `Beat platform: ${beatState}`,
-      `Ghost platform: ${ghostSolid ? 'SOLID (rewind)' : 'OFF'}`,
-      `Reverse ghost: ${reverseGhostSolid ? 'SOLID (forward/idle)' : 'OFF (rewind)'}`,
-      `Enemies: patrol ${livingPatrol} | flying ${livingFlying}`
-    ]);
+    this.infoText.setText(CONTROL_HINT_TEXT);
+  }
+
+  private resolveSpawnSafeX(x: number, minX: number, maxX: number): number | null {
+    const safeLeft = this.playerStartX - this.minEnemySpawnDistanceFromPlayerStart;
+    const safeRight = this.playerStartX + this.minEnemySpawnDistanceFromPlayerStart;
+    const clampedX = Phaser.Math.Clamp(x, minX, maxX);
+    if (clampedX <= safeLeft || clampedX >= safeRight) return clampedX;
+
+    const canUseLeft = safeLeft >= minX;
+    const canUseRight = safeRight <= maxX;
+    if (canUseLeft && canUseRight) {
+      return clampedX < this.playerStartX ? safeLeft : safeRight;
+    }
+    if (canUseRight) return safeRight;
+    if (canUseLeft) return safeLeft;
+    return null;
   }
 
   private spawnPatrolEnemy(x: number, y: number, minX: number, maxX: number): void {
-    const sprite = this.add.rectangle(x, y, 30, 24, 0xff6b6b, 0.95);
+    const safeX = this.resolveSpawnSafeX(x, minX, maxX);
+    if (safeX === null) return;
+    const deoverlappedX = this.resolvePatrolSpawnX(safeX, y, minX, maxX);
+    if (deoverlappedX === null) return;
+
+    const sprite = this.add.rectangle(deoverlappedX, y, 30, 24, 0xff6b6b, 0.95);
     this.patrolEnemies.push({
       sprite,
       alive: true,
-      state: { x, speed: 90, direction: 1, minX, maxX }
+      state: { x: deoverlappedX, speed: 90, direction: 1, minX, maxX }
     });
+  }
+
+  private resolvePatrolSpawnX(preferredX: number, y: number, minX: number, maxX: number): number | null {
+    const spacing = 34;
+    const sameLaneEnemies = this.patrolEnemies.filter((enemy) => enemy.alive && Math.abs(enemy.sprite.y - y) <= 14);
+    if (sameLaneEnemies.length === 0) return Phaser.Math.Clamp(preferredX, minX, maxX);
+
+    const collides = (candidateX: number): boolean =>
+      sameLaneEnemies.some((enemy) => Math.abs(enemy.sprite.x - candidateX) < spacing);
+
+    const firstChoice = Phaser.Math.Clamp(preferredX, minX, maxX);
+    if (!collides(firstChoice)) return firstChoice;
+
+    for (let step = 1; step <= 16; step++) {
+      const distance = step * spacing;
+      const candidates = [
+        Phaser.Math.Clamp(preferredX + distance, minX, maxX),
+        Phaser.Math.Clamp(preferredX - distance, minX, maxX)
+      ];
+      for (const candidate of candidates) {
+        if (!collides(candidate)) return candidate;
+      }
+    }
+
+    return null;
   }
 
   private spawnFlyingEnemy(): void {
     const y = Phaser.Math.Between(160, 330);
     const x = this.worldWidth + 32;
-    const sprite = this.add.rectangle(x, y, 30, 20, 0xffcf5a, 0.95);
+    this.spawnFlyingEnemyAt(x, y);
+  }
+
+  private spawnFlyingEnemyAt(x: number, y: number): void {
+    const minX = -80;
+    const maxX = this.worldWidth + 80;
+    const safeX = this.resolveSpawnSafeX(x, minX, maxX);
+    if (safeX === null) return;
+
+    const sprite = this.add.rectangle(safeX, y, 30, 20, 0xffcf5a, 0.95);
     this.flyingEnemies.push({
       sprite,
       alive: true,
-      state: { x, y, speedX: 180, homingRate: 90, active: true }
+      state: { x: safeX, y, speedX: 180, homingRate: 90, active: true }
     });
   }
 
   private updatePatrolEnemies(deltaSeconds: number): void {
+    const nowSeconds = this.time.now / 1000;
     for (const enemy of this.patrolEnemies) {
       if (!enemy.alive) continue;
       enemy.state = updatePatrolEnemy(enemy.state, deltaSeconds);
       enemy.sprite.x = enemy.state.x;
       const fill = enemy.state.direction < 0 ? 0xff8b8b : 0xff6b6b;
       enemy.sprite.setFillStyle(fill, 0.95);
+      const squashPhase = nowSeconds * 8 + enemy.state.x * 0.05;
+      const squashWave = (Math.sin(squashPhase) + 1) / 2;
+      const scaleY = this.patrolSquashBaseScaleY + squashWave * this.patrolSquashAmplitude;
+      enemy.sprite.setScale(1, scaleY);
     }
   }
 
   private updateFlyingEnemies(nowMs: number, deltaSeconds: number): void {
-    if (nowMs >= this.nextFlyingSpawnMs) {
-      this.spawnFlyingEnemy();
-      const base = Math.max(700, this.flyingSpawnIntervalMs);
-      const jitter = Math.round(base * 0.25);
-      this.nextFlyingSpawnMs = nowMs + Phaser.Math.Between(base - jitter, base + jitter);
-    }
-
+    this.processSegmentFlyingSpawnQueue(nowMs);
+    const nowSeconds = nowMs / 1000;
     for (const enemy of this.flyingEnemies) {
       if (!enemy.alive) continue;
       enemy.state = updateFlyingEnemy(enemy.state, this.player.y, deltaSeconds, -40);
       enemy.sprite.x = enemy.state.x;
       enemy.sprite.y = enemy.state.y;
+      const stretchPhase = nowSeconds * 6 + enemy.state.y * 0.06;
+      const stretchWave = (Math.sin(stretchPhase) + 1) / 2;
+      const scaleX = this.flyingStretchBaseScaleX + stretchWave * this.flyingStretchAmplitude;
+      enemy.sprite.setScale(scaleX, 1);
       if (!enemy.state.active) {
         enemy.alive = false;
         enemy.sprite.destroy();
@@ -392,6 +548,10 @@ export class GameScene extends Phaser.Scene {
 
       if (collision.stomp) {
         enemy.alive = false;
+        this.enemyKills += 1;
+        this.updateScoreLabel();
+        // Prevent immediate same-frame damage when enemies overlap during a stomp.
+        this.damageCooldownMs = Math.max(this.damageCooldownMs, nowMs + 180);
         if (entry.type === 'patrol') {
           enemy.sprite.setFillStyle(0x3b4a67, 0.45);
           enemy.sprite.setScale(1, 0.45);
@@ -417,28 +577,129 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  private processSegmentFlyingSpawnQueue(nowMs: number): void {
+    if (!this.useSegmentEnemySpawns || this.segmentEnemyPlans.length === 0) return;
+
+    for (const plan of this.segmentEnemyPlans) {
+      if (!plan.triggered || plan.pendingFlyingSpawns <= 0) continue;
+      if (nowMs < plan.nextFlyingSpawnMs) continue;
+
+      const laneLeft = Math.max(120, plan.leftX + 14);
+      const laneRight = Math.min(this.worldWidth - 120, plan.rightX - 14);
+      const midX = (laneLeft + laneRight) * 0.5;
+      const offset = 70 + (plan.flyingCount - plan.pendingFlyingSpawns) * 28;
+      const cameraRightEdge = this.cameras.main.scrollX + this.cameras.main.width;
+      const offscreenRightX = cameraRightEdge + 48;
+      const spawnX = Math.max(offscreenRightX, Math.max(midX + 20, plan.rightX + offset));
+      const spawnY = Phaser.Math.Between(160, 330);
+      this.spawnFlyingEnemyAt(spawnX, spawnY);
+
+      plan.pendingFlyingSpawns -= 1;
+      const spacing = Math.max(500, plan.flyingSpawnIntervalMs || 1200);
+      plan.nextFlyingSpawnMs = nowMs + spacing;
+    }
+  }
+
   private updateLivesLabel(): void {
     const hearts = Array.from({ length: 5 }, (_, i) => (i < this.lives ? '❤' : '·')).join(' ');
     this.livesText.setText(`Lives: ${hearts} (${this.lives}/5)`);
   }
 
+  private updateScoreLabel(): void {
+    if (!this.scoreText) return;
+    this.scoreText.setText(String(Math.max(0, Math.floor(this.enemyKills))));
+  }
+
   private applyBeatPlatformVisual(state: ReturnType<typeof getBeatPlatformState>): void {
-    if (state === 'solid') this.beatPlatform.setAlpha(1);
-    else if (state === 'fadeOut') this.beatPlatform.setAlpha(0.55);
-    else if (state === 'gone') this.beatPlatform.setAlpha(0.1);
-    else this.beatPlatform.setAlpha(0.45);
+    if (this.beatPlatforms.length === 0) return;
+    if (state === 'solid') {
+      for (const beatPlatform of this.beatPlatforms) {
+        beatPlatform.setFillStyle(0xfef08a, 1);
+        beatPlatform.setStrokeStyle(2, 0xfffbeb, 1);
+        beatPlatform.setAlpha(1);
+      }
+    } else if (state === 'fadeOut') {
+      for (const beatPlatform of this.beatPlatforms) {
+        beatPlatform.setFillStyle(0xfacc15, 0.9);
+        beatPlatform.setStrokeStyle(2, 0xfef08a, 0.95);
+        beatPlatform.setAlpha(0.85);
+      }
+    } else if (state === 'gone') {
+      for (const beatPlatform of this.beatPlatforms) {
+        beatPlatform.setFillStyle(0x3f2f08, 0.25);
+        beatPlatform.setStrokeStyle(1, 0x5f4a10, 0.2);
+        beatPlatform.setAlpha(0.03);
+      }
+    } else {
+      for (const beatPlatform of this.beatPlatforms) {
+        beatPlatform.setFillStyle(0xf59e0b, 0.9);
+        beatPlatform.setStrokeStyle(2, 0xfcd34d, 0.95);
+        beatPlatform.setAlpha(0.85);
+      }
+    }
+  }
+
+  private applyAlternateBeatPlatformVisual(solid: boolean): void {
+    if (this.alternateBeatPlatforms.length === 0) return;
+    if (solid) {
+      for (const alternateBeatPlatform of this.alternateBeatPlatforms) {
+        alternateBeatPlatform.setFillStyle(0xffb86c, 1);
+        alternateBeatPlatform.setAlpha(1);
+      }
+    } else {
+      for (const alternateBeatPlatform of this.alternateBeatPlatforms) {
+        alternateBeatPlatform.setFillStyle(0x6b4a2f, 0.45);
+        alternateBeatPlatform.setAlpha(0.25);
+      }
+    }
+  }
+
+  private applyElevatorPlatformVisual(): void {
+    if (this.elevatorPlatforms.length === 0) return;
+    const movingUp = this.lastElevatorOffsetSteps > 0 && this.lastElevatorOffsetSteps < 4;
+    const movingDown = this.lastElevatorOffsetSteps > 0 && !movingUp;
+    for (const elevatorPlatform of this.elevatorPlatforms) {
+      if (movingUp) {
+        elevatorPlatform.shape.setFillStyle(0x60a5fa, 0.95);
+        elevatorPlatform.shape.setStrokeStyle(2, 0xdbeafe, 0.95);
+      } else if (movingDown) {
+        elevatorPlatform.shape.setFillStyle(0x3b82f6, 0.9);
+        elevatorPlatform.shape.setStrokeStyle(2, 0xbfdbfe, 0.9);
+      } else {
+        elevatorPlatform.shape.setFillStyle(0x1d4ed8, 0.9);
+        elevatorPlatform.shape.setStrokeStyle(2, 0x93c5fd, 0.9);
+      }
+      elevatorPlatform.shape.setAlpha(0.92);
+    }
+  }
+
+  private syncElevatorPlatforms(nowMs: number): number {
+    if (this.elevatorPlatforms.length === 0) return 0;
+    const beatIndex = Math.floor(nowMs / this.metronome.beatIntervalMs);
+    const offsetSteps = getElevatorOffsetSteps(beatIndex);
+    const deltaSteps = offsetSteps - this.lastElevatorOffsetSteps;
+    const stepSize = this.mover.stepSize;
+    for (const elevatorPlatform of this.elevatorPlatforms) {
+      elevatorPlatform.shape.y = elevatorPlatform.baseY - offsetSteps * stepSize;
+    }
+    this.lastElevatorOffsetSteps = offsetSteps;
+    return -deltaSteps * stepSize;
   }
 
   private snapLengthToGrid(length: number): number {
-    const step = this.mover.stepSize;
-    const snapped = Math.round(length / step) * step;
-    return Math.max(step, snapped);
+    void length;
+    return this.mover.stepSize * 2;
   }
 
   private snapXToGrid(x: number): number {
     const step = this.mover.stepSize;
     const snappedSteps = Math.round((x - this.playerStartX) / step);
     return this.playerStartX + snappedSteps * step;
+  }
+
+  private snapYToGrid(y: number): number {
+    const step = this.mover.stepSize;
+    return Math.round(y / step) * step;
   }
 
   private getGridIndexFromX(playerX: number): number {
@@ -465,13 +726,37 @@ export class GameScene extends Phaser.Scene {
     this.intensity = Math.max(defaultIntensityConfig.residualFloor, decayed);
   }
 
-  private isPlayerGrounded(beatSolid: boolean, ghostSolid: boolean, reverseGhostSolid: boolean): boolean {
-    if (this.playerY >= this.groundY - 0.5) return true;
-    if (this.isStandingOnPlatform(this.beatPlatform, beatSolid)) return true;
-    if (this.isStandingOnPlatform(this.ghostPlatform, ghostSolid)) return true;
-    if (this.reverseGhostPlatform && this.isStandingOnPlatform(this.reverseGhostPlatform, reverseGhostSolid)) return true;
+  private isPlayerGrounded(
+    beatSolid: boolean,
+    alternateBeatSolid: boolean,
+    ghostSolid: boolean,
+    reverseGhostSolid: boolean,
+    elevatorSolid: boolean
+  ): boolean {
+    for (const beatPlatform of this.beatPlatforms) {
+      if (this.isStandingOnPlatform(beatPlatform, beatSolid)) return true;
+    }
+    for (const alternateBeatPlatform of this.alternateBeatPlatforms) {
+      if (this.isStandingOnPlatform(alternateBeatPlatform, alternateBeatSolid)) return true;
+    }
+    for (const ghostPlatform of this.ghostPlatforms) {
+      if (this.isStandingOnPlatform(ghostPlatform, ghostSolid)) return true;
+    }
+    for (const reverseGhostPlatform of this.reverseGhostPlatforms) {
+      if (this.isStandingOnPlatform(reverseGhostPlatform, reverseGhostSolid)) return true;
+    }
+    for (const elevatorPlatform of this.elevatorPlatforms) {
+      if (this.isStandingOnPlatform(elevatorPlatform.shape, elevatorSolid)) return true;
+    }
     for (const platform of this.segmentPlatforms) {
       if (this.isStandingOnPlatform(platform.shape, platform.solid)) return true;
+    }
+    return false;
+  }
+
+  private isStandingOnAnyElevator(): boolean {
+    for (const elevatorPlatform of this.elevatorPlatforms) {
+      if (this.isStandingOnPlatform(elevatorPlatform.shape, true)) return true;
     }
     return false;
   }
@@ -496,8 +781,10 @@ export class GameScene extends Phaser.Scene {
   private resolveVerticalCollisions(
     previousPlayerY: number,
     beatSolid: boolean,
+    alternateBeatSolid: boolean,
     ghostSolid: boolean,
-    reverseGhostSolid: boolean
+    reverseGhostSolid: boolean,
+    elevatorSolid: boolean
   ): void {
     const playerHalfWidth = this.player.width / 2;
     const playerHalfHeight = this.player.height / 2;
@@ -526,17 +813,24 @@ export class GameScene extends Phaser.Scene {
     for (const platform of this.segmentPlatforms) {
       tryLandOnPlatform(platform.shape, platform.solid);
     }
-    tryLandOnPlatform(this.beatPlatform, beatSolid);
-    tryLandOnPlatform(this.ghostPlatform, ghostSolid);
-    if (this.reverseGhostPlatform) tryLandOnPlatform(this.reverseGhostPlatform, reverseGhostSolid);
+    for (const beatPlatform of this.beatPlatforms) {
+      tryLandOnPlatform(beatPlatform, beatSolid);
+    }
+    for (const alternateBeatPlatform of this.alternateBeatPlatforms) {
+      tryLandOnPlatform(alternateBeatPlatform, alternateBeatSolid);
+    }
+    for (const ghostPlatform of this.ghostPlatforms) {
+      tryLandOnPlatform(ghostPlatform, ghostSolid);
+    }
+    for (const reverseGhostPlatform of this.reverseGhostPlatforms) {
+      tryLandOnPlatform(reverseGhostPlatform, reverseGhostSolid);
+    }
+    for (const elevatorPlatform of this.elevatorPlatforms) {
+      tryLandOnPlatform(elevatorPlatform.shape, elevatorSolid);
+    }
 
     if (landingY !== null) {
       this.playerY = landingY;
-      this.verticalVelocity = 0;
-    }
-
-    if (this.playerY > this.groundY) {
-      this.playerY = this.groundY;
       this.verticalVelocity = 0;
     }
 
@@ -550,6 +844,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private updateMoonVisual(deltaSeconds: number): void {
+    const moonScreenTargetX = this.cameras.main.scrollX + this.cameras.main.width - 140;
+    this.moon.x = Math.min(moonScreenTargetX, this.moonMaxWorldX);
     this.moonBeatPulse = Math.max(0, this.moonBeatPulse - deltaSeconds * 5.5);
     const moonAlpha = 0.2 + this.intensity * 0.8;
     const baseScale = 0.85 + this.intensity * 0.35;
@@ -594,22 +890,24 @@ export class GameScene extends Phaser.Scene {
 
   private createGameOverUI(): void {
     this.gameOverBackdrop = this.add
-      .rectangle(this.worldWidth / 2, 270, this.worldWidth, 540, 0x000000, 0.7)
+      .rectangle(480, 270, 960, 540, 0x000000, 0.7)
       .setVisible(false)
-      .setDepth(20);
+      .setDepth(20)
+      .setScrollFactor(0);
 
     this.gameOverText = this.add
-      .text(this.worldWidth / 2, 230, this.endStateTitle, {
+      .text(480, 230, this.endStateTitle, {
         color: '#ffd6e7',
         fontFamily: 'monospace',
         fontSize: '48px'
       })
       .setOrigin(0.5)
       .setVisible(false)
-      .setDepth(21);
+      .setDepth(21)
+      .setScrollFactor(0);
 
     this.gameOverDetailsText = this.add
-      .text(this.worldWidth / 2, 276, '', {
+      .text(480, 276, '', {
         color: '#d7e2ff',
         fontFamily: 'monospace',
         fontSize: '24px',
@@ -617,10 +915,11 @@ export class GameScene extends Phaser.Scene {
       })
       .setOrigin(0.5, 0.5)
       .setVisible(false)
-      .setDepth(21);
+      .setDepth(21)
+      .setScrollFactor(0);
 
     this.restartButton = this.add
-      .text(this.worldWidth / 2, 300, 'Restart', {
+      .text(480, 300, 'Restart', {
         color: '#0b0f1a',
         backgroundColor: '#d7e2ff',
         fontFamily: 'monospace',
@@ -630,10 +929,11 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setVisible(false)
       .setDepth(21)
+      .setScrollFactor(0)
       .setInteractive({ useHandCursor: true });
 
     this.nextLevelButton = this.add
-      .text(this.worldWidth / 2, 390, 'Next Level', {
+      .text(480, 390, 'Next Level', {
         color: '#0b0f1a',
         backgroundColor: '#c8ffd6',
         fontFamily: 'monospace',
@@ -643,10 +943,11 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setVisible(false)
       .setDepth(21)
+      .setScrollFactor(0)
       .setInteractive({ useHandCursor: true });
 
     this.backToMenuButton = this.add
-      .text(this.worldWidth / 2, 430, 'Back To Start', {
+      .text(480, 430, 'Back To Start', {
         color: '#0b0f1a',
         backgroundColor: '#bfdbfe',
         fontFamily: 'monospace',
@@ -656,6 +957,7 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setVisible(false)
       .setDepth(21)
+      .setScrollFactor(0)
       .setInteractive({ useHandCursor: true });
 
     this.restartButton.on('pointerdown', () =>
@@ -678,22 +980,24 @@ export class GameScene extends Phaser.Scene {
 
   private createPauseUI(): void {
     this.pauseBackdrop = this.add
-      .rectangle(this.worldWidth / 2, 270, this.worldWidth, 540, 0x000000, 0.62)
+      .rectangle(480, 270, 960, 540, 0x000000, 0.62)
       .setVisible(false)
-      .setDepth(30);
+      .setDepth(30)
+      .setScrollFactor(0);
 
     this.pauseTitleText = this.add
-      .text(this.worldWidth / 2, 220, 'PAUSED', {
+      .text(480, 220, 'PAUSED', {
         color: '#dbeafe',
         fontFamily: 'monospace',
         fontSize: '50px'
       })
       .setOrigin(0.5)
       .setVisible(false)
-      .setDepth(31);
+      .setDepth(31)
+      .setScrollFactor(0);
 
     this.continueButton = this.add
-      .text(this.worldWidth / 2, 300, 'Continue', {
+      .text(480, 300, 'Continue', {
         color: '#0b0f1a',
         backgroundColor: '#c7d2fe',
         fontFamily: 'monospace',
@@ -703,10 +1007,11 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setVisible(false)
       .setDepth(31)
+      .setScrollFactor(0)
       .setInteractive({ useHandCursor: true });
 
     this.pauseBackToMenuButton = this.add
-      .text(this.worldWidth / 2, 355, 'Back to Start Screen', {
+      .text(480, 355, 'Back to Start Screen', {
         color: '#0b0f1a',
         backgroundColor: '#bfdbfe',
         fontFamily: 'monospace',
@@ -716,10 +1021,11 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setVisible(false)
       .setDepth(31)
+      .setScrollFactor(0)
       .setInteractive({ useHandCursor: true });
 
     this.quitButton = this.add
-      .text(this.worldWidth / 2, 410, 'Quit', {
+      .text(480, 410, 'Quit', {
         color: '#0b0f1a',
         backgroundColor: '#fecaca',
         fontFamily: 'monospace',
@@ -729,6 +1035,7 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setVisible(false)
       .setDepth(31)
+      .setScrollFactor(0)
       .setInteractive({ useHandCursor: true });
 
     this.continueButton.on('pointerdown', () => this.resumeFromPause());
@@ -815,7 +1122,9 @@ export class GameScene extends Phaser.Scene {
     if (this.isPreviewMode) return;
     this.isGameOver = true;
     const now = performance.now();
-    const completedMs = Math.max(0, now - this.runStartMs);
+    const rawCompletedMs = Math.max(0, now - this.runStartMs);
+    const scoreBonusMs = Math.max(0, Math.floor(this.enemyKills)) * 200;
+    const completedMs = Math.max(0, rawCompletedMs - scoreBonusMs);
     this.elapsedAtEndMs = completedMs;
     const previousBest = this.bestTimeMs;
     if (previousBest === null || completedMs < previousBest) {
@@ -874,6 +1183,22 @@ export class GameScene extends Phaser.Scene {
     this.nextFlyingSpawnMs = 0;
     this.patrolCount = Math.max(0, Math.floor(this.currentLevel.enemies?.patrolCount ?? 2));
     this.flyingSpawnIntervalMs = Math.max(500, Math.floor(this.currentLevel.enemies?.flyingSpawnIntervalMs ?? 3400));
+    this.segmentEnemyPlans = [];
+    this.useSegmentEnemySpawns =
+      Array.isArray(this.currentLevel.segmentEnemies) &&
+      this.currentLevel.segmentEnemies.some((seg) => {
+        const patrol = Math.max(0, Math.floor(Number(seg?.patrolCount) || 0));
+        const flyingLegacy = Math.max(0, Math.floor(Number(seg?.flyingCount) || 0));
+        const rawInterval = Number(seg?.flyingSpawnIntervalMs);
+        const hasInterval = Number.isFinite(rawInterval) && rawInterval > 0;
+        return patrol + flyingLegacy > 0 || hasInterval;
+      });
+    this.activeSegmentFlyingSpawnIntervalMs = 0;
+    this.beatPlatforms = [];
+    this.alternateBeatPlatforms = [];
+    this.ghostPlatforms = [];
+    this.reverseGhostPlatforms = [];
+    this.elevatorPlatforms = [];
     this.intensity = 1.0;
     this.currentDirection = 'idle';
     this.ghostPlatformLatchedSolid = false;
@@ -883,10 +1208,19 @@ export class GameScene extends Phaser.Scene {
     this.verticalVelocity = 0;
     this.lastGroundedAtMs = 0;
     this.lastBeatInBar = null;
+    this.lastElevatorOffsetSteps = 0;
     this.moonBeatPulse = 0;
     this.runStartMs = 0;
     this.elapsedAtEndMs = 0;
     this.previewDirection = 'forward';
+    this.enemyKills = 0;
+    const step = 32;
+    const maxPlatformRight = this.currentLevel.platforms.reduce((max, p) => Math.max(max, p.x + p.width / 2), 0);
+    const hasAuthoredPlatforms = maxPlatformRight > 0;
+    const fromPlatforms = maxPlatformRight + 220;
+    const fromGridFallback = this.playerStartX + step * Math.max(0, this.currentLevel.gridColumns - 1) + 220;
+    this.worldWidth = Math.max(960, Math.ceil(hasAuthoredPlatforms ? fromPlatforms : fromGridFallback));
+    this.moonMaxWorldX = Math.max(820, Math.ceil(maxPlatformRight + 140));
   }
 
   private updateTimerLabel(nowMs: number): void {
@@ -1000,8 +1334,53 @@ export class GameScene extends Phaser.Scene {
 
     const safeIndex = Math.max(1, Math.min(this.availableLevels.length, Math.floor(parsedIndex)));
     const resolvedLevel = this.availableLevels[safeIndex - 1] ?? getLevelByOneBasedIndex(safeIndex);
-    this.currentLevel = resolvedLevel;
+    this.currentLevel = {
+      ...resolvedLevel,
+      notes: [...(resolvedLevel.notes || [])],
+      platforms: [...(resolvedLevel.platforms || [])],
+      segmentEnemies: Array.isArray(resolvedLevel.segmentEnemies)
+        ? resolvedLevel.segmentEnemies.map((entry) => ({ ...entry }))
+        : undefined,
+      enemies: resolvedLevel.enemies ? { ...resolvedLevel.enemies } : undefined
+    };
     this.currentLevelOneBasedIndex = safeIndex;
+  }
+
+  private queueLevelMidiLoad(): void {
+    const midiFile = String(this.currentLevel.midi_file || '').trim();
+    if (!midiFile) {
+      this.levelMidiCacheKey = null;
+      return;
+    }
+    const cacheKey = `level-midi:${this.currentLevelOneBasedIndex}:${midiFile}`;
+    this.levelMidiCacheKey = cacheKey;
+    this.load.binary(cacheKey, `/api/midi-file?name=${encodeURIComponent(midiFile)}`);
+  }
+
+  private applyLoadedMidiToLevelNotes(): void {
+    if (!this.levelMidiCacheKey) return;
+    if (!this.cache.binary.exists(this.levelMidiCacheKey)) return;
+
+    const raw = this.cache.binary.get(this.levelMidiCacheKey) as unknown;
+    const arrayBuffer = this.coerceArrayBuffer(raw);
+    if (!arrayBuffer) return;
+
+    try {
+      const parsed = parseMidiFile(arrayBuffer);
+      const midiNotes = buildGridNotesFromMidi(parsed, this.currentLevel.gridColumns);
+      if (midiNotes.length !== this.currentLevel.gridColumns) return;
+      this.currentLevel.notes = midiNotes;
+    } catch (err) {
+      console.warn('Unable to parse runtime MIDI file for level playback.', err);
+    }
+  }
+
+  private coerceArrayBuffer(raw: unknown): ArrayBufferLike | null {
+    if (raw instanceof ArrayBuffer) return raw;
+    if (ArrayBuffer.isView(raw)) {
+      return raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength);
+    }
+    return null;
   }
 
   private goToNextLevel(): void {
@@ -1028,18 +1407,175 @@ export class GameScene extends Phaser.Scene {
   }
 
   private spawnPatrolEnemiesFromLevel(): void {
+    if (this.useSegmentEnemySpawns) return;
     const count = Math.max(0, this.patrolCount);
     if (count <= 0) return;
 
-    const left = 240;
-    const right = 760;
-    const patrolRangeHalf = 90;
+    const segments = [...this.segmentPlatforms].map((p) => p.shape).sort((a, b) => a.x - b.x);
+    if (segments.length === 0) return;
+
     for (let i = 0; i < count; i++) {
       const t = (i + 1) / (count + 1);
-      const x = left + (right - left) * t;
-      const minX = Math.max(120, x - patrolRangeHalf);
-      const maxX = Math.min(840, x + patrolRangeHalf);
-      this.spawnPatrolEnemy(x, this.groundY + 8, minX, maxX);
+      const idx = Math.min(segments.length - 1, Math.max(0, Math.floor(t * (segments.length - 1))));
+      const shape = segments[idx];
+      const x = shape.x;
+      const span = Math.max(52, Math.min(140, shape.width * 0.7));
+      const minX = Math.max(120, x - span * 0.5);
+      const maxX = Math.min(this.worldWidth - 120, x + span * 0.5);
+      const y = this.snapYToGrid(shape.y - shape.height / 2 - 12);
+      this.spawnPatrolEnemy(x, y, minX, maxX);
     }
+  }
+
+  private buildSegmentEnemyPlans(): void {
+    if (!this.useSegmentEnemySpawns) return;
+    if (!Array.isArray(this.currentLevel.segmentEnemies) || this.currentLevel.segmentEnemies.length === 0) return;
+
+    const segments = [...this.segmentPlatforms]
+      .map((platform) => platform.shape)
+      .sort((a, b) => a.x - b.x);
+    if (segments.length === 0) return;
+    const rawRows = this.currentLevel.segmentEnemies
+      .map((row) => ({
+        sourceIdx: Math.floor(Number(row?.segmentIndex)),
+        patrolCount: Math.max(0, Math.floor(Number(row?.patrolCount) || 0)),
+        flyingCount: Math.max(0, Math.floor(Number(row?.flyingCount) || 0)),
+        flyingSpawnIntervalMs: (() => {
+          const rawInterval = Number(row?.flyingSpawnIntervalMs);
+          return Number.isFinite(rawInterval) && rawInterval > 0
+            ? Math.max(500, Math.min(30000, Math.floor(rawInterval)))
+            : 0;
+        })()
+      }))
+      .filter((row) => Number.isFinite(row.sourceIdx));
+    const maxSourceIdx = rawRows.reduce((max, row) => Math.max(max, row.sourceIdx), 0);
+    const toSegmentIndex = (sourceIdx: number): number =>
+      maxSourceIdx > 0
+        ? Phaser.Math.Clamp(Math.round((Math.max(0, sourceIdx) / maxSourceIdx) * (segments.length - 1)), 0, segments.length - 1)
+        : 0;
+
+    const patrolAssigned = new Array(segments.length).fill(0);
+    const flyingBySegment = new Map<number, { flyingCount: number; flyingSpawnIntervalMs: number }>();
+    const pickSpreadSegment = (preferredIdx: number): number => {
+      let bestIdx = preferredIdx;
+      let bestScore = Number.POSITIVE_INFINITY;
+      for (let i = 0; i < segments.length; i++) {
+        const distance = Math.abs(i - preferredIdx);
+        const score = patrolAssigned[i] * 100 + distance;
+        if (score < bestScore) {
+          bestScore = score;
+          bestIdx = i;
+        }
+      }
+      return bestIdx;
+    };
+
+    for (const row of rawRows) {
+      const baseIndex = toSegmentIndex(row.sourceIdx);
+      for (let i = 0; i < row.patrolCount; i++) {
+        const targetIndex = pickSpreadSegment(baseIndex);
+        patrolAssigned[targetIndex] += 1;
+      }
+      if (row.flyingCount > 0 || row.flyingSpawnIntervalMs > 0) {
+        const prev = flyingBySegment.get(baseIndex);
+        if (!prev) {
+          flyingBySegment.set(baseIndex, {
+            flyingCount: row.flyingCount,
+            flyingSpawnIntervalMs: row.flyingSpawnIntervalMs
+          });
+        } else {
+          prev.flyingCount += row.flyingCount;
+          if (row.flyingSpawnIntervalMs > 0) {
+            prev.flyingSpawnIntervalMs =
+              prev.flyingSpawnIntervalMs > 0
+                ? Math.min(prev.flyingSpawnIntervalMs, row.flyingSpawnIntervalMs)
+                : row.flyingSpawnIntervalMs;
+          }
+        }
+      }
+    }
+
+    const plans: SegmentEnemyPlan[] = [];
+    for (let segmentIndex = 0; segmentIndex < segments.length; segmentIndex++) {
+      const shape = segments[segmentIndex];
+      const leftX = shape.x - shape.width / 2;
+      const rightX = shape.x + shape.width / 2;
+      const patrolCount = patrolAssigned[segmentIndex] || 0;
+      const flyingMeta = flyingBySegment.get(segmentIndex);
+      const flyingCount = flyingMeta?.flyingCount ?? 0;
+      const flyingSpawnIntervalMs = flyingMeta?.flyingSpawnIntervalMs ?? 0;
+      if (patrolCount + flyingCount <= 0 && flyingSpawnIntervalMs <= 0) continue;
+      plans.push({
+        segmentIndex,
+        triggerX: leftX,
+        leftX,
+        rightX,
+        platformTopY: shape.y - shape.height / 2,
+        patrolCount,
+        flyingCount,
+        flyingSpawnIntervalMs,
+        pendingFlyingSpawns: 0,
+        nextFlyingSpawnMs: 0,
+        triggered: false
+      });
+    }
+
+    this.segmentEnemyPlans = plans.sort((a, b) => a.triggerX - b.triggerX);
+    this.spawnSegmentPatrolAtLevelStart();
+  }
+
+  private triggerSegmentEnemyPlansAt(playerX: number): void {
+    if (!this.useSegmentEnemySpawns || this.segmentEnemyPlans.length === 0) return;
+
+    for (const plan of this.segmentEnemyPlans) {
+      if (plan.triggered) continue;
+      if (Number.isFinite(playerX) && playerX + this.player.width / 2 < plan.triggerX) continue;
+      this.queueFlyingForPlan(plan);
+      plan.triggered = true;
+    }
+  }
+
+  private spawnSegmentPatrolAtLevelStart(): void {
+    for (const plan of this.segmentEnemyPlans) {
+      this.spawnPatrolForPlan(plan);
+    }
+  }
+
+  private spawnPatrolForPlan(plan: SegmentEnemyPlan): void {
+    const laneLeft = Math.max(120, plan.leftX + 6);
+    const laneRight = Math.min(this.worldWidth - 120, plan.rightX - 6);
+    const midX = (laneLeft + laneRight) * 0.5;
+    const laneWidth = Math.max(0, laneRight - laneLeft);
+    const minSpacing = 34;
+    const laneCapacity = Math.max(1, Math.floor(laneWidth / minSpacing) + 1);
+    const spawnCount = Math.min(plan.patrolCount, laneCapacity);
+
+    for (let i = 0; i < spawnCount; i++) {
+      const t = (i + 1) / (spawnCount + 1);
+      const x = laneRight > laneLeft ? laneLeft + (laneRight - laneLeft) * t : midX;
+      const span = Math.max(52, Math.min(140, (laneRight - laneLeft) * 0.5));
+      const minX = Math.max(120, x - span * 0.5);
+      const maxX = Math.min(this.worldWidth - 120, x + span * 0.5);
+      this.spawnPatrolEnemy(x, this.snapYToGrid(plan.platformTopY - 12), minX, maxX);
+    }
+  }
+
+  private queueFlyingForPlan(plan: SegmentEnemyPlan): void {
+    plan.pendingFlyingSpawns = Math.max(plan.flyingCount, plan.flyingSpawnIntervalMs > 0 ? 1 : 0);
+    plan.nextFlyingSpawnMs = performance.now();
+  }
+
+  private getInitialPlayerYFromPlatforms(): number {
+    const playerHalfHeight = 38 / 2;
+    const step = this.mover.stepSize;
+    const targetX = this.playerStartX;
+    const candidates = this.segmentPlatforms
+      .map((platform) => platform.shape)
+      .filter((shape) => Math.abs(shape.x - targetX) <= step * 3)
+      .sort((a, b) => Math.abs(a.x - targetX) - Math.abs(b.x - targetX));
+    const picked = candidates[0] ?? this.segmentPlatforms[0]?.shape;
+    if (!picked) return this.groundY;
+    const top = picked.y - picked.height / 2;
+    return top - playerHalfHeight;
   }
 }

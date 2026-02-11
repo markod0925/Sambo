@@ -20,7 +20,7 @@ function templateForEnergy(energy) {
         return {
             durationBeats: 8,
             energyState: energy,
-            platformTypes: ['static'],
+            platformTypes: ['static', 'beat', 'alternateBeat'],
             verticalRange: [0, 1],
             rhythmDensity: 0.25
         };
@@ -29,7 +29,7 @@ function templateForEnergy(energy) {
         return {
             durationBeats: 8,
             energyState: energy,
-            platformTypes: ['static', 'beat'],
+            platformTypes: ['static', 'beat', 'alternateBeat', 'ghost', 'reverseGhost'],
             verticalRange: [0, 2],
             rhythmDensity: 0.5
         };
@@ -37,7 +37,7 @@ function templateForEnergy(energy) {
     return {
         durationBeats: 8,
         energyState: energy,
-        platformTypes: ['beat', 'ghost'],
+        platformTypes: ['static', 'beat', 'alternateBeat', 'ghost', 'reverseGhost', 'elevator'],
         verticalRange: [1, 3],
         rhythmDensity: 0.8
     };

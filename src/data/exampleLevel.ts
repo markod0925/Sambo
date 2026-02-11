@@ -1,5 +1,5 @@
 export interface PlatformSpec {
-  kind: 'segment' | 'beat' | 'ghost' | 'reverseGhost';
+  kind: 'segment' | 'beat' | 'alternateBeat' | 'ghost' | 'reverseGhost' | 'elevator';
   x: number;
   y: number;
   width: number;
@@ -10,7 +10,14 @@ export interface LevelDefinition {
   bpm: number;
   gridColumns: number;
   notes: number[];
+  midi_file?: string;
   platforms: PlatformSpec[];
+  segmentEnemies?: Array<{
+    segmentIndex: number;
+    patrolCount: number;
+    flyingSpawnIntervalMs?: number;
+    flyingCount?: number;
+  }>;
   enemies?: {
     patrolCount: number;
     flyingSpawnIntervalMs: number;
@@ -36,6 +43,8 @@ export const EXAMPLE_LEVEL: LevelDefinition = {
     { kind: 'segment', x: 120, y: 405, width: 74, height: 18 },
     { kind: 'segment', x: 210, y: 405, width: 74, height: 18 },
     { kind: 'beat', x: 560, y: 340, width: 120, height: 16 },
+    { kind: 'alternateBeat', x: 650, y: 300, width: 110, height: 16 },
+    { kind: 'elevator', x: 700, y: 340, width: 100, height: 16 },
     { kind: 'ghost', x: 720, y: 290, width: 100, height: 14 },
     { kind: 'reverseGhost', x: 820, y: 250, width: 100, height: 14 }
   ],

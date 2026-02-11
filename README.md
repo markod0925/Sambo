@@ -111,7 +111,8 @@ The repository includes a lightweight browser editor for `level_draft.json` file
 - Load a MIDI from project folder `MIDI/` (or from local file) and play/stop it directly in the editor.
 - Generate the first level draft automatically from the loaded MIDI.
 - Configure runtime output (`bpm`, `gridColumns`, optional `reverseGhost`) and save/copy a runtime level JSON:
-  - `{ "bpm": number, "gridColumns": number, "notes": number[], "platforms": [...], "enemies": { "patrolCount": number, "flyingSpawnIntervalMs": number } }`
+  - `{ "bpm": number, "gridColumns": number, "notes": number[], "platforms": [...], "segmentEnemies": [{ "segmentIndex": number, "patrolCount": number, "flyingSpawnIntervalMs": number }], "enemies": { "patrolCount": number, "flyingSpawnIntervalMs": number } }`
+  - Runtime export automatically appends final approach platforms so the moon is always reachable.
 - Add segments.
 - Delete segments.
 - Reorder by `index`.
@@ -121,6 +122,8 @@ The repository includes a lightweight browser editor for `level_draft.json` file
   - `platform_types`
   - `vertical_range`
   - `rhythm_density`
+  - `patrol_enemies`
+  - `flying_spawn_interval_ms`
 - Preview a live minimap:
   - color-coded by energy state
   - ghost segments outlined when `platform_types` includes `ghost`

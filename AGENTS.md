@@ -15,3 +15,7 @@ Rules:
 ## Language Policy (Persistent)
 
 - All user-facing text in the game and editor must be in English.
+
+## Design Documentation Policy (Persistent)
+
+- Whenever a gameplay/design modification is implemented, always update `GDD/GDD.md` in the same task to reflect the change.
