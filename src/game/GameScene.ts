@@ -1,5 +1,4 @@
 import { BeatSnapMover } from '../core/beatMovement.js';
-import { generateSegments } from '../core/levelGenerator.js';
 import { Metronome } from '../core/metronome.js';
 import { buildGridNotesFromMidi, parseMidiFile } from '../core/midi.js';
 import { getBeatPlatformState, getElevatorOffsetSteps, isAlternateBeatPlatformSolid } from '../core/platforms.js';
@@ -18,9 +17,48 @@ import {
   updatePatrolEnemy
 } from '../core/enemies.js';
 
-const DEFAULT_ENERGY_CURVE = [0.1, 0.2, 0.3, 0.45, 0.55, 0.65, 0.75, 0.9];
 const BEST_TIME_STORAGE_PREFIX = 'sambo.level';
+const ENEMY_TIME_BONUS_MS = 200;
 const CONTROL_HINT_TEXT = 'A/D or Arrows: move | W/Space/Up: jump.';
+const HUD_FONT = 'monospace';
+const DEPTH_ENVIRONMENT = 2;
+const DEPTH_ENEMY = 3;
+const DEPTH_PLAYER = 4;
+const DEPTH_MOON = 5;
+const COLORS = {
+  deepBackground: 0x05070f,
+  midBackground: 0x0b0f1a,
+  secondaryPlane: 0x121a2b,
+  segmentFill: 0x2a3244,
+  segmentBorder: 0x3a4663,
+  player: 0xe8e6e3,
+  hudText: '#d7e2ff',
+  hudHearts: '#ff6b6b',
+  beatSolidFill: 0xf4d35e,
+  beatSolidBorder: 0xffb703,
+  beatFadeFill: 0xee964b,
+  beatFadeBorder: 0xf4d35e,
+  alternateFill: 0xfb8500,
+  alternateBorder: 0xffb703,
+  ghostActiveFill: 0x4cc9f0,
+  ghostActiveBorder: 0xcdefff,
+  ghostInactiveFill: 0x121a2b,
+  ghostInactiveBorder: 0x3a86ff,
+  reverseGhostActiveFill: 0xb5179e,
+  reverseGhostActiveBorder: 0xe056fd,
+  reverseGhostInactiveFill: 0x3c0d3a,
+  reverseGhostInactiveBorder: 0x5e1a57,
+  elevatorFill: 0x3a86ff,
+  elevatorBorder: 0x4cc9f0,
+  patrolFill: 0xa4161a,
+  patrolBorder: 0x660708,
+  flyingFill: 0x9d0208,
+  flyingBorder: 0xff4d6d,
+  damageFlash: 0xff6b6b,
+  moonLow: 0xb0b7c3,
+  moonWarm: 0xf4d35e,
+  moonCool: 0x4cc9f0
+} as const;
 
 interface PatrolEnemy {
   sprite: any;
@@ -63,6 +101,7 @@ export class GameScene extends Phaser.Scene {
   private mover!: BeatSnapMover;
   private player!: any;
   private moon!: any;
+  private moonHalo!: any;
   private infoText!: any;
   private scoreText!: any;
   private livesText!: any;
@@ -157,112 +196,125 @@ export class GameScene extends Phaser.Scene {
     this.resetGameplayState();
     this.validateLevelDefinition();
 
-    this.cameras.main.setBackgroundColor('#0b0f1a');
+    this.cameras.main.setBackgroundColor(COLORS.midBackground);
     this.cameras.main.setBounds(0, 0, this.worldWidth, 540);
 
-    const segments = generateSegments({ bpm: this.currentLevel.bpm, energy_curve: DEFAULT_ENERGY_CURVE });
-    const segmentByIndex = segments.length > 0 ? segments : [{ energyState: 'medium' as const, verticalRange: [0, 2] as [number, number] }];
-    let segmentCursor = 0;
     for (const platform of this.currentLevel.platforms) {
       if (platform.kind === 'segment') {
-        const segment = segmentByIndex[Math.min(segmentCursor, segmentByIndex.length - 1)];
-        segmentCursor += 1;
         const x = this.snapXToGrid(platform.x);
         const y = this.snapYToGrid(platform.y);
-        const color = segment.energyState === 'low' ? 0x4b5d67 : segment.energyState === 'medium' ? 0x6a7f89 : 0x9ca3af;
-        const shape = this.add.rectangle(x, y, this.snapLengthToGrid(platform.width), this.platformBlockHeight, color, 0.85);
+        const shape = this.add
+          .rectangle(x, y, this.snapLengthToGrid(platform.width), this.platformBlockHeight, COLORS.segmentFill, 0.9)
+          .setStrokeStyle(2, COLORS.segmentBorder, 0.9)
+          .setDepth(DEPTH_ENVIRONMENT);
         this.segmentPlatforms.push({ shape, solid: true });
       } else if (platform.kind === 'beat') {
-        const beat = this.add.rectangle(
-          this.snapXToGrid(platform.x),
-          this.snapYToGrid(platform.y),
-          this.snapLengthToGrid(platform.width),
-          this.platformBlockHeight,
-          0x8b93aa,
-          0.95
-        );
+        const beat = this.add
+          .rectangle(
+            this.snapXToGrid(platform.x),
+            this.snapYToGrid(platform.y),
+            this.snapLengthToGrid(platform.width),
+            this.platformBlockHeight,
+            COLORS.beatFadeFill,
+            0.5
+          )
+          .setStrokeStyle(2, COLORS.beatFadeBorder, 0.65)
+          .setDepth(DEPTH_ENVIRONMENT);
         this.beatPlatforms.push(beat);
       } else if (platform.kind === 'alternateBeat') {
-        const alternateBeat = this.add.rectangle(
-          this.snapXToGrid(platform.x),
-          this.snapYToGrid(platform.y),
-          this.snapLengthToGrid(platform.width),
-          this.platformBlockHeight,
-          0xffb86c,
-          0.95
-        );
+        const alternateBeat = this.add
+          .rectangle(
+            this.snapXToGrid(platform.x),
+            this.snapYToGrid(platform.y),
+            this.snapLengthToGrid(platform.width),
+            this.platformBlockHeight,
+            COLORS.alternateFill,
+            0.85
+          )
+          .setStrokeStyle(2, COLORS.alternateBorder, 0.9)
+          .setDepth(DEPTH_ENVIRONMENT);
         this.alternateBeatPlatforms.push(alternateBeat);
       } else if (platform.kind === 'ghost') {
-        const ghost = this.add.rectangle(
-          this.snapXToGrid(platform.x),
-          this.snapYToGrid(platform.y),
-          this.snapLengthToGrid(platform.width),
-          this.platformBlockHeight,
-          0x73f7ff,
-          0.15
-        );
+        const ghost = this.add
+          .rectangle(
+            this.snapXToGrid(platform.x),
+            this.snapYToGrid(platform.y),
+            this.snapLengthToGrid(platform.width),
+            this.platformBlockHeight,
+            COLORS.ghostInactiveFill,
+            0.15
+          )
+          .setStrokeStyle(2, COLORS.ghostInactiveBorder, 0.4)
+          .setDepth(DEPTH_ENVIRONMENT);
         this.ghostPlatforms.push(ghost);
       } else if (platform.kind === 'reverseGhost') {
-        const reverseGhost = this.add.rectangle(
-          this.snapXToGrid(platform.x),
-          this.snapYToGrid(platform.y),
-          this.snapLengthToGrid(platform.width),
-          this.platformBlockHeight,
-          0xff8cf7,
-          0.85
-        );
+        const reverseGhost = this.add
+          .rectangle(
+            this.snapXToGrid(platform.x),
+            this.snapYToGrid(platform.y),
+            this.snapLengthToGrid(platform.width),
+            this.platformBlockHeight,
+            COLORS.reverseGhostActiveFill,
+            0.85
+          )
+          .setStrokeStyle(2, COLORS.reverseGhostActiveBorder, 0.9)
+          .setDepth(DEPTH_ENVIRONMENT);
         this.reverseGhostPlatforms.push(reverseGhost);
       } else if (platform.kind === 'elevator') {
-        const elevator = this.add.rectangle(
-          this.snapXToGrid(platform.x),
-          this.snapYToGrid(platform.y),
-          this.snapLengthToGrid(platform.width),
-          this.platformBlockHeight,
-          0x60a5fa,
-          0.95
-        );
+        const elevator = this.add
+          .rectangle(
+            this.snapXToGrid(platform.x),
+            this.snapYToGrid(platform.y),
+            this.snapLengthToGrid(platform.width),
+            this.platformBlockHeight,
+            COLORS.elevatorFill,
+            0.9
+          )
+          .setStrokeStyle(2, COLORS.elevatorBorder, 0.9)
+          .setDepth(DEPTH_ENVIRONMENT);
         this.elevatorPlatforms.push({ shape: elevator, baseY: elevator.y });
       }
     }
     this.syncElevatorPlatforms(performance.now());
     this.playerY = this.getInitialPlayerYFromPlatforms();
 
-    this.player = this.add.rectangle(150, this.playerY, 24, 38, 0xffffff, 1);
+    this.player = this.add.rectangle(150, this.playerY, 24, 38, COLORS.player, 1).setDepth(DEPTH_PLAYER);
     this.cameras.main.startFollow(this.player, false, 0.12, 0.12);
     this.initializeGridBounds();
-    this.moon = this.add.circle(this.moonMaxWorldX, 90, 42, 0xdde8ff, 0.35);
+    this.moonHalo = this.add.circle(this.moonMaxWorldX, 90, 72, COLORS.moonLow, 0.12).setDepth(DEPTH_MOON - 1);
+    this.moon = this.add.circle(this.moonMaxWorldX, 90, 42, COLORS.moonLow, 0.32).setDepth(DEPTH_MOON);
 
     this.buildSegmentEnemyPlans();
     this.spawnPatrolEnemiesFromLevel();
 
     this.livesText = this.add.text(20, 14, '', {
-      color: '#ffd6e7',
-      fontFamily: 'monospace',
+      color: COLORS.hudHearts,
+      fontFamily: HUD_FONT,
       fontSize: '18px'
     });
     this.timerText = this.add
       .text(this.worldWidth / 2, 14, '', {
-        color: '#d7e2ff',
-        fontFamily: 'monospace',
+        color: COLORS.hudText,
+        fontFamily: HUD_FONT,
         fontSize: '20px'
       })
       .setOrigin(0.5, 0);
 
     this.infoText = this.add.text(20, 44, '', {
-      color: '#d7e2ff',
-      fontFamily: 'monospace',
+      color: COLORS.hudText,
+      fontFamily: HUD_FONT,
       fontSize: '16px'
     });
     this.scoreText = this.add
       .text(480, 520, '0', {
-        color: '#d7e2ff',
-        fontFamily: 'monospace',
+        color: COLORS.hudText,
+        fontFamily: HUD_FONT,
         fontSize: '24px'
       })
       .setOrigin(0.5, 1);
 
     this.darknessOverlay = this.add
-      .rectangle(480, 270, 960, 540, 0x000000, 1)
+      .rectangle(480, 270, 960, 540, COLORS.deepBackground, 0.82)
       .setDepth(10)
       .setScrollFactor(0);
     this.livesText.setDepth(11);
@@ -390,22 +442,30 @@ export class GameScene extends Phaser.Scene {
     this.applyBrightnessFromIntensity();
 
     this.updateMoonVisual(deltaSeconds);
-    this.applyBeatPlatformVisual(beatState);
+    this.applyBeatPlatformVisual(beatState, now);
     this.applyAlternateBeatPlatformVisual(alternateBeatSolid);
     this.applyElevatorPlatformVisual();
     for (const ghostPlatform of this.ghostPlatforms) {
       if (ghostSolid) {
-        ghostPlatform.setFillStyle(0x67e8f9, 0.95);
-        ghostPlatform.setStrokeStyle(2, 0xe0faff, 0.95);
-        ghostPlatform.setAlpha(1);
+        ghostPlatform.setFillStyle(COLORS.ghostActiveFill, 0.85);
+        ghostPlatform.setStrokeStyle(2, COLORS.ghostActiveBorder, 0.95);
+        ghostPlatform.setAlpha(0.85);
       } else {
-        ghostPlatform.setFillStyle(0x1b3f4a, 0.3);
-        ghostPlatform.setStrokeStyle(1, 0x2b6b78, 0.25);
-        ghostPlatform.setAlpha(0.12);
+        ghostPlatform.setFillStyle(COLORS.ghostInactiveFill, 0.2);
+        ghostPlatform.setStrokeStyle(2, COLORS.ghostInactiveBorder, 0.4);
+        ghostPlatform.setAlpha(0.15);
       }
     }
     for (const reverseGhostPlatform of this.reverseGhostPlatforms) {
-      reverseGhostPlatform.setAlpha(reverseGhostSolid ? 0.85 : 0.15);
+      if (reverseGhostSolid) {
+        reverseGhostPlatform.setFillStyle(COLORS.reverseGhostActiveFill, 0.85);
+        reverseGhostPlatform.setStrokeStyle(2, COLORS.reverseGhostActiveBorder, 0.92);
+        reverseGhostPlatform.setAlpha(0.85);
+      } else {
+        reverseGhostPlatform.setFillStyle(COLORS.reverseGhostInactiveFill, 0.25);
+        reverseGhostPlatform.setStrokeStyle(1, COLORS.reverseGhostInactiveBorder, 0.5);
+        reverseGhostPlatform.setAlpha(0.15);
+      }
     }
 
     this.infoText.setText(CONTROL_HINT_TEXT);
@@ -433,7 +493,10 @@ export class GameScene extends Phaser.Scene {
     const deoverlappedX = this.resolvePatrolSpawnX(safeX, y, minX, maxX);
     if (deoverlappedX === null) return;
 
-    const sprite = this.add.rectangle(deoverlappedX, y, 30, 24, 0xff6b6b, 0.95);
+    const sprite = this.add
+      .rectangle(deoverlappedX, y, 30, 24, COLORS.patrolFill, 0.95)
+      .setStrokeStyle(2, COLORS.patrolBorder, 0.9)
+      .setDepth(DEPTH_ENEMY);
     this.patrolEnemies.push({
       sprite,
       alive: true,
@@ -478,7 +541,10 @@ export class GameScene extends Phaser.Scene {
     const safeX = this.resolveSpawnSafeX(x, minX, maxX);
     if (safeX === null) return;
 
-    const sprite = this.add.rectangle(safeX, y, 30, 20, 0xffcf5a, 0.95);
+    const sprite = this.add
+      .rectangle(safeX, y, 30, 20, COLORS.flyingFill, 0.95)
+      .setStrokeStyle(2, COLORS.flyingBorder, 0.85)
+      .setDepth(DEPTH_ENEMY);
     this.flyingEnemies.push({
       sprite,
       alive: true,
@@ -492,8 +558,9 @@ export class GameScene extends Phaser.Scene {
       if (!enemy.alive) continue;
       enemy.state = updatePatrolEnemy(enemy.state, deltaSeconds);
       enemy.sprite.x = enemy.state.x;
-      const fill = enemy.state.direction < 0 ? 0xff8b8b : 0xff6b6b;
+      const fill = enemy.state.direction < 0 ? 0xc1121f : COLORS.patrolFill;
       enemy.sprite.setFillStyle(fill, 0.95);
+      enemy.sprite.setStrokeStyle(2, COLORS.patrolBorder, 0.9);
       const squashPhase = nowSeconds * 8 + enemy.state.x * 0.05;
       const squashWave = (Math.sin(squashPhase) + 1) / 2;
       const scaleY = this.patrolSquashBaseScaleY + squashWave * this.patrolSquashAmplitude;
@@ -513,6 +580,7 @@ export class GameScene extends Phaser.Scene {
       const stretchWave = (Math.sin(stretchPhase) + 1) / 2;
       const scaleX = this.flyingStretchBaseScaleX + stretchWave * this.flyingStretchAmplitude;
       enemy.sprite.setScale(scaleX, 1);
+      enemy.sprite.setStrokeStyle(2, COLORS.flyingBorder, 0.78 + stretchWave * 0.15);
       if (!enemy.state.active) {
         enemy.alive = false;
         enemy.sprite.destroy();
@@ -553,7 +621,8 @@ export class GameScene extends Phaser.Scene {
         // Prevent immediate same-frame damage when enemies overlap during a stomp.
         this.damageCooldownMs = Math.max(this.damageCooldownMs, nowMs + 180);
         if (entry.type === 'patrol') {
-          enemy.sprite.setFillStyle(0x3b4a67, 0.45);
+          enemy.sprite.setFillStyle(0x3a4663, 0.45);
+          enemy.sprite.setStrokeStyle(1, 0x2a3244, 0.4);
           enemy.sprite.setScale(1, 0.45);
         } else {
           enemy.sprite.destroy();
@@ -566,8 +635,8 @@ export class GameScene extends Phaser.Scene {
         if (this.isPreviewMode) continue;
         this.lives = applyDamage(this.lives, 1);
         this.damageCooldownMs = nowMs + 850;
-        this.player.setFillStyle(0xffcdd2, 1);
-        this.time.delayedCall(220, () => this.player.setFillStyle(0xffffff, 1));
+        this.player.setFillStyle(COLORS.damageFlash, 1);
+        this.time.delayedCall(220, () => this.player.setFillStyle(COLORS.player, 1));
         this.updateLivesLabel();
         if (this.lives === 0) {
           this.triggerGameOver();
@@ -607,34 +676,38 @@ export class GameScene extends Phaser.Scene {
 
   private updateScoreLabel(): void {
     if (!this.scoreText) return;
-    this.scoreText.setText(String(Math.max(0, Math.floor(this.enemyKills))));
+    const kills = this.getEnemyKillCount();
+    const bonusSeconds = this.getEnemyTimeBonusMs() / 1000;
+    this.scoreText.setText(`${kills} (-${bonusSeconds.toFixed(1)}s)`);
   }
 
-  private applyBeatPlatformVisual(state: ReturnType<typeof getBeatPlatformState>): void {
+  private applyBeatPlatformVisual(state: ReturnType<typeof getBeatPlatformState>, nowMs: number): void {
     if (this.beatPlatforms.length === 0) return;
+    const timeIntoBeat = nowMs % this.metronome.beatIntervalMs;
+    const nearTransition = timeIntoBeat >= this.metronome.beatIntervalMs - 100;
     if (state === 'solid') {
       for (const beatPlatform of this.beatPlatforms) {
-        beatPlatform.setFillStyle(0xfef08a, 1);
-        beatPlatform.setStrokeStyle(2, 0xfffbeb, 1);
+        beatPlatform.setFillStyle(COLORS.beatSolidFill, 1);
+        beatPlatform.setStrokeStyle(2, COLORS.beatSolidBorder, nearTransition ? 1 : 0.9);
         beatPlatform.setAlpha(1);
       }
     } else if (state === 'fadeOut') {
       for (const beatPlatform of this.beatPlatforms) {
-        beatPlatform.setFillStyle(0xfacc15, 0.9);
-        beatPlatform.setStrokeStyle(2, 0xfef08a, 0.95);
-        beatPlatform.setAlpha(0.85);
+        beatPlatform.setFillStyle(COLORS.beatFadeFill, 0.7);
+        beatPlatform.setStrokeStyle(2, COLORS.beatFadeBorder, nearTransition ? 0.85 : 0.7);
+        beatPlatform.setAlpha(0.5);
       }
     } else if (state === 'gone') {
       for (const beatPlatform of this.beatPlatforms) {
-        beatPlatform.setFillStyle(0x3f2f08, 0.25);
-        beatPlatform.setStrokeStyle(1, 0x5f4a10, 0.2);
-        beatPlatform.setAlpha(0.03);
+        beatPlatform.setFillStyle(COLORS.secondaryPlane, 0.05);
+        beatPlatform.setStrokeStyle(1, COLORS.deepBackground, 0.05);
+        beatPlatform.setAlpha(0.05);
       }
     } else {
       for (const beatPlatform of this.beatPlatforms) {
-        beatPlatform.setFillStyle(0xf59e0b, 0.9);
-        beatPlatform.setStrokeStyle(2, 0xfcd34d, 0.95);
-        beatPlatform.setAlpha(0.85);
+        beatPlatform.setFillStyle(COLORS.beatFadeFill, 0.7);
+        beatPlatform.setStrokeStyle(2, COLORS.beatFadeBorder, nearTransition ? 0.85 : 0.7);
+        beatPlatform.setAlpha(0.5);
       }
     }
   }
@@ -643,12 +716,14 @@ export class GameScene extends Phaser.Scene {
     if (this.alternateBeatPlatforms.length === 0) return;
     if (solid) {
       for (const alternateBeatPlatform of this.alternateBeatPlatforms) {
-        alternateBeatPlatform.setFillStyle(0xffb86c, 1);
+        alternateBeatPlatform.setFillStyle(COLORS.alternateFill, 0.95);
+        alternateBeatPlatform.setStrokeStyle(2, COLORS.alternateBorder, 0.9);
         alternateBeatPlatform.setAlpha(1);
       }
     } else {
       for (const alternateBeatPlatform of this.alternateBeatPlatforms) {
-        alternateBeatPlatform.setFillStyle(0x6b4a2f, 0.45);
+        alternateBeatPlatform.setFillStyle(0x4a2a0a, 0.35);
+        alternateBeatPlatform.setStrokeStyle(1, COLORS.alternateBorder, 0.35);
         alternateBeatPlatform.setAlpha(0.25);
       }
     }
@@ -660,14 +735,14 @@ export class GameScene extends Phaser.Scene {
     const movingDown = this.lastElevatorOffsetSteps > 0 && !movingUp;
     for (const elevatorPlatform of this.elevatorPlatforms) {
       if (movingUp) {
-        elevatorPlatform.shape.setFillStyle(0x60a5fa, 0.95);
-        elevatorPlatform.shape.setStrokeStyle(2, 0xdbeafe, 0.95);
+        elevatorPlatform.shape.setFillStyle(COLORS.elevatorFill, 0.95);
+        elevatorPlatform.shape.setStrokeStyle(2, COLORS.elevatorBorder, 0.98);
       } else if (movingDown) {
-        elevatorPlatform.shape.setFillStyle(0x3b82f6, 0.9);
-        elevatorPlatform.shape.setStrokeStyle(2, 0xbfdbfe, 0.9);
+        elevatorPlatform.shape.setFillStyle(0x2f6fd3, 0.9);
+        elevatorPlatform.shape.setStrokeStyle(2, COLORS.elevatorBorder, 0.9);
       } else {
-        elevatorPlatform.shape.setFillStyle(0x1d4ed8, 0.9);
-        elevatorPlatform.shape.setStrokeStyle(2, 0x93c5fd, 0.9);
+        elevatorPlatform.shape.setFillStyle(0x285fb7, 0.86);
+        elevatorPlatform.shape.setStrokeStyle(2, COLORS.elevatorBorder, 0.78);
       }
       elevatorPlatform.shape.setAlpha(0.92);
     }
@@ -839,19 +914,36 @@ export class GameScene extends Phaser.Scene {
 
   private applyBrightnessFromIntensity(): void {
     const visibility = Phaser.Math.Clamp((this.intensity - 0.2) / 0.8, 0, 1);
-    const darknessAlpha = 0.95 - visibility * 0.9;
+    const darknessAlpha = 0.74 - visibility * 0.54;
     this.darknessOverlay.setAlpha(darknessAlpha);
   }
 
   private updateMoonVisual(deltaSeconds: number): void {
     const moonScreenTargetX = this.cameras.main.scrollX + this.cameras.main.width - 140;
-    this.moon.x = Math.min(moonScreenTargetX, this.moonMaxWorldX);
+    const moonX = Math.min(moonScreenTargetX, this.moonMaxWorldX);
+    this.moon.x = moonX;
+    this.moonHalo.x = moonX;
     this.moonBeatPulse = Math.max(0, this.moonBeatPulse - deltaSeconds * 5.5);
-    const moonAlpha = 0.2 + this.intensity * 0.8;
-    const baseScale = 0.85 + this.intensity * 0.35;
-    const pulseScale = 0.2 * this.moonBeatPulse;
+    const moonY = 90;
+    this.moon.y = moonY;
+    this.moonHalo.y = moonY;
+    const moonColor =
+      this.currentDirection === 'forward'
+        ? COLORS.moonWarm
+        : this.currentDirection === 'backward'
+          ? COLORS.moonCool
+          : COLORS.moonLow;
+    const moonAlpha = 0.28 + this.intensity * 0.64;
+    const haloAlpha = (this.currentDirection === 'backward' ? 0.13 : 0.18) + this.intensity * 0.24;
+    const baseScale = 0.94 + this.intensity * 0.22;
+    const pulseScale = 0.04 * this.moonBeatPulse;
+    const haloScale = 1.02 + this.intensity * 0.28 + 0.08 * this.moonBeatPulse;
+    this.moon.setFillStyle(moonColor, moonAlpha);
     this.moon.setAlpha(moonAlpha);
     this.moon.setScale(baseScale + pulseScale);
+    this.moonHalo.setFillStyle(moonColor, haloAlpha);
+    this.moonHalo.setAlpha(haloAlpha);
+    this.moonHalo.setScale(haloScale);
   }
 
   private handleBeatPulse(beatInBar: 1 | 2 | 3 | 4): void {
@@ -890,15 +982,15 @@ export class GameScene extends Phaser.Scene {
 
   private createGameOverUI(): void {
     this.gameOverBackdrop = this.add
-      .rectangle(480, 270, 960, 540, 0x000000, 0.7)
+      .rectangle(480, 270, 960, 540, COLORS.deepBackground, 0.72)
       .setVisible(false)
       .setDepth(20)
       .setScrollFactor(0);
 
     this.gameOverText = this.add
       .text(480, 230, this.endStateTitle, {
-        color: '#ffd6e7',
-        fontFamily: 'monospace',
+        color: COLORS.hudText,
+        fontFamily: HUD_FONT,
         fontSize: '48px'
       })
       .setOrigin(0.5)
@@ -908,8 +1000,8 @@ export class GameScene extends Phaser.Scene {
 
     this.gameOverDetailsText = this.add
       .text(480, 276, '', {
-        color: '#d7e2ff',
-        fontFamily: 'monospace',
+        color: COLORS.hudText,
+        fontFamily: HUD_FONT,
         fontSize: '24px',
         align: 'center'
       })
@@ -920,9 +1012,9 @@ export class GameScene extends Phaser.Scene {
 
     this.restartButton = this.add
       .text(480, 300, 'Restart', {
-        color: '#0b0f1a',
-        backgroundColor: '#d7e2ff',
-        fontFamily: 'monospace',
+        color: '#05070f',
+        backgroundColor: '#f4d35e',
+        fontFamily: HUD_FONT,
         fontSize: '24px',
         padding: { left: 14, right: 14, top: 8, bottom: 8 }
       })
@@ -934,9 +1026,9 @@ export class GameScene extends Phaser.Scene {
 
     this.nextLevelButton = this.add
       .text(480, 390, 'Next Level', {
-        color: '#0b0f1a',
-        backgroundColor: '#c8ffd6',
-        fontFamily: 'monospace',
+        color: '#05070f',
+        backgroundColor: '#4cc9f0',
+        fontFamily: HUD_FONT,
         fontSize: '20px',
         padding: { left: 12, right: 12, top: 7, bottom: 7 }
       })
@@ -948,9 +1040,9 @@ export class GameScene extends Phaser.Scene {
 
     this.backToMenuButton = this.add
       .text(480, 430, 'Back To Start', {
-        color: '#0b0f1a',
-        backgroundColor: '#bfdbfe',
-        fontFamily: 'monospace',
+        color: '#05070f',
+        backgroundColor: '#d7e2ff',
+        fontFamily: HUD_FONT,
         fontSize: '20px',
         padding: { left: 12, right: 12, top: 7, bottom: 7 }
       })
@@ -980,15 +1072,15 @@ export class GameScene extends Phaser.Scene {
 
   private createPauseUI(): void {
     this.pauseBackdrop = this.add
-      .rectangle(480, 270, 960, 540, 0x000000, 0.62)
+      .rectangle(480, 270, 960, 540, COLORS.deepBackground, 0.66)
       .setVisible(false)
       .setDepth(30)
       .setScrollFactor(0);
 
     this.pauseTitleText = this.add
       .text(480, 220, 'PAUSED', {
-        color: '#dbeafe',
-        fontFamily: 'monospace',
+        color: COLORS.hudText,
+        fontFamily: HUD_FONT,
         fontSize: '50px'
       })
       .setOrigin(0.5)
@@ -998,9 +1090,9 @@ export class GameScene extends Phaser.Scene {
 
     this.continueButton = this.add
       .text(480, 300, 'Continue', {
-        color: '#0b0f1a',
-        backgroundColor: '#c7d2fe',
-        fontFamily: 'monospace',
+        color: '#05070f',
+        backgroundColor: '#f4d35e',
+        fontFamily: HUD_FONT,
         fontSize: '24px',
         padding: { left: 14, right: 14, top: 8, bottom: 8 }
       })
@@ -1012,9 +1104,9 @@ export class GameScene extends Phaser.Scene {
 
     this.pauseBackToMenuButton = this.add
       .text(480, 355, 'Back to Start Screen', {
-        color: '#0b0f1a',
-        backgroundColor: '#bfdbfe',
-        fontFamily: 'monospace',
+        color: '#05070f',
+        backgroundColor: '#d7e2ff',
+        fontFamily: HUD_FONT,
         fontSize: '22px',
         padding: { left: 12, right: 12, top: 7, bottom: 7 }
       })
@@ -1026,9 +1118,9 @@ export class GameScene extends Phaser.Scene {
 
     this.quitButton = this.add
       .text(480, 410, 'Quit', {
-        color: '#0b0f1a',
-        backgroundColor: '#fecaca',
-        fontFamily: 'monospace',
+        color: '#05070f',
+        backgroundColor: '#ff6b6b',
+        fontFamily: HUD_FONT,
         fontSize: '22px',
         padding: { left: 12, right: 12, top: 7, bottom: 7 }
       })
@@ -1123,7 +1215,7 @@ export class GameScene extends Phaser.Scene {
     this.isGameOver = true;
     const now = performance.now();
     const rawCompletedMs = Math.max(0, now - this.runStartMs);
-    const scoreBonusMs = Math.max(0, Math.floor(this.enemyKills)) * 200;
+    const scoreBonusMs = this.getEnemyTimeBonusMs();
     const completedMs = Math.max(0, rawCompletedMs - scoreBonusMs);
     this.elapsedAtEndMs = completedMs;
     const previousBest = this.bestTimeMs;
@@ -1226,6 +1318,14 @@ export class GameScene extends Phaser.Scene {
   private updateTimerLabel(nowMs: number): void {
     const elapsedMs = this.isGameOver ? this.elapsedAtEndMs : Math.max(0, nowMs - this.runStartMs);
     this.timerText.setText(`Time ${this.formatElapsedTime(elapsedMs)}`);
+  }
+
+  private getEnemyKillCount(): number {
+    return Math.max(0, Math.floor(this.enemyKills));
+  }
+
+  private getEnemyTimeBonusMs(): number {
+    return this.getEnemyKillCount() * ENEMY_TIME_BONUS_MS;
   }
 
   private formatElapsedTime(ms: number): string {

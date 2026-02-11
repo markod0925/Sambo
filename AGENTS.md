@@ -19,3 +19,7 @@ Rules:
 ## Design Documentation Policy (Persistent)
 
 - Whenever a gameplay/design modification is implemented, always update `GDD/GDD.md` in the same task to reflect the change.
+
+## Visual Documentation Policy (Persistent)
+
+- Whenever a visual component is added or updated (game or editor), always update `GDD/VSG.md` in the same task so the Visual Style Guide stays aligned with implementation.

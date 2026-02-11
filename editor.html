@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="it">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -10,10 +10,13 @@
         --font-game: monospace;
         --bg: #05070f;
         --surface: #0c1322;
-        --surface-2: #0f182a;
+        --surface-2: #121a2b;
         --text: #d7e2ff;
         --border: #1b2a45;
         --border-2: #2a3e66;
+        --accent-warm: #f4d35e;
+        --accent-cool: #4cc9f0;
+        --accent-active: #4cc9f0;
         --shadow: 0 0 24px rgba(173, 208, 255, 0.2);
       }
       body {
@@ -31,6 +34,7 @@
       }
       .panel h1 { font-size: 18px; margin: 0 0 12px; }
       .panel button, .panel input { width: 100%; margin: 6px 0; padding: 10px; border-radius: 8px; border: 1px solid var(--border-2); background: var(--surface-2); color: var(--text); box-sizing: border-box; }
+      .panel button:hover { border-color: var(--accent-cool); }
       .panel button { cursor: pointer; }
       .button-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
       .panel label { display: block; margin-top: 10px; font-size: 12px; opacity: 0.85; }
@@ -46,9 +50,9 @@
       select, input[type='number'], input[type='text'] { width: 100%; padding: 6px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--surface-2); color: var(--text); }
       .small { font-size: 12px; opacity: 0.8; }
       .tag { border-radius: 999px; padding: 2px 8px; font-size: 12px; }
-      .low { background: #334155; }
-      .medium { background: #1d4ed8; }
-      .high { background: #7c2d12; }
+      .low { background: #3a4663; }
+      .medium { background: #3a86ff; color: #05070f; }
+      .high { background: #f4d35e; color: #05070f; }
 
       .minimap {
         width: 100%;
@@ -68,14 +72,14 @@
         box-sizing: border-box;
         border-radius: 6px;
         border: 1px solid var(--border);
-        background: #0b1224;
+        background: #0b0f1a;
         box-shadow: var(--shadow);
       }
       .legend { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
       .legend span { font-size: 11px; padding: 2px 8px; border-radius: 999px; }
-      .l-low { background: #4b5563; }
-      .l-medium { background: #2563eb; }
-      .l-high { background: #b45309; }
+      .l-low { background: #3a4663; }
+      .l-medium { background: #3a86ff; color: #05070f; }
+      .l-high { background: #f4d35e; color: #05070f; }
       .level-layout-editor {
         width: 100%;
         margin: 0 0 14px;
@@ -95,7 +99,7 @@
         box-sizing: border-box;
         border-radius: 6px;
         border: 1px solid var(--border);
-        background: #091121;
+        background: #0b0f1a;
         box-shadow: var(--shadow);
       }
       button, input, select, textarea { font-family: inherit; }
@@ -236,6 +240,25 @@
         dragOffsetY: 0
       };
       const platformKindCycle = ['segment', 'beat', 'alternateBeat', 'ghost', 'reverseGhost', 'elevator'];
+      const EDITOR_COLORS = {
+        segmentLow: '#3a4663',
+        segmentMedium: '#3a86ff',
+        segmentHigh: '#f4d35e',
+        platformSegment: '#2a3244',
+        platformBeat: '#f4d35e',
+        platformAlternate: '#fb8500',
+        platformGhost: '#4cc9f0',
+        platformReverseGhost: '#b5179e',
+        platformElevator: '#3a86ff',
+        canvasBackground: '#0b0f1a',
+        canvasGrid: '#1b2a45',
+        canvasLabel: '#d7e2ff',
+        canvasMuted: '#9db6de',
+        canvasGhostStroke: '#cdefff',
+        canvasSpawn: '#ffb703',
+        canvasSelection: '#4cc9f0',
+        canvasBorder: '#05070f'
+      };
       let midiPlayback = {
         fileName: null,
         notes: [],
@@ -299,12 +322,12 @@
       }
 
       function platformColor(kind) {
-        if (kind === 'beat') return '#94a3b8';
-        if (kind === 'alternateBeat') return '#38bdf8';
-        if (kind === 'ghost') return '#67e8f9';
-        if (kind === 'reverseGhost') return '#f472b6';
-        if (kind === 'elevator') return '#60a5fa';
-        return '#879abf';
+        if (kind === 'beat') return EDITOR_COLORS.platformBeat;
+        if (kind === 'alternateBeat') return EDITOR_COLORS.platformAlternate;
+        if (kind === 'ghost') return EDITOR_COLORS.platformGhost;
+        if (kind === 'reverseGhost') return EDITOR_COLORS.platformReverseGhost;
+        if (kind === 'elevator') return EDITOR_COLORS.platformElevator;
+        return EDITOR_COLORS.platformSegment;
       }
 
       function sanitizeBaseName(value) {
@@ -972,9 +995,9 @@
       }
 
       function energyColor(state) {
-        if (state === 'low') return '#6b7280';
-        if (state === 'medium') return '#3b82f6';
-        return '#f59e0b';
+        if (state === 'low') return EDITOR_COLORS.segmentLow;
+        if (state === 'medium') return EDITOR_COLORS.segmentMedium;
+        return EDITOR_COLORS.segmentHigh;
       }
 
       function buildFallbackRuntimeNotes(gridColumns) {
@@ -1287,10 +1310,10 @@
         const h = minimap.height;
 
         mapCtx.clearRect(0, 0, w, h);
-        mapCtx.fillStyle = '#0b1224';
+        mapCtx.fillStyle = EDITOR_COLORS.canvasBackground;
         mapCtx.fillRect(0, 0, w, h);
 
-        mapCtx.strokeStyle = '#243457';
+        mapCtx.strokeStyle = EDITOR_COLORS.canvasGrid;
         mapCtx.lineWidth = 1;
         for (let i = 0; i <= 4; i++) {
           const y = 14 + i * ((h - 28) / 4);
@@ -1302,7 +1325,7 @@
 
         const segments = [...model.segments].sort((a, b) => a.index - b.index);
         if (segments.length === 0) {
-          mapCtx.fillStyle = '#8ea2cf';
+          mapCtx.fillStyle = EDITOR_COLORS.canvasMuted;
           mapCtx.font = '12px monospace';
           mapCtx.fillText('No segments: load or create data', 52, h / 2);
           return;
@@ -1324,12 +1347,12 @@
           mapCtx.fillStyle = energyColor(seg.energy_state);
           mapCtx.fillRect(cursorX, top, width - 2, segHeight);
 
-          mapCtx.fillStyle = '#0e172d';
+          mapCtx.fillStyle = EDITOR_COLORS.canvasLabel;
           mapCtx.font = '10px monospace';
           mapCtx.fillText(String(seg.index), cursorX + 2, Math.max(12, top - 2));
 
           if ((seg.platform_types || []).includes('ghost')) {
-            mapCtx.strokeStyle = '#67e8f9';
+            mapCtx.strokeStyle = EDITOR_COLORS.canvasGhostStroke;
             mapCtx.strokeRect(cursorX + 1, top + 1, width - 4, segHeight - 2);
           }
 
@@ -1348,10 +1371,10 @@
         const worldWidth = getLayoutWorldWidth(platforms);
 
         layoutCtx.clearRect(0, 0, width, height);
-        layoutCtx.fillStyle = '#091121';
+        layoutCtx.fillStyle = EDITOR_COLORS.canvasBackground;
         layoutCtx.fillRect(0, 0, width, height);
 
-        layoutCtx.strokeStyle = '#1f2d4f';
+        layoutCtx.strokeStyle = EDITOR_COLORS.canvasGrid;
         layoutCtx.lineWidth = 1;
         const gridStep = GRID_STEP;
         const gridStart = Math.floor(cameraX / gridStep) * gridStep;
@@ -1372,13 +1395,13 @@
 
         const spawnX = 150;
         const spawnCanvasX = spawnX - cameraX;
-        layoutCtx.strokeStyle = '#fbbf24';
+        layoutCtx.strokeStyle = EDITOR_COLORS.canvasSpawn;
         layoutCtx.lineWidth = 2;
         layoutCtx.beginPath();
         layoutCtx.moveTo(spawnCanvasX, 0);
         layoutCtx.lineTo(spawnCanvasX, height);
         layoutCtx.stroke();
-        layoutCtx.fillStyle = '#fbbf24';
+        layoutCtx.fillStyle = EDITOR_COLORS.canvasSpawn;
         layoutCtx.font = '12px monospace';
         layoutCtx.fillText('SPAWN', spawnCanvasX + 6, 16);
 
@@ -1396,15 +1419,15 @@
           layoutCtx.globalAlpha = layoutEditorState.selectedIndex === idx ? 0.95 : 0.8;
           layoutCtx.fillRect(left, top, w, drawH);
           layoutCtx.globalAlpha = 1;
-          layoutCtx.strokeStyle = layoutEditorState.selectedIndex === idx ? '#f8fafc' : '#0b1326';
+          layoutCtx.strokeStyle = layoutEditorState.selectedIndex === idx ? EDITOR_COLORS.canvasSelection : EDITOR_COLORS.canvasBorder;
           layoutCtx.lineWidth = layoutEditorState.selectedIndex === idx ? 2 : 1;
           layoutCtx.strokeRect(left, top, w, drawH);
-          layoutCtx.fillStyle = '#dbeafe';
+          layoutCtx.fillStyle = EDITOR_COLORS.canvasLabel;
           layoutCtx.font = '11px monospace';
           layoutCtx.fillText(String(platform.kind), left + 4, Math.max(12, top - 4));
         });
 
-        layoutCtx.fillStyle = '#9db6de';
+        layoutCtx.fillStyle = EDITOR_COLORS.canvasMuted;
         layoutCtx.font = '12px monospace';
         layoutCtx.fillText(
           `X: ${Math.round(cameraX)} / ${Math.max(0, worldWidth - width)} | platforms: ${platforms.length} | mode: ${

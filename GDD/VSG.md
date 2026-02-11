@@ -290,6 +290,10 @@ Typography:
 * Monospace in-game
 * Keep consistent letter spacing
 
+Kill counter format:
+
+* Bottom HUD score must render as `kills (-Xs)` with one decimal place (example: `6 (-1.2s)`), matching the runtime time-bonus rule.
+
 No excessive animations.
 
 ---

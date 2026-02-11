@@ -3,6 +3,21 @@ import type { LevelDefinition } from '../data/exampleLevel.js';
 
 const BEST_TIME_STORAGE_PREFIX = 'sambo.level';
 const VOLUME_STORAGE_KEY = 'sambo.masterVolume';
+const FONT_UI = 'monospace';
+const COLORS = {
+  panelOverlay: 0x0c1322,
+  text: '#d7e2ff',
+  textDim: '#9db6de',
+  listText: '#d7e2ff',
+  listBg: '#1b2a45',
+  listSelectedText: '#05070f',
+  listSelectedBg: '#4cc9f0',
+  accentWarm: '#f4d35e',
+  accentCool: '#4cc9f0',
+  track: 0x2a3244,
+  trackFill: 0x4cc9f0,
+  handle: 0xe8e6e3
+} as const;
 
 interface LevelEntry {
   name: string;
@@ -44,19 +59,19 @@ export class StartScene extends Phaser.Scene {
     this.cameras.main.setBackgroundColor('rgba(0,0,0,0)');
     this.volume = Number.isFinite(data.volume) ? Phaser.Math.Clamp(Number(data.volume), 0, 1) : this.loadVolume();
 
-    this.add.rectangle(480, 270, 960, 540, 0x02050f, 0.62).setDepth(5);
+    this.add.rectangle(480, 270, 960, 540, COLORS.panelOverlay, 0.66).setDepth(5);
     this.add
       .text(480, 86, 'SAMBO', {
-        color: '#e6f1ff',
-        fontFamily: 'monospace',
+        color: COLORS.text,
+        fontFamily: FONT_UI,
         fontSize: '72px'
       })
       .setOrigin(0.5)
       .setDepth(6);
     this.add
       .text(480, 138, 'Rhythm Platformer', {
-        color: '#9db6de',
-        fontFamily: 'monospace',
+        color: COLORS.textDim,
+        fontFamily: FONT_UI,
         fontSize: '24px'
       })
       .setOrigin(0.5)
@@ -64,8 +79,8 @@ export class StartScene extends Phaser.Scene {
 
     this.loadingText = this.add
       .text(480, 230, 'Loading levels from Levels/...', {
-        color: '#cdddf7',
-        fontFamily: 'monospace',
+        color: COLORS.text,
+        fontFamily: FONT_UI,
         fontSize: '18px'
       })
       .setOrigin(0.5)
@@ -122,8 +137,8 @@ export class StartScene extends Phaser.Scene {
   private createLevelSelection(): void {
     this.add
       .text(480, 190, 'Select Level', {
-        color: '#d6e8ff',
-        fontFamily: 'monospace',
+        color: COLORS.text,
+        fontFamily: FONT_UI,
         fontSize: '22px'
       })
       .setOrigin(0.5)
@@ -143,9 +158,9 @@ export class StartScene extends Phaser.Scene {
           this.levelViewport.top + idx * this.levelRowHeight + this.levelRowHeight / 2,
           `${this.displayLevelName(entry.name)}   Best: ${bestLabel}`,
           {
-            color: level === this.selectedLevel ? '#0f172a' : '#dbeafe',
-            backgroundColor: level === this.selectedLevel ? '#bfdbfe' : '#1f355b',
-            fontFamily: 'monospace',
+            color: level === this.selectedLevel ? COLORS.listSelectedText : COLORS.listText,
+            backgroundColor: level === this.selectedLevel ? COLORS.listSelectedBg : COLORS.listBg,
+            fontFamily: FONT_UI,
             fontSize: '16px',
             padding: { left: 10, right: 10, top: 4, bottom: 4 }
           }
@@ -182,7 +197,7 @@ export class StartScene extends Phaser.Scene {
         this.levelViewport.top + this.levelViewport.height / 2,
         10,
         this.levelViewport.height,
-        0x1f355b,
+        0x1b2a45,
         0.95
       )
       .setDepth(6)
@@ -194,7 +209,7 @@ export class StartScene extends Phaser.Scene {
         this.levelViewport.top + 14,
         12,
         28,
-        0x93c5fd,
+        0x4cc9f0,
         0.95
       )
       .setDepth(7)
@@ -260,8 +275,8 @@ export class StartScene extends Phaser.Scene {
   private refreshLevelButtons(): void {
     this.levelButtons.forEach((row, idx) => {
       const level = idx + 1;
-      row.setColor(level === this.selectedLevel ? '#0f172a' : '#dbeafe');
-      row.setBackgroundColor(level === this.selectedLevel ? '#bfdbfe' : '#1f355b');
+      row.setColor(level === this.selectedLevel ? COLORS.listSelectedText : COLORS.listText);
+      row.setBackgroundColor(level === this.selectedLevel ? COLORS.listSelectedBg : COLORS.listBg);
     });
   }
 
@@ -270,16 +285,19 @@ export class StartScene extends Phaser.Scene {
     const xCenter = 790;
     this.volumeLabel = this.add
       .text(xCenter, y - 24, `Volume: ${Math.round(this.volume * 100)}%`, {
-        color: '#d6e8ff',
-        fontFamily: 'monospace',
+        color: COLORS.text,
+        fontFamily: FONT_UI,
         fontSize: '16px'
       })
       .setOrigin(0.5)
       .setDepth(6);
 
-    this.sliderTrack = this.add.rectangle(xCenter, y, 220, 8, 0x1e3a66, 0.95).setDepth(6);
-    this.sliderFill = this.add.rectangle(xCenter - 110, y, 0, 8, 0x7dd3fc, 0.95).setOrigin(0, 0.5).setDepth(6);
-    this.sliderHandle = this.add.circle(xCenter, y, 9, 0xe2e8f0, 0.95).setDepth(6).setInteractive({ draggable: true, useHandCursor: true });
+    this.sliderTrack = this.add.rectangle(xCenter, y, 220, 8, COLORS.track, 0.95).setDepth(6);
+    this.sliderFill = this.add.rectangle(xCenter - 110, y, 0, 8, COLORS.trackFill, 0.95).setOrigin(0, 0.5).setDepth(6);
+    this.sliderHandle = this.add
+      .circle(xCenter, y, 9, COLORS.handle, 0.95)
+      .setDepth(6)
+      .setInteractive({ draggable: true, useHandCursor: true });
 
     const setFromPointerX = (pointerX: number, playPreview = true): void => {
       const left = xCenter - 110;
@@ -351,9 +369,9 @@ export class StartScene extends Phaser.Scene {
   private createActions(): void {
     this.playButton = this.add
       .text(480, 440, 'Play Selected Level', {
-        color: '#091221',
-        backgroundColor: '#a7f3d0',
-        fontFamily: 'monospace',
+        color: '#05070f',
+        backgroundColor: COLORS.accentWarm,
+        fontFamily: FONT_UI,
         fontSize: '28px',
         padding: { left: 16, right: 16, top: 8, bottom: 8 }
       })
@@ -368,8 +386,8 @@ export class StartScene extends Phaser.Scene {
 
     const editorLink = this.add
       .text(480, 500, 'Open Level Editor', {
-        color: '#93c5fd',
-        fontFamily: 'monospace',
+        color: COLORS.accentCool,
+        fontFamily: FONT_UI,
         fontSize: '20px'
       })
       .setOrigin(0.5)

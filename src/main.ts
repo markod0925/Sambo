@@ -7,7 +7,7 @@ const config = {
   height: 540,
   parent: 'game',
   pixelArt: false,
-  backgroundColor: '#0b0f1a',
+  backgroundColor: '#05070f',
   scene: [StartScene, GameScene]
 };
 

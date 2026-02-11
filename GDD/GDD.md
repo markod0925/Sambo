@@ -479,35 +479,45 @@ Procedural variation occurs **within authored constraints**.
 * HUD includes:
   * lives as hearts + numeric counter
   * timer
-  * kill score
+  * kill score with cumulative time discount display (`kills (-Xs)`, one decimal)
 * Implemented state overlays:
   * pause menu (`ESC`)
   * game over panel
   * victory panel (time + best time + next level action)
 * Victory time rule:
   * each defeated enemy grants a `0.2s` completion-time reduction
+  * the kill HUD mirrors this in real time (e.g. `1 (-0.2s)`, `6 (-1.2s)`)
 
 ### Platform Visual Identity (Fill, Border, Alpha)
 
-* **Segment platform**: neutral desaturated tones, energy-influenced coloration.
+* **Segment platform**: fixed neutral slate (`#2A3244`) with muted steel border (`#3A4663`), no glow.
 * **Beat platform** (`solid/fadeOut/gone/fadeIn`):
-  * high-contrast yellow/orange fill changes by phase
-  * explicit border/stroke updates per phase
-  * alpha drops near zero in `gone`
+  * warm family mapped to VSG (`#F4D35E`, `#EE964B`, `#FFB703`)
+  * phase alpha aligned to `1.0 / 0.5 / 0.05 / 0.5`
+  * subtle pre-transition border telegraph in the final ~100ms of the beat
 * **Alternate beat platform**:
   * solid on beats `1` and `3`, dimmed otherwise
-  * warm orange family distinct from beat platform
+  * dedicated orange family (`#FB8500` + `#FFB703`) to remain distinct from beat platforms
 * **Ghost platform**:
-  * cyan family
-  * when active (backward latch): bright fill + clear stroke
-  * when inactive: dark fill, faint stroke, very low alpha
+  * active: electric cyan + ice highlight (`#4CC9F0`, `#CDEFFF`)
+  * inactive: dark slate + deep azure border (`#121A2B`, `#3A86FF`)
 * **Reverse ghost platform** (implemented extension):
-  * magenta family
-  * complementary latch to ghost (solid while forward, weak while backward)
+  * forward solid: neon orchid + soft fuchsia (`#B5179E`, `#E056FD`)
+  * backward weak: dark plum low-alpha state (`#3C0D3A`)
 * **Elevator platform**:
-  * blue family
+  * blue family aligned to VSG (`#3A86FF` fill, `#4CC9F0` border)
   * moves one vertical grid level per beat
   * loops with 4-beat rise and 4-beat descent
+
+### Runtime Visual Identity Update (VSG Alignment, Feb 2026)
+
+* Moon now behaves as a state anchor:
+  * low intensity uses soft grey (`#B0B7C3`)
+  * forward motion warms to gold
+  * backward motion cools to cyan
+  * core + halo pulse scale remains subtle and BPM-synced
+* Enemy palette now uses dedicated crimson tones (`#A4161A`, `#660708`, `#9D0208`, `#FF4D6D`) and no cyan/gold reuse.
+* HUD and overlays remain monospace with the established runtime text color (`#D7E2FF`), keeping readability at low intensity.
 
 ---
 
@@ -519,8 +529,9 @@ The project includes a browser editor at `/editor.html` for draft and runtime le
 
 * Same dark style family as runtime:
   * `#05070f` background
-  * layered panel surfaces (`#0c1322`, `#0f182a`)
+  * layered panel surfaces (`#0c1322`, `#121A2B`)
   * cool blue borders (`#1b2a45`, `#2a3e66`)
+  * active selection accent aligned to VSG cool energy (`#4CC9F0`)
   * monospace typography
 * Left control panel + right workspace layout.
 * User-facing sections:
