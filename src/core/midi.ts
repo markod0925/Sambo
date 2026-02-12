@@ -12,6 +12,22 @@ export interface ParsedMidi {
   initialBpm: number;
 }
 
+export interface GridMidiNoteEvent {
+  noteId: string;
+  frequency: number;
+  velocity: number;
+}
+
+export interface GridMidiColumnEvents {
+  on: GridMidiNoteEvent[];
+  off: GridMidiNoteEvent[];
+}
+
+export interface GridMidiMap {
+  eventsByColumn: GridMidiColumnEvents[];
+  selectedChannels: number[];
+}
+
 interface VarLenResult {
   value: number;
   size: number;
@@ -217,4 +233,93 @@ export function buildGridNotesFromMidi(parsed: ParsedMidi, gridColumns: number):
     out.push(midiToFrequency(picked.midiNote));
   }
   return out;
+}
+
+interface BuildGridMidiOptions {
+  maxChannels?: number;
+  minMidiNote?: number;
+  maxMidiNote?: number;
+}
+
+function pickChannelsForGridPlayback(notes: MidiNoteEvent[], maxChannels: number): number[] {
+  const stats = new Map<number, { count: number; sumMidi: number; sumVelocity: number }>();
+  for (const note of notes) {
+    if (note.channel === 9) continue;
+    const entry = stats.get(note.channel) ?? { count: 0, sumMidi: 0, sumVelocity: 0 };
+    entry.count += 1;
+    entry.sumMidi += note.midiNote;
+    entry.sumVelocity += note.velocity;
+    stats.set(note.channel, entry);
+  }
+
+  const ranked = Array.from(stats.entries())
+    .map(([channel, entry]) => {
+      const avgMidi = entry.sumMidi / Math.max(1, entry.count);
+      const avgVelocity = entry.sumVelocity / Math.max(1, entry.count);
+      const score = avgMidi + Math.log2(entry.count + 1) * 2 + avgVelocity * 6;
+      return { channel, score };
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, Math.max(1, Math.floor(maxChannels)))
+    .map((row) => row.channel);
+
+  if (ranked.length > 0) return ranked;
+  return [];
+}
+
+function toGridColumn(timeSec: number, durationSec: number, lastColumn: number): number {
+  const ratio = durationSec <= 0 ? 0 : timeSec / durationSec;
+  const mapped = Math.round(ratio * lastColumn);
+  if (!Number.isFinite(mapped)) return 0;
+  return Math.max(0, Math.min(lastColumn, mapped));
+}
+
+export function buildGridMidiMapFromMidi(parsed: ParsedMidi, gridColumns: number, options: BuildGridMidiOptions = {}): GridMidiMap {
+  const totalColumns = Math.max(1, Math.floor(gridColumns));
+  const eventsByColumn: GridMidiColumnEvents[] = Array.from({ length: totalColumns }, () => ({ on: [], off: [] }));
+  if (!parsed.notes.length || parsed.durationSec <= 0) {
+    return { eventsByColumn, selectedChannels: [] };
+  }
+
+  const maxChannels = Math.max(1, Math.floor(options.maxChannels ?? 2));
+  const minMidiNote = Math.max(0, Math.floor(options.minMidiNote ?? 48));
+  const maxMidiNote = Math.min(127, Math.floor(options.maxMidiNote ?? 84));
+  const selectedChannels = pickChannelsForGridPlayback(parsed.notes, maxChannels);
+  const selectedSet = new Set(selectedChannels);
+  const filtered = parsed.notes.filter(
+    (note) => selectedSet.has(note.channel) && note.midiNote >= minMidiNote && note.midiNote <= maxMidiNote
+  );
+
+  if (filtered.length === 0) {
+    return { eventsByColumn, selectedChannels };
+  }
+
+  const totalDuration = Math.max(0.001, parsed.durationSec);
+  const lastColumn = totalColumns - 1;
+  const sorted = [...filtered].sort((a, b) => a.startSec - b.startSec || a.endSec - b.endSec);
+
+  for (let i = 0; i < sorted.length; i++) {
+    const note = sorted[i];
+    const noteId = `n${i}`;
+    const startColumn = toGridColumn(note.startSec, totalDuration, lastColumn);
+    let endColumn = toGridColumn(note.endSec, totalDuration, lastColumn);
+    if (endColumn <= startColumn && startColumn < lastColumn) {
+      endColumn = startColumn + 1;
+    }
+    if (endColumn < startColumn) endColumn = startColumn;
+    const event: GridMidiNoteEvent = {
+      noteId,
+      frequency: midiToFrequency(note.midiNote),
+      velocity: Math.max(0.05, Math.min(1, note.velocity))
+    };
+    eventsByColumn[startColumn].on.push(event);
+    eventsByColumn[endColumn].off.push(event);
+  }
+
+  for (const columnEvents of eventsByColumn) {
+    columnEvents.on.sort((a, b) => b.velocity - a.velocity || a.frequency - b.frequency);
+    columnEvents.off.sort((a, b) => a.frequency - b.frequency);
+  }
+
+  return { eventsByColumn, selectedChannels };
 }

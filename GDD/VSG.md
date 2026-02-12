@@ -211,6 +211,30 @@ Movement clarity is more important than brightness.
 
 ---
 
+## 5.7 Shuttle Platform
+
+Uses the same mobile-platform palette as Elevator to keep "moving platform" readability consistent.
+
+* Family: Blue gradient
+* Fill: `#3A86FF`
+* Border: `#4CC9F0`
+* Horizontal beat motion readability takes priority over decorative effects
+* Optional side-motion emphasis can be done with slightly stronger border alpha during lateral travel
+
+---
+
+## 5.8 Cross Platform
+
+Uses the same mobile-platform palette as Elevator and Shuttle.
+
+* Family: Blue gradient
+* Fill: `#3A86FF`
+* Border: `#4CC9F0`
+* Motion pattern readability (`down -> left -> up -> right`) must remain clear at low intensity
+* Use the same alpha/stroke behavior family as other mobile platforms, with only subtle phase accents
+
+---
+
 # 6. Enemy Visual Identity
 
 Enemies must be readable even at low intensity.
@@ -250,6 +274,7 @@ Moon color adapts to state.
 Scale pulse: 2–4%
 Glow pulse: synced exactly to BPM
 Never distort or shake.
+Horizontal anchoring: moon stop position is one platform slot (2 grid cells) to the right of the authored level-end platform extent.
 
 ---
 
@@ -264,7 +289,7 @@ Intensity drives:
 Never drop below:
 
 ```
-intensity floor visibility ≈ 20%
+intensity floor visibility ≈ 15%
 ```
 
 Darkness overlay should:
@@ -293,6 +318,17 @@ Typography:
 Kill counter format:
 
 * Bottom HUD score must render as `kills (-Xs)` with one decimal place (example: `6 (-1.2s)`), matching the runtime time-bonus rule.
+* Timer must stay top-center and screen-anchored (independent from world width/camera scroll).
+
+Debug overlay (runtime):
+
+* Top-right, screen-anchored, right-aligned monospace block.
+* Color: dim pale blue (`#9DB6DE`) to avoid competing with primary HUD labels.
+* Three compact rows:
+  * audio mode and selected MIDI channel count
+  * current grid column, movement direction, and step state
+  * note event counts (`on/off`) and active voice count
+* Overlay must remain readable but secondary; no glow or animation.
 
 No excessive animations.
 
@@ -302,13 +338,55 @@ No excessive animations.
 
 Editor shares world aesthetic:
 
-| Element          | Color     |
-| ---------------- | --------- |
-| Background       | `#05070F` |
-| Panels           | `#0C1322` |
-| Borders          | `#1B2A45` |
-| Accent Buttons   | `#2A3E66` |
-| Active Selection | `#4CC9F0` |
+| Element                 | Color     |
+| ----------------------- | --------- |
+| Background              | `#05070F` |
+| Panels                  | `#0C1322` |
+| Input Surface           | `#121A2B` |
+| Borders                 | `#1B2A45` |
+| Default Buttons         | `#1B2A45` |
+| Primary Action Buttons  | `#F4D35E` |
+| Interactive Hover State | `#4CC9F0` |
+| Danger Actions          | `#FF6B6B` |
+| Action Text             | `#05070F` |
+| Body Text               | `#D7E2FF` |
+| Secondary Text          | `#9DB6DE` |
+
+Editor controls should use the same hard-edged UI language used by runtime overlays:
+
+* Monospace typography
+* Square corners for controls (avoid rounded-pill button language)
+* Cyan hover/selection for interactives
+* Warm gold for primary/confirm actions
+* Red reserved for destructive actions
+* `Back to Game` is a primary warm action and should be placed at top of the editor control panel
+* Runtime export controls expose editable `BPM runtime` plus read-only `Grid columns (auto)` status text (no editable grid-columns input)
+
+Editor scrollbars must match runtime color families:
+
+* Track: `#1B2A45`
+* Thumb: `#4CC9F0`
+* Thumb hover: lighter cyan tint
+
+Layout editor grid must remain visually aligned with runtime snap rules:
+
+* X-axis snap and grid lines anchored on runtime player start (`x = 150`)
+* Grid spacing: `32px` on both axes
+* Spawn guide line must overlap the snap-aligned anchor column
+* Horizontal navigation uses a dedicated range scrollbar under layout actions (replacing left/right buttons)
+* Platform kind label `static` is shown in the layout canvas for base platforms (runtime kind remains `segment`)
+
+Segments table conventions:
+
+* Column headers use Title Case labels (not snake_case)
+* Segment ID is read-only text (non-editable)
+* `Duration Beats` is fixed to `2` internally and not shown in table UI
+* `Platform Types (CSV)` column is intentionally wider than numeric columns for readability
+* `Vertical Min` and `Vertical Max` are compact numeric columns with matched width/visual weight
+* `Vertical Min`, `Vertical Max`, `Patrol Enemies`, and `Flying Spawn Interval` inputs use a reduced visual width (75% of cell width)
+* Flying spawn interval column is shown in seconds (`s`) and communicates disable state explicitly (`0 = Off`)
+* `Rhythm Density` is not shown in the table UI
+* `Energy State` is edited only through a single dropdown control (no duplicated colored badge above it)
 
 Minimap energy legend:
 

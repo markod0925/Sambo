@@ -3,9 +3,13 @@ import assert from 'node:assert/strict';
 import { Metronome } from '../dist/src/core/metronome.js';
 import { updateIntensity, defaultIntensityConfig } from '../dist/src/core/intensity.js';
 import { BeatSnapMover } from '../dist/src/core/beatMovement.js';
+import { getTempoScale, scaleIntervalByTempo, scaleSpeedByTempo } from '../dist/src/core/tempo.js';
+import { buildGridMidiMapFromMidi } from '../dist/src/core/midi.js';
 import {
+  getCrossOffsetSteps,
   getBeatPlatformState,
   getElevatorOffsetSteps,
+  getShuttleOffsetSteps,
   isAlternateBeatPlatformSolid,
   isGhostPlatformSolid
 } from '../dist/src/core/platforms.js';
@@ -25,7 +29,7 @@ test('intensity increases, decays and clamps at floor', () => {
   assert.equal(up, 0.6);
 
   const down = updateIntensity(0.3, 'idle', 0, 2, defaultIntensityConfig);
-  assert.equal(down, 0.25);
+  assert.ok(Math.abs(down - 0.2) < 1e-9);
 
   const back = updateIntensity(0.8, 'backward', 1, 1, defaultIntensityConfig);
   assert.equal(back, 0.5);
@@ -38,9 +42,73 @@ test('beat snapped mover arrives exactly on subdivision', () => {
   mover.enqueue('forward');
   let move = mover.update(10);
   assert.equal(move.arrived, false);
+  move = mover.update(70);
+  assert.equal(move.arrived, false);
+  assert.ok(move.x > 0 && move.x < 64);
   move = mover.update(125);
   assert.equal(move.arrived, true);
   assert.equal(move.x, 64);
+});
+
+test('beat snapped mover moves faster at higher BPM while keeping beat arrival lock', () => {
+  const fastMover = new BeatSnapMover(new Metronome(120, 4), 64);
+  const slowMover = new BeatSnapMover(new Metronome(70, 4), 64);
+
+  fastMover.enqueue('forward');
+  slowMover.enqueue('forward');
+  fastMover.update(0);
+  slowMover.update(0);
+
+  const fastMid = fastMover.update(100);
+  const slowMid = slowMover.update(100);
+  assert.ok(fastMid.x > slowMid.x);
+  assert.equal(fastMid.arrived, false);
+  assert.equal(slowMid.arrived, false);
+
+  const fastEnd = fastMover.update(125);
+  assert.equal(fastEnd.arrived, true);
+  assert.equal(fastEnd.x, 64);
+});
+
+test('tempo scaling helpers map speed and interval to BPM', () => {
+  assert.equal(getTempoScale(120), 1);
+  assert.equal(getTempoScale(70), 70 / 120);
+  assert.equal(scaleSpeedByTempo(90, 120), 90);
+  assert.equal(scaleSpeedByTempo(90, 60), 45);
+  assert.equal(scaleIntervalByTempo(1000, 120), 1000);
+  assert.equal(scaleIntervalByTempo(1000, 240), 500);
+});
+
+test('grid midi map preserves note on/off timing and ignores drum channel', () => {
+  const parsed = {
+    durationSec: 2,
+    initialBpm: 120,
+    notes: [
+      { startSec: 0, endSec: 1, midiNote: 60, velocity: 1, channel: 0 },
+      { startSec: 1, endSec: 2, midiNote: 64, velocity: 0.8, channel: 0 },
+      { startSec: 0.5, endSec: 0.9, midiNote: 36, velocity: 1, channel: 9 }
+    ]
+  };
+  const grid = buildGridMidiMapFromMidi(parsed, 8, { maxChannels: 1, minMidiNote: 48, maxMidiNote: 84 });
+
+  assert.equal(grid.eventsByColumn.length, 8);
+  assert.deepEqual(grid.selectedChannels, [0]);
+  assert.equal(grid.eventsByColumn[0].on.length, 1);
+  assert.equal(grid.eventsByColumn[0].off.length, 0);
+  assert.equal(grid.eventsByColumn[4].off.length, 1);
+  assert.equal(grid.eventsByColumn[4].on.length, 1);
+  assert.equal(grid.eventsByColumn[7].off.length, 1);
+});
+
+test('grid midi map keeps silence when no playable channels are selected', () => {
+  const parsed = {
+    durationSec: 1,
+    initialBpm: 120,
+    notes: [{ startSec: 0, endSec: 0.5, midiNote: 36, velocity: 1, channel: 9 }]
+  };
+  const grid = buildGridMidiMapFromMidi(parsed, 4, { maxChannels: 2, minMidiNote: 48, maxMidiNote: 84 });
+  const hasAnyEvent = grid.eventsByColumn.some((column) => column.on.length > 0 || column.off.length > 0);
+  assert.equal(hasAnyEvent, false);
 });
 
 test('beat and ghost platform state transitions', () => {
@@ -63,6 +131,23 @@ test('elevator platform follows 4-up and 4-down beat loop', () => {
   assert.deepEqual(offsets, [0, 1, 2, 3, 4, 3, 2, 1, 0, 1]);
 });
 
+test('shuttle platform follows 0-1-2-3-4-3-2-1 loop', () => {
+  const offsets = Array.from({ length: 10 }, (_, beat) => getShuttleOffsetSteps(beat));
+  assert.deepEqual(offsets, [0, 1, 2, 3, 4, 3, 2, 1, 0, 1]);
+});
+
+test('cross platform follows down-left-up-right loop', () => {
+  const offsets = Array.from({ length: 6 }, (_, beat) => getCrossOffsetSteps(beat));
+  assert.deepEqual(offsets, [
+    { x: 0, y: 1 },
+    { x: -1, y: 0 },
+    { x: 0, y: -1 },
+    { x: 1, y: 0 },
+    { x: 0, y: 1 },
+    { x: -1, y: 0 }
+  ]);
+});
+
 test('energy classification and segment generation follow templates', () => {
   assert.equal(classifyEnergy(0.2), 'low');
   assert.equal(classifyEnergy(0.5), 'medium');
@@ -71,7 +156,16 @@ test('energy classification and segment generation follow templates', () => {
   const segments = generateSegments({ bpm: 120, energy_curve: [0.1, 0.2, 0.8, 0.9] }, 2);
   assert.equal(segments.length, 2);
   assert.deepEqual(segments[0].platformTypes, ['static', 'beat', 'alternateBeat']);
-  assert.deepEqual(segments[1].platformTypes, ['static', 'beat', 'alternateBeat', 'ghost', 'reverseGhost', 'elevator']);
+  assert.deepEqual(segments[1].platformTypes, [
+    'static',
+    'beat',
+    'alternateBeat',
+    'ghost',
+    'reverseGhost',
+    'elevator',
+    'shuttle',
+    'cross'
+  ]);
 });
 
 test('input resolver supports movement and jump intent', () => {

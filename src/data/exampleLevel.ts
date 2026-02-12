@@ -1,5 +1,5 @@
 export interface PlatformSpec {
-  kind: 'segment' | 'beat' | 'alternateBeat' | 'ghost' | 'reverseGhost' | 'elevator';
+  kind: 'segment' | 'beat' | 'alternateBeat' | 'ghost' | 'reverseGhost' | 'elevator' | 'shuttle' | 'cross';
   x: number;
   y: number;
   width: number;

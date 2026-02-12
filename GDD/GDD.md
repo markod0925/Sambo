@@ -91,6 +91,33 @@ Player movement is **quantized and magnetized to the beat grid**.
     (¼ or ⅛ note, depending on tuning)
 * Small speed corrections are applied invisibly.
 
+### BPM-Proportional Traversal and Enemy Motion
+
+Traversal speed is derived from tempo so authored MIDI timing remains correct across levels.
+
+```text
+reference_bpm = 120
+tempo_scale = level_bpm / reference_bpm
+
+player_step_duration = beat_interval / subdivision
+player_speed = grid_cell_size / player_step_duration
+```
+
+Consequences:
+
+* 70 BPM levels produce slower continuous movement than 120 BPM levels.
+* 120 BPM keeps baseline traversal tuning.
+* Arrival remains subdivision-locked, so note triggers stay rhythmically correct.
+
+Enemy pacing follows the same tempo scale:
+
+```text
+enemy_speed = base_enemy_speed * tempo_scale
+enemy_spawn_interval_ms = base_spawn_interval_ms / tempo_scale
+```
+
+This keeps pressure and readability coherent with the musical tempo of each level.
+
 ```text
 Input → movement queued
 → interpolation begins
@@ -158,7 +185,7 @@ Stopping to think should not punish the player with total blindness.
 **Solution:**
 Introduce a **Residual Intensity Floor**.
 
-* `residual_floor ≈ 0.2–0.3`
+* `residual_floor ≈ 0.15–0.25`
 * Below this:
 
   * beat continues
@@ -177,45 +204,45 @@ Introduce a **Residual Intensity Floor**.
 
 ### Chosen Implementation (Explicit)
 
-✅ **Forward playback with envelope modulation (no raw audio reversal)**
+✅ **Grid event playback from parsed MIDI (note on/off), with lightweight polyphonic synth**
 
-**Why this choice:**
+The runtime parses the MIDI file and builds a grid-aligned event map:
 
-* Reverse playback of samples is brittle and artifact-prone
-* Negative pitch shifting complicates tuning and musicality
-* Envelope modulation preserves clarity and control
+* `column -> note_on[] + note_off[]`
+* events are derived from MIDI start/end times, not from a single sampled pitch per column
+* channel 10 (drums) is excluded from melodic playback
+* playback can keep multiple concurrent notes (bounded polyphony)
 
 ---
 
 ### Forward Movement (Normal Playback)
 
-* Notes play in sequence
-* ADSR envelope:
-
-  * Fast attack
-  * Natural decay
-* Filter more open / brighter tone
+* On each arrived grid column, process:
+  * note-off events first
+  * then note-on events
+* Notes sustain until matching note-off is reached.
+* Synth voice uses a brighter low-pass cutoff and fast attack for legibility.
 
 ---
 
 ### Backward Movement (Rewind Articulation)
 
-* Notes remain forward-played
-* Envelope is **inverted**:
+* Reverse traversal applies the inverse transition on the same column:
+  * forward note-on becomes note release
+  * forward note-off becomes note start
+* Backward-started notes are transient and auto-release (fade-out), not sustained.
+* When movement input stops, any remaining active voices are released to avoid stuck drones.
+* This preserves harmonic continuity while moving backward through authored musical states while keeping rewind audio readable and non-fatiguing.
 
-  * Slow attack
-  * Short decay
-  * Minimal sustain
-* Filter becomes darker / narrower
+**Result:**
 
-**Perceptual Result:**
-The note feels like it is *fading in from the past* rather than asserting itself.
-
-This approach:
-
-* Preserves pitch and harmony
-* Clearly communicates reversal
-* Is lightweight to implement in Godot using envelope parameters
+* Much closer rhythmic/melodic behavior to source MIDI
+* Preserved direction readability (forward vs backward)
+* No dependency on external SoundFont middleware in the core prototype loop
+* Voice lifecycle is click-safe:
+  * no immediate global hard-cut when horizontal input briefly goes idle
+  * short idle grace window before releasing held voices
+  * smooth release ramps and legato handling for near-immediate retriggers on the same note
 
 ---
 
@@ -280,6 +307,32 @@ Elevator platforms move vertically in a repeating beat-driven staircase loop.
 * Climb for 4 beats (`+1, +2, +3, +4` levels).
 * Descend for the next 4 beats (`+3, +2, +1, +0` levels).
 * Repeat continuously on an 8-beat cycle.
+
+---
+
+## **4.4 Shuttle Platforms (Beat Horizontal Sweep)**
+
+Shuttle platforms move horizontally on beat, always snapped to the gameplay grid.
+
+**Rules:**
+
+* Move by exactly 1 horizontal grid cell on each beat.
+* Follow the repeating beat sequence: `0, +1, +2, +3, +4, +3, +2, +1, 0`.
+* Movement is strictly beat-driven and never interpolated between cells.
+* If the player is standing on the platform, the player is carried by the same snapped horizontal delta.
+
+---
+
+## **4.5 Cross Platforms (4-Beat Cross Orbit)**
+
+Cross platforms move on a 4-beat loop around their authored center, always snapped to the gameplay grid.
+
+**Rules:**
+
+* Radius is exactly 1 grid cell from the authored center.
+* Beat sequence is fixed: `down -> left -> up -> right`.
+* Positions map to grid offsets: `(0,+1) -> (-1,0) -> (0,-1) -> (+1,0)`.
+* If the player is standing on the platform, the player is carried by the same snapped delta on each beat.
 
 ---
 
@@ -422,7 +475,7 @@ Levels are assembled from segments:
 
 ```text
 Segment {
-  duration_beats
+  duration_beats = 2
   energy_state
   platform_types
   vertical_range
@@ -469,6 +522,8 @@ Procedural variation occurs **within authored constraints**.
 * Dedicated start scene with:
   * scrollable level list loaded from `Levels/*.runtime.json`
   * per-level best-time readout
+  * best-time persistence keyed by level file name (not by list index) to keep records stable when alphabetical order changes
+  * no fallback to index-based legacy keys
   * volume slider with immediate audible preview
   * direct link to level editor (`/editor.html`)
 * A dimmed gameplay **preview mode** runs in the background behind the start UI.
@@ -478,7 +533,7 @@ Procedural variation occurs **within authored constraints**.
 * Darkness overlay alpha is driven by intensity with a non-zero visibility floor.
 * HUD includes:
   * lives as hearts + numeric counter
-  * timer
+  * timer (top-center, screen-anchored)
   * kill score with cumulative time discount display (`kills (-Xs)`, one decimal)
 * Implemented state overlays:
   * pause menu (`ESC`)
@@ -508,6 +563,14 @@ Procedural variation occurs **within authored constraints**.
   * blue family aligned to VSG (`#3A86FF` fill, `#4CC9F0` border)
   * moves one vertical grid level per beat
   * loops with 4-beat rise and 4-beat descent
+* **Shuttle platform**:
+  * same mobile blue family as elevator (`#3A86FF` + `#4CC9F0`)
+  * moves horizontally on beat with `0,1,2,3,4,3,2,1,0` loop
+  * carries player horizontally while standing on top
+* **Cross platform**:
+  * same mobile blue family as elevator (`#3A86FF` + `#4CC9F0`)
+  * moves on 4-beat cross pattern (`down -> left -> up -> right`, radius 1 cell)
+  * carries player with both horizontal and vertical snapped deltas while standing on top
 
 ### Runtime Visual Identity Update (VSG Alignment, Feb 2026)
 
@@ -523,24 +586,29 @@ Procedural variation occurs **within authored constraints**.
 
 ## **6.2 Level Editor (Implemented Tooling)**
 
-The project includes a browser editor at `/editor.html` for draft and runtime level authoring.
+The project includes a browser editor at `/editor.html` for runtime-oriented level authoring.
 
 ### Editor UX and Style Direction
 
 * Same dark style family as runtime:
   * `#05070f` background
   * layered panel surfaces (`#0c1322`, `#121A2B`)
-  * cool blue borders (`#1b2a45`, `#2a3e66`)
+  * cool blue borders (`#1b2a45`, `#3a4663`)
   * active selection accent aligned to VSG cool energy (`#4CC9F0`)
   * monospace typography
+  * warm primary action buttons (`#F4D35E`) with dark text (`#05070F`)
 * Left control panel + right workspace layout.
 * User-facing sections:
+  * top `Back to Game` action
   * MIDI/Levels folder loaders
-  * quality mode selector (`fast`, `balanced`, `accurate`)
+  * playback quality mode selector (`fast`, `balanced`, `accurate`)
   * runtime export box
   * segment table editor
   * live minimap
   * runtime platform layout canvas
+* Segment authoring source of truth:
+  * segments are derived from MIDI or loaded JSON data
+  * no manual `Load sample` / `Add segment` controls in the editor UI
 
 ### Minimap and Layout Editor
 
@@ -549,41 +617,68 @@ The project includes a browser editor at `/editor.html` for draft and runtime le
   * Medium: blue
   * High: amber
 * Layout editor supports:
-  * camera scroll left/right
+  * horizontal camera scrollbar
   * center on spawn
   * regenerate from segments
   * delete selected platform
   * left-click select/drag
   * right-click cycle platform type or create platform
+  * X snap aligned to runtime player anchor (`x = 150`) with `32px` grid step
+  * Y snap aligned to runtime vertical grid with `32px` spacing
+  * canvas grid overlay aligned to the same runtime snap lattice
 * Platform type cycle:
-  * `segment -> beat -> alternateBeat -> ghost -> reverseGhost -> elevator`
+  * `static -> beat -> alternateBeat -> ghost -> reverseGhost -> elevator -> shuttle -> cross`
+  * editor label `static` maps to runtime/export kind `segment`
 * Canvas rendering includes visible platform borders, selected-state highlight stroke, spawn guide line, and kind labels.
 
 ### Runtime Export Features
 
 * Runtime export parameters:
   * BPM (20–300)
-  * grid columns (1–128)
+  * grid columns are auto-derived from authored platform extent (not user-editable in the editor UI)
   * platform kinds are exported from explicit layout/platform type definitions
+* Runtime outputs:
+  * `Save runtime to Levels` writes `<base>.runtime.json` to `Levels/`
+  * runtime export includes a `segments` metadata snapshot used by the editor for lossless round-trip of per-segment fields
+* Level load behavior:
+  * when loading a level JSON with `midi_file`, the editor attempts to auto-load the linked MIDI from `MIDI/`
+  * if the linked MIDI is unavailable, runtime export still works using saved/runtime note data
+  * `Load level file` refreshes `Levels/` before applying data, so the latest saved runtime is loaded
+  * after load, the selected level remains selected in the `Levels/` dropdown
+* MIDI load behavior:
+  * manual `Load MIDI file` / `Select local MIDI` rebuilds segments from the loaded MIDI and resets layout editor to generated mode
+  * segment count is derived from MIDI duration and current runtime BPM at generation time (`2 beats` per segment)
+  * changing runtime BPM after MIDI load does not rebuild segment count automatically; regenerate/reload is required to recalculate beats/segments
 * Runtime generation guarantees:
-  * spawn-support segment at player start
+  * if no generated `static` segment covers spawn, a fallback spawn-support segment is injected immediately left of spawn (its right edge aligns to spawn)
   * default platform width is 2 horizontal grid cells
-  * auto-generation uses 2 beats per platform slot (8-beat segments -> 4 platforms)
-  * each generated platform picks a random type from that segment's `platform_types`
+  * each segment is fixed to 2 beats and generates exactly 1 platform slot
+  * each segment draws a single random roll in `[0,1)` for platform allocation:
+    * `< 0.1`: blank slot (no platform)
+    * `0.1 - 0.5`: static platform
+    * `>= 0.5`: remaining probability split equally across non-static types declared in that segment `platform_types`
   * each generated platform picks a random vertical level between `vertical_min` and `vertical_max`
   * generation avoids overlapping placements while building the lane
-  * no forced moon-approach sequence is appended at runtime
-  * moon reachability is authored by level design
+  * when generating from loaded MIDI, runtime appends a fixed 3-step static ascent at vertical levels `3 -> 5 -> 7` after authored/generated segment slots to preserve moon reachability
+  * moon reachability remains primarily authored, with the MIDI-generation ascent acting as a fallback assist
 * Enemy authoring per segment:
   * `patrol_enemies`
-  * `flying_spawn_interval_ms`
+  * `flying_spawn_interval_ms` (stored in runtime JSON)
+  * editor input is in seconds (`Flying Spawn Interval (s, 0=Off)`), converted to/from ms during runtime export/load
+  * `flying_spawn_interval_ms = 0` disables flying spawn for that segment
+  * MIDI-derived draft default patrols: `low=0`, `medium=random(0|1)`, `high=random(0|1)`
+  * MIDI-derived draft enables flying spawn interval only every 5 segments (`5, 10, 15, ...`), using energy-coherent intervals
+  * if `segmentEnemies` exists in runtime JSON (even empty), gameplay uses segment-authoring mode and disables global fallback enemy settings
   * runtime maps authored `segmentIndex` across available segment platforms to avoid front-loading on long mixed-platform levels
   * patrol spawn enforces local spacing/capacity so enemies do not overlap at spawn time
   * patrol allocation is spread across nearby segment platforms to reduce repeated same-segment clustering
 * Moon movement boundary:
-  * moon horizontal stop is tied to authored platform extent (level layout end), not synthetic grid coverage
+  * moon horizontal stop is tied to authored platform extent plus one platform slot to the right (2 grid cells), not synthetic grid coverage
 * World bounds:
   * gameplay/camera width is derived from authored platform extent (grid columns are only a fallback when no platforms exist)
+* Tempo-change implications:
+  * changing runtime BPM keeps authored beat count/segment layout unchanged unless the draft is regenerated from MIDI
+  * traversal/enemy pacing follows the new BPM, so the same beat sequence is crossed faster/slower
 
 ---
 

@@ -65,8 +65,10 @@ export class BeatSnapMover {
       return { x: this.position, arrived: true, direction };
     }
 
-    // Grid-anchored movement: hold position until beat subdivision, then snap.
-    this.position = this.activeStep.fromX;
+    const travelMs = Math.max(1, this.activeStep.arrivalTime - this.activeStep.startTime);
+    const elapsedMs = Math.max(0, nowMs - this.activeStep.startTime);
+    const progress = Math.min(1, elapsedMs / travelMs);
+    this.position = this.activeStep.fromX + (this.activeStep.toX - this.activeStep.fromX) * progress;
     return { x: this.position, arrived: false, direction: this.activeStep.direction };
   }
 }

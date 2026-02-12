@@ -11,7 +11,7 @@ export const defaultIntensityConfig: IntensityConfig = {
   intensityGainRate: 0.3,
   decayRate: 0.05,
   intensityLossRate: 0.3,
-  residualFloor: 0.25
+  residualFloor: 0.15
 };
 
 export function updateIntensity(

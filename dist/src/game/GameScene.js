@@ -1,13 +1,17 @@
 import { BeatSnapMover } from '../core/beatMovement.js';
 import { Metronome } from '../core/metronome.js';
-import { buildGridNotesFromMidi, parseMidiFile } from '../core/midi.js';
-import { getBeatPlatformState, getElevatorOffsetSteps, isAlternateBeatPlatformSolid } from '../core/platforms.js';
+import { buildGridMidiMapFromMidi, buildGridNotesFromMidi, parseMidiFile } from '../core/midi.js';
+import { getBeatPlatformState, getCrossOffsetSteps, getElevatorOffsetSteps, getShuttleOffsetSteps, isAlternateBeatPlatformSolid } from '../core/platforms.js';
 import { defaultIntensityConfig } from '../core/intensity.js';
+import { DEFAULT_REFERENCE_BPM, scaleIntervalByTempo, scaleSpeedByTempo } from '../core/tempo.js';
 import { getLevelByOneBasedIndex, LEVELS } from '../data/levels.js';
 import { resolveIntent } from '../core/input.js';
 import { applyDamage, resolveEnemyCollision, updateFlyingEnemy, updatePatrolEnemy } from '../core/enemies.js';
 const BEST_TIME_STORAGE_PREFIX = 'sambo.level';
 const ENEMY_TIME_BONUS_MS = 200;
+const BASE_PATROL_SPEED = 90;
+const BASE_FLYING_SPEED_X = 180;
+const BASE_FLYING_HOMING_RATE = 90;
 const CONTROL_HINT_TEXT = 'A/D or Arrows: move | W/Space/Up: jump.';
 const HUD_FONT = 'monospace';
 const DEPTH_ENVIRONMENT = 2;
@@ -55,6 +59,7 @@ export class GameScene extends Phaser.Scene {
     moon;
     moonHalo;
     infoText;
+    debugText;
     scoreText;
     livesText;
     timerText;
@@ -63,6 +68,8 @@ export class GameScene extends Phaser.Scene {
     ghostPlatforms = [];
     reverseGhostPlatforms = [];
     elevatorPlatforms = [];
+    shuttlePlatforms = [];
+    crossPlatforms = [];
     segmentPlatforms = [];
     darknessOverlay;
     gameOverBackdrop;
@@ -109,14 +116,18 @@ export class GameScene extends Phaser.Scene {
     lastGroundedAtMs = 0;
     lastBeatInBar = null;
     lastElevatorOffsetSteps = 0;
+    lastShuttleOffsetSteps = 0;
+    lastCrossOffsetSteps = { x: 0, y: 1 };
     moonBeatPulse = 0;
     runStartMs = 0;
     elapsedAtEndMs = 0;
     bestTimeMs = null;
     enemyKills = 0;
     currentLevel = LEVELS[0];
+    currentLevelName = 'level_1.runtime.json';
     currentLevelOneBasedIndex = 1;
     availableLevels = LEVELS;
+    availableLevelNames = ['level_1.runtime.json'];
     isPreviewMode = false;
     masterVolume = 0.5;
     nextPreviewToggleMs = 0;
@@ -128,10 +139,21 @@ export class GameScene extends Phaser.Scene {
     useSegmentEnemySpawns = false;
     activeSegmentFlyingSpawnIntervalMs = 0;
     levelMidiCacheKey = null;
+    gridMidiMap = null;
+    activeVoices = new Map();
+    masterGain = null;
     patrolSquashBaseScaleY = 0.93;
     patrolSquashAmplitude = 0.05;
     flyingStretchBaseScaleX = 1.03;
     flyingStretchAmplitude = 0.07;
+    maxSimultaneousVoices = 4;
+    idleVoiceReleaseAtMs = 0;
+    lastMusicEventAtMs = 0;
+    debugLastGridColumn = -1;
+    debugLastDirection = 'idle';
+    debugLastOnCount = 0;
+    debugLastOffCount = 0;
+    debugAudioMode = 'legacy';
     constructor() {
         super('game');
     }
@@ -191,8 +213,25 @@ export class GameScene extends Phaser.Scene {
                     .setDepth(DEPTH_ENVIRONMENT);
                 this.elevatorPlatforms.push({ shape: elevator, baseY: elevator.y });
             }
+            else if (platform.kind === 'shuttle') {
+                const shuttle = this.add
+                    .rectangle(this.snapXToGrid(platform.x), this.snapYToGrid(platform.y), this.snapLengthToGrid(platform.width), this.platformBlockHeight, COLORS.elevatorFill, 0.9)
+                    .setStrokeStyle(2, COLORS.elevatorBorder, 0.9)
+                    .setDepth(DEPTH_ENVIRONMENT);
+                this.shuttlePlatforms.push({ shape: shuttle, baseX: shuttle.x });
+            }
+            else if (platform.kind === 'cross') {
+                const cross = this.add
+                    .rectangle(this.snapXToGrid(platform.x), this.snapYToGrid(platform.y), this.snapLengthToGrid(platform.width), this.platformBlockHeight, COLORS.elevatorFill, 0.9)
+                    .setStrokeStyle(2, COLORS.elevatorBorder, 0.9)
+                    .setDepth(DEPTH_ENVIRONMENT);
+                this.crossPlatforms.push({ shape: cross, baseX: cross.x, baseY: cross.y });
+            }
         }
-        this.syncElevatorPlatforms(performance.now());
+        const initialNow = performance.now();
+        this.syncElevatorPlatforms(initialNow);
+        this.syncShuttlePlatforms(initialNow);
+        this.syncCrossPlatforms(initialNow);
         this.playerY = this.getInitialPlayerYFromPlatforms();
         this.player = this.add.rectangle(150, this.playerY, 24, 38, COLORS.player, 1).setDepth(DEPTH_PLAYER);
         this.cameras.main.startFollow(this.player, false, 0.12, 0.12);
@@ -207,7 +246,7 @@ export class GameScene extends Phaser.Scene {
             fontSize: '18px'
         });
         this.timerText = this.add
-            .text(this.worldWidth / 2, 14, '', {
+            .text(this.scale.width * 0.5, 14, '', {
             color: COLORS.hudText,
             fontFamily: HUD_FONT,
             fontSize: '20px'
@@ -218,6 +257,14 @@ export class GameScene extends Phaser.Scene {
             fontFamily: HUD_FONT,
             fontSize: '16px'
         });
+        this.debugText = this.add
+            .text(this.scale.width - 20, 14, '', {
+            color: '#9db6de',
+            fontFamily: HUD_FONT,
+            fontSize: '14px',
+            align: 'right'
+        })
+            .setOrigin(1, 0);
         this.scoreText = this.add
             .text(480, 520, '0', {
             color: COLORS.hudText,
@@ -232,10 +279,12 @@ export class GameScene extends Phaser.Scene {
         this.livesText.setDepth(11);
         this.timerText.setDepth(11);
         this.infoText.setDepth(11);
+        this.debugText.setDepth(11);
         this.scoreText.setDepth(11);
         this.livesText.setScrollFactor(0);
         this.timerText.setScrollFactor(0);
         this.infoText.setScrollFactor(0);
+        this.debugText.setScrollFactor(0);
         this.scoreText.setScrollFactor(0);
         this.cursors = this.input.keyboard.createCursorKeys();
         this.keys = this.input.keyboard.addKeys('W,A,S,D,SPACE,UP,LEFT,RIGHT,ESC');
@@ -304,8 +353,19 @@ export class GameScene extends Phaser.Scene {
             this.currentDirection = this.mover.currentStep.direction;
         else
             this.currentDirection = 'idle';
+        if (!this.mover.currentStep && intent.direction === 'idle' && this.activeVoices.size > 0) {
+            if (this.idleVoiceReleaseAtMs <= 0)
+                this.idleVoiceReleaseAtMs = now + 150;
+            const longEnoughIdle = now >= this.idleVoiceReleaseAtMs;
+            const noRecentMusic = now - this.lastMusicEventAtMs >= 80;
+            if (longEnoughIdle && noRecentMusic)
+                this.releaseAllVoices();
+        }
+        else {
+            this.idleVoiceReleaseAtMs = 0;
+        }
         if (movement.arrived)
-            this.playNoteAtGridIndex(this.getGridIndexFromX(this.player.x), movement.direction);
+            this.playGridAudioAtIndex(this.getGridIndexFromX(this.player.x), movement.direction);
         if (movedX < -this.movementEpsilon)
             this.ghostPlatformLatchedSolid = true;
         else if (movedX > this.movementEpsilon)
@@ -319,11 +379,29 @@ export class GameScene extends Phaser.Scene {
         const alternateBeatSolid = isAlternateBeatPlatformSolid(beatInBar);
         this.handleBeatPulse(beatInBar);
         const wasStandingOnElevator = this.isStandingOnAnyElevator();
+        const wasStandingOnShuttle = this.isStandingOnAnyShuttle();
+        const wasStandingOnCross = this.isStandingOnAnyCross();
         const elevatorDeltaY = this.syncElevatorPlatforms(now);
-        if (wasStandingOnElevator && elevatorDeltaY !== 0) {
-            this.playerY += elevatorDeltaY;
+        const shuttleDeltaX = this.syncShuttlePlatforms(now);
+        const crossDelta = this.syncCrossPlatforms(now);
+        let carriedX = 0;
+        let carriedY = 0;
+        if (wasStandingOnElevator)
+            carriedY += elevatorDeltaY;
+        if (wasStandingOnShuttle)
+            carriedX += shuttleDeltaX;
+        if (wasStandingOnCross) {
+            carriedX += crossDelta.deltaX;
+            carriedY += crossDelta.deltaY;
+        }
+        if (carriedX !== 0 || carriedY !== 0) {
+            this.player.x = Phaser.Math.Clamp(this.player.x + carriedX, this.minPlayerX, this.maxPlayerX);
+            this.mover.stopAt(this.player.x - this.playerStartX);
+            this.playerY += carriedY;
             this.player.y = this.playerY;
-            this.verticalVelocity = Math.min(0, this.verticalVelocity);
+            if (carriedY !== 0) {
+                this.verticalVelocity = Math.min(0, this.verticalVelocity);
+            }
         }
         const beatSolid = beatState !== 'gone';
         const ghostSolid = this.ghostPlatformLatchedSolid;
@@ -353,7 +431,7 @@ export class GameScene extends Phaser.Scene {
         this.updateMoonVisual(deltaSeconds);
         this.applyBeatPlatformVisual(beatState, now);
         this.applyAlternateBeatPlatformVisual(alternateBeatSolid);
-        this.applyElevatorPlatformVisual();
+        this.applyMobilePlatformVisual();
         for (const ghostPlatform of this.ghostPlatforms) {
             if (ghostSolid) {
                 ghostPlatform.setFillStyle(COLORS.ghostActiveFill, 0.85);
@@ -379,6 +457,7 @@ export class GameScene extends Phaser.Scene {
             }
         }
         this.infoText.setText(CONTROL_HINT_TEXT);
+        this.updateDebugOverlay();
     }
     resolveSpawnSafeX(x, minX, maxX) {
         const safeLeft = this.playerStartX - this.minEnemySpawnDistanceFromPlayerStart;
@@ -411,7 +490,7 @@ export class GameScene extends Phaser.Scene {
         this.patrolEnemies.push({
             sprite,
             alive: true,
-            state: { x: deoverlappedX, speed: 90, direction: 1, minX, maxX }
+            state: { x: deoverlappedX, speed: this.scaleEnemySpeed(BASE_PATROL_SPEED), direction: 1, minX, maxX }
         });
     }
     resolvePatrolSpawnX(preferredX, y, minX, maxX) {
@@ -454,7 +533,13 @@ export class GameScene extends Phaser.Scene {
         this.flyingEnemies.push({
             sprite,
             alive: true,
-            state: { x: safeX, y, speedX: 180, homingRate: 90, active: true }
+            state: {
+                x: safeX,
+                y,
+                speedX: this.scaleEnemySpeed(BASE_FLYING_SPEED_X),
+                homingRate: this.scaleEnemySpeed(BASE_FLYING_HOMING_RATE),
+                active: true
+            }
         });
     }
     updatePatrolEnemies(deltaSeconds) {
@@ -565,7 +650,7 @@ export class GameScene extends Phaser.Scene {
             const spawnY = Phaser.Math.Between(160, 330);
             this.spawnFlyingEnemyAt(spawnX, spawnY);
             plan.pendingFlyingSpawns -= 1;
-            const spacing = Math.max(500, plan.flyingSpawnIntervalMs || 1200);
+            const spacing = Math.max(250, plan.flyingSpawnIntervalMs || this.scaleSpawnIntervalMs(1200));
             plan.nextFlyingSpawnMs = nowMs + spacing;
         }
     }
@@ -579,6 +664,19 @@ export class GameScene extends Phaser.Scene {
         const kills = this.getEnemyKillCount();
         const bonusSeconds = this.getEnemyTimeBonusMs() / 1000;
         this.scoreText.setText(`${kills} (-${bonusSeconds.toFixed(1)}s)`);
+    }
+    updateDebugOverlay() {
+        if (!this.debugText)
+            return;
+        const modeLabel = this.debugAudioMode === 'midi' ? 'MIDI' : 'Legacy';
+        const channels = this.gridMidiMap?.selectedChannels.length ?? 0;
+        const voices = this.activeVoices.size;
+        const stepState = this.mover.currentStep ? 'moving' : 'idle';
+        this.debugText.setText([
+            `Debug Audio: ${modeLabel} | channels=${channels}`,
+            `Grid: col=${this.debugLastGridColumn} dir=${this.debugLastDirection} step=${stepState}`,
+            `Events: on=${this.debugLastOnCount} off=${this.debugLastOffCount} voices=${voices}`
+        ].join('\n'));
     }
     applyBeatPlatformVisual(state, nowMs) {
         if (this.beatPlatforms.length === 0)
@@ -632,25 +730,57 @@ export class GameScene extends Phaser.Scene {
             }
         }
     }
-    applyElevatorPlatformVisual() {
-        if (this.elevatorPlatforms.length === 0)
+    applyMobilePlatformVisual() {
+        if (this.elevatorPlatforms.length + this.shuttlePlatforms.length + this.crossPlatforms.length === 0)
             return;
         const movingUp = this.lastElevatorOffsetSteps > 0 && this.lastElevatorOffsetSteps < 4;
         const movingDown = this.lastElevatorOffsetSteps > 0 && !movingUp;
-        for (const elevatorPlatform of this.elevatorPlatforms) {
-            if (movingUp) {
-                elevatorPlatform.shape.setFillStyle(COLORS.elevatorFill, 0.95);
-                elevatorPlatform.shape.setStrokeStyle(2, COLORS.elevatorBorder, 0.98);
+        const shuttleMoving = this.lastShuttleOffsetSteps > 0 && this.lastShuttleOffsetSteps < 4;
+        const crossMovingVertical = this.lastCrossOffsetSteps.y !== 0;
+        const crossMovingHorizontal = this.lastCrossOffsetSteps.x !== 0;
+        const applyStyle = (shape, mode) => {
+            if (mode === 'up') {
+                shape.setFillStyle(COLORS.elevatorFill, 0.95);
+                shape.setStrokeStyle(2, COLORS.elevatorBorder, 0.98);
             }
-            else if (movingDown) {
-                elevatorPlatform.shape.setFillStyle(0x2f6fd3, 0.9);
-                elevatorPlatform.shape.setStrokeStyle(2, COLORS.elevatorBorder, 0.9);
+            else if (mode === 'down') {
+                shape.setFillStyle(0x2f6fd3, 0.9);
+                shape.setStrokeStyle(2, COLORS.elevatorBorder, 0.9);
+            }
+            else if (mode === 'side') {
+                shape.setFillStyle(0x347be8, 0.92);
+                shape.setStrokeStyle(2, COLORS.elevatorBorder, 0.95);
             }
             else {
-                elevatorPlatform.shape.setFillStyle(0x285fb7, 0.86);
-                elevatorPlatform.shape.setStrokeStyle(2, COLORS.elevatorBorder, 0.78);
+                shape.setFillStyle(0x285fb7, 0.86);
+                shape.setStrokeStyle(2, COLORS.elevatorBorder, 0.78);
             }
-            elevatorPlatform.shape.setAlpha(0.92);
+            shape.setAlpha(0.92);
+        };
+        for (const elevatorPlatform of this.elevatorPlatforms) {
+            if (movingUp) {
+                applyStyle(elevatorPlatform.shape, 'up');
+            }
+            else if (movingDown) {
+                applyStyle(elevatorPlatform.shape, 'down');
+            }
+            else {
+                applyStyle(elevatorPlatform.shape, 'idle');
+            }
+        }
+        for (const shuttlePlatform of this.shuttlePlatforms) {
+            applyStyle(shuttlePlatform.shape, shuttleMoving ? 'side' : 'idle');
+        }
+        for (const crossPlatform of this.crossPlatforms) {
+            if (crossMovingVertical) {
+                applyStyle(crossPlatform.shape, this.lastCrossOffsetSteps.y < 0 ? 'up' : 'down');
+            }
+            else if (crossMovingHorizontal) {
+                applyStyle(crossPlatform.shape, 'side');
+            }
+            else {
+                applyStyle(crossPlatform.shape, 'idle');
+            }
         }
     }
     syncElevatorPlatforms(nowMs) {
@@ -665,6 +795,38 @@ export class GameScene extends Phaser.Scene {
         }
         this.lastElevatorOffsetSteps = offsetSteps;
         return -deltaSteps * stepSize;
+    }
+    syncShuttlePlatforms(nowMs) {
+        if (this.shuttlePlatforms.length === 0)
+            return 0;
+        const beatIndex = Math.floor(nowMs / this.metronome.beatIntervalMs);
+        const offsetSteps = getShuttleOffsetSteps(beatIndex);
+        const deltaSteps = offsetSteps - this.lastShuttleOffsetSteps;
+        const stepSize = this.getPlatformGridStepX();
+        for (const shuttlePlatform of this.shuttlePlatforms) {
+            shuttlePlatform.shape.x = shuttlePlatform.baseX + offsetSteps * stepSize;
+        }
+        this.lastShuttleOffsetSteps = offsetSteps;
+        return deltaSteps * stepSize;
+    }
+    syncCrossPlatforms(nowMs) {
+        if (this.crossPlatforms.length === 0)
+            return { deltaX: 0, deltaY: 0 };
+        const beatIndex = Math.floor(nowMs / this.metronome.beatIntervalMs);
+        const offsetSteps = getCrossOffsetSteps(beatIndex);
+        const deltaXSteps = offsetSteps.x - this.lastCrossOffsetSteps.x;
+        const deltaYSteps = offsetSteps.y - this.lastCrossOffsetSteps.y;
+        const stepSizeX = this.getPlatformGridStepX();
+        const stepSizeY = this.mover.stepSize;
+        for (const crossPlatform of this.crossPlatforms) {
+            crossPlatform.shape.x = crossPlatform.baseX + offsetSteps.x * stepSizeX;
+            crossPlatform.shape.y = crossPlatform.baseY + offsetSteps.y * stepSizeY;
+        }
+        this.lastCrossOffsetSteps = offsetSteps;
+        return { deltaX: deltaXSteps * stepSizeX, deltaY: deltaYSteps * stepSizeY };
+    }
+    getPlatformGridStepX() {
+        return this.mover.stepSize * 2;
     }
     snapLengthToGrid(length) {
         void length;
@@ -719,6 +881,14 @@ export class GameScene extends Phaser.Scene {
             if (this.isStandingOnPlatform(elevatorPlatform.shape, elevatorSolid))
                 return true;
         }
+        for (const shuttlePlatform of this.shuttlePlatforms) {
+            if (this.isStandingOnPlatform(shuttlePlatform.shape, true))
+                return true;
+        }
+        for (const crossPlatform of this.crossPlatforms) {
+            if (this.isStandingOnPlatform(crossPlatform.shape, true))
+                return true;
+        }
         for (const platform of this.segmentPlatforms) {
             if (this.isStandingOnPlatform(platform.shape, platform.solid))
                 return true;
@@ -728,6 +898,20 @@ export class GameScene extends Phaser.Scene {
     isStandingOnAnyElevator() {
         for (const elevatorPlatform of this.elevatorPlatforms) {
             if (this.isStandingOnPlatform(elevatorPlatform.shape, true))
+                return true;
+        }
+        return false;
+    }
+    isStandingOnAnyShuttle() {
+        for (const shuttlePlatform of this.shuttlePlatforms) {
+            if (this.isStandingOnPlatform(shuttlePlatform.shape, true))
+                return true;
+        }
+        return false;
+    }
+    isStandingOnAnyCross() {
+        for (const crossPlatform of this.crossPlatforms) {
+            if (this.isStandingOnPlatform(crossPlatform.shape, true))
                 return true;
         }
         return false;
@@ -788,6 +972,12 @@ export class GameScene extends Phaser.Scene {
         for (const elevatorPlatform of this.elevatorPlatforms) {
             tryLandOnPlatform(elevatorPlatform.shape, elevatorSolid);
         }
+        for (const shuttlePlatform of this.shuttlePlatforms) {
+            tryLandOnPlatform(shuttlePlatform.shape, true);
+        }
+        for (const crossPlatform of this.crossPlatforms) {
+            tryLandOnPlatform(crossPlatform.shape, true);
+        }
         if (landingY !== null) {
             this.playerY = landingY;
             this.verticalVelocity = 0;
@@ -847,7 +1037,7 @@ export class GameScene extends Phaser.Scene {
         filter.frequency.value = isBarAccent ? 1400 : 1100;
         osc.connect(filter);
         filter.connect(gain);
-        gain.connect(synth.destination);
+        gain.connect(this.getAudioOutputNode(synth));
         const now = synth.currentTime;
         const peak = Math.max(0.0001, (isBarAccent ? 0.16 : 0.11) * this.masterVolume);
         gain.gain.setValueAtTime(0.0001, now);
@@ -926,14 +1116,16 @@ export class GameScene extends Phaser.Scene {
             levelIndex: this.currentLevelOneBasedIndex,
             mode: 'play',
             volume: this.masterVolume,
-            levels: this.availableLevels
+            levels: this.availableLevels,
+            levelNames: this.availableLevelNames
         }));
         this.nextLevelButton.on('pointerdown', () => this.goToNextLevel());
         this.backToMenuButton.on('pointerdown', () => {
             this.scene.start('start', {
                 levelIndex: this.currentLevelOneBasedIndex,
                 volume: this.masterVolume,
-                levels: this.availableLevels
+                levels: this.availableLevels,
+                levelNames: this.availableLevelNames
             });
         });
     }
@@ -997,7 +1189,8 @@ export class GameScene extends Phaser.Scene {
             this.scene.start('start', {
                 levelIndex: this.currentLevelOneBasedIndex,
                 volume: this.masterVolume,
-                levels: this.availableLevels
+                levels: this.availableLevels,
+                levelNames: this.availableLevelNames
             });
         });
         this.quitButton.on('pointerdown', () => {
@@ -1047,6 +1240,7 @@ export class GameScene extends Phaser.Scene {
         if (this.isPreviewMode)
             return;
         this.isGameOver = true;
+        this.releaseAllVoices();
         this.elapsedAtEndMs = Math.max(0, performance.now() - this.runStartMs);
         this.updateTimerLabel(performance.now());
         this.endStateTitle = 'GAME OVER';
@@ -1069,6 +1263,7 @@ export class GameScene extends Phaser.Scene {
         if (this.isPreviewMode)
             return;
         this.isGameOver = true;
+        this.releaseAllVoices();
         const now = performance.now();
         const rawCompletedMs = Math.max(0, now - this.runStartMs);
         const scoreBonusMs = this.getEnemyTimeBonusMs();
@@ -1118,6 +1313,7 @@ export class GameScene extends Phaser.Scene {
         }
     }
     resetGameplayState() {
+        this.releaseAllVoices(true);
         this.metronome = new Metronome(this.currentLevel.bpm, 4);
         this.mover = new BeatSnapMover(this.metronome, 32);
         this.segmentPlatforms = [];
@@ -1129,24 +1325,32 @@ export class GameScene extends Phaser.Scene {
         this.endStateTitle = 'GAME OVER';
         this.damageCooldownMs = 0;
         this.nextFlyingSpawnMs = 0;
-        this.patrolCount = Math.max(0, Math.floor(this.currentLevel.enemies?.patrolCount ?? 2));
-        this.flyingSpawnIntervalMs = Math.max(500, Math.floor(this.currentLevel.enemies?.flyingSpawnIntervalMs ?? 3400));
+        const hasSegmentEnemyAuthoring = Array.isArray(this.currentLevel.segmentEnemies);
+        this.patrolCount = hasSegmentEnemyAuthoring ? 0 : Math.max(0, Math.floor(this.currentLevel.enemies?.patrolCount ?? 2));
+        const baseSpawnInterval = hasSegmentEnemyAuthoring
+            ? 0
+            : Math.max(500, Math.floor(this.currentLevel.enemies?.flyingSpawnIntervalMs ?? 3400));
+        this.flyingSpawnIntervalMs = baseSpawnInterval > 0 ? this.scaleSpawnIntervalMs(baseSpawnInterval) : 0;
         this.segmentEnemyPlans = [];
-        this.useSegmentEnemySpawns =
-            Array.isArray(this.currentLevel.segmentEnemies) &&
-                this.currentLevel.segmentEnemies.some((seg) => {
-                    const patrol = Math.max(0, Math.floor(Number(seg?.patrolCount) || 0));
-                    const flyingLegacy = Math.max(0, Math.floor(Number(seg?.flyingCount) || 0));
-                    const rawInterval = Number(seg?.flyingSpawnIntervalMs);
-                    const hasInterval = Number.isFinite(rawInterval) && rawInterval > 0;
-                    return patrol + flyingLegacy > 0 || hasInterval;
-                });
+        this.useSegmentEnemySpawns = hasSegmentEnemyAuthoring;
+        if (this.isEnemyPlanDebugEnabled()) {
+            const segmentEnemyRows = Array.isArray(this.currentLevel.segmentEnemies) ? this.currentLevel.segmentEnemies.length : 0;
+            console.log('[EnemyDebug] mode', {
+                hasSegmentEnemyAuthoring,
+                useSegmentEnemySpawns: this.useSegmentEnemySpawns,
+                segmentEnemyRows,
+                fallbackPatrolCount: this.patrolCount,
+                fallbackFlyingSpawnIntervalMs: this.flyingSpawnIntervalMs
+            });
+        }
         this.activeSegmentFlyingSpawnIntervalMs = 0;
         this.beatPlatforms = [];
         this.alternateBeatPlatforms = [];
         this.ghostPlatforms = [];
         this.reverseGhostPlatforms = [];
         this.elevatorPlatforms = [];
+        this.shuttlePlatforms = [];
+        this.crossPlatforms = [];
         this.intensity = 1.0;
         this.currentDirection = 'idle';
         this.ghostPlatformLatchedSolid = false;
@@ -1157,18 +1361,28 @@ export class GameScene extends Phaser.Scene {
         this.lastGroundedAtMs = 0;
         this.lastBeatInBar = null;
         this.lastElevatorOffsetSteps = 0;
+        this.lastShuttleOffsetSteps = 0;
+        this.lastCrossOffsetSteps = { x: 0, y: 1 };
         this.moonBeatPulse = 0;
         this.runStartMs = 0;
         this.elapsedAtEndMs = 0;
         this.previewDirection = 'forward';
         this.enemyKills = 0;
+        this.debugLastGridColumn = -1;
+        this.debugLastDirection = 'idle';
+        this.debugLastOnCount = 0;
+        this.debugLastOffCount = 0;
+        this.debugAudioMode = 'legacy';
+        this.idleVoiceReleaseAtMs = 0;
+        this.lastMusicEventAtMs = 0;
         const step = 32;
         const maxPlatformRight = this.currentLevel.platforms.reduce((max, p) => Math.max(max, p.x + p.width / 2), 0);
         const hasAuthoredPlatforms = maxPlatformRight > 0;
         const fromPlatforms = maxPlatformRight + 220;
         const fromGridFallback = this.playerStartX + step * Math.max(0, this.currentLevel.gridColumns - 1) + 220;
         this.worldWidth = Math.max(960, Math.ceil(hasAuthoredPlatforms ? fromPlatforms : fromGridFallback));
-        this.moonMaxWorldX = Math.max(820, Math.ceil(maxPlatformRight + 140));
+        const moonForwardOffset = this.getPlatformGridStepX();
+        this.moonMaxWorldX = Math.max(820, Math.ceil(maxPlatformRight + 140 + moonForwardOffset));
     }
     updateTimerLabel(nowMs) {
         const elapsedMs = this.isGameOver ? this.elapsedAtEndMs : Math.max(0, nowMs - this.runStartMs);
@@ -1191,7 +1405,7 @@ export class GameScene extends Phaser.Scene {
         try {
             if (typeof window === 'undefined' || !window.localStorage)
                 return null;
-            const raw = window.localStorage.getItem(this.getBestTimeStorageKey(this.currentLevelOneBasedIndex));
+            const raw = window.localStorage.getItem(this.getBestTimeStorageKey(this.currentLevelName));
             if (!raw)
                 return null;
             const parsed = Number(raw);
@@ -1205,15 +1419,47 @@ export class GameScene extends Phaser.Scene {
         try {
             if (typeof window === 'undefined' || !window.localStorage)
                 return;
-            window.localStorage.setItem(this.getBestTimeStorageKey(this.currentLevelOneBasedIndex), String(Math.max(0, Math.floor(timeMs))));
+            window.localStorage.setItem(this.getBestTimeStorageKey(this.currentLevelName), String(Math.max(0, Math.floor(timeMs))));
         }
         catch {
             // Ignore storage failures (private mode / disabled storage).
         }
     }
-    playNoteAtGridIndex(gridIndex, direction) {
+    playGridAudioAtIndex(gridIndex, direction) {
         if (this.isPreviewMode || this.masterVolume <= 0)
             return;
+        const nowMs = performance.now();
+        const columnIndex = Phaser.Math.Clamp(Math.floor(gridIndex), 0, Math.max(0, this.currentLevel.gridColumns - 1));
+        this.debugLastGridColumn = columnIndex;
+        this.debugLastDirection = direction;
+        const midiMap = this.gridMidiMap;
+        if (!midiMap || !midiMap.eventsByColumn[columnIndex]) {
+            this.debugAudioMode = 'legacy';
+            this.debugLastOnCount = 1;
+            this.debugLastOffCount = 0;
+            this.lastMusicEventAtMs = nowMs;
+            this.playLegacyNoteAtGridIndex(columnIndex, direction);
+            return;
+        }
+        this.debugAudioMode = 'midi';
+        const columnEvents = midiMap.eventsByColumn[columnIndex];
+        this.debugLastOnCount = columnEvents.on.length;
+        this.debugLastOffCount = columnEvents.off.length;
+        if (columnEvents.on.length > 0 || columnEvents.off.length > 0)
+            this.lastMusicEventAtMs = nowMs;
+        if (direction === 'backward') {
+            for (const event of columnEvents.on)
+                this.releaseVoice(event.noteId, 0.1);
+            for (const event of columnEvents.off)
+                this.playBackwardTransient(event);
+            return;
+        }
+        for (const event of columnEvents.off)
+            this.releaseVoice(event.noteId, 0.08);
+        for (const event of columnEvents.on)
+            this.startVoice(event, 'forward');
+    }
+    playLegacyNoteAtGridIndex(gridIndex, direction) {
         const synth = this.ensureSynthReady();
         if (!synth)
             return;
@@ -1226,20 +1472,161 @@ export class GameScene extends Phaser.Scene {
         filter.frequency.value = direction === 'forward' ? 1200 : 700;
         osc.connect(filter);
         filter.connect(gain);
-        gain.connect(synth.destination);
+        gain.connect(this.getAudioOutputNode(synth));
         const now = synth.currentTime;
         if (direction === 'backward') {
             gain.gain.setValueAtTime(0.0001, now);
-            gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, 0.35 * this.masterVolume), now + 0.08);
-            gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
+            gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, 0.28 * this.masterVolume), now + 0.06);
+            gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
         }
         else {
             gain.gain.setValueAtTime(0.0001, now);
-            gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, 0.5 * this.masterVolume), now + 0.015);
-            gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
+            gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, 0.42 * this.masterVolume), now + 0.012);
+            gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
         }
         osc.start(now);
-        osc.stop(now + 0.24);
+        osc.stop(now + 0.22);
+    }
+    startVoice(event, direction) {
+        const synth = this.ensureSynthReady();
+        if (!synth)
+            return;
+        const now = synth.currentTime;
+        const existing = this.activeVoices.get(event.noteId);
+        if (existing) {
+            const retriggerMs = (now - existing.startedAt) * 1000;
+            if (retriggerMs <= 40) {
+                const velocityNorm = Phaser.Math.Clamp(event.velocity, 0.05, 1);
+                const cutoff = direction === 'forward' ? 900 + velocityNorm * 2200 : 500 + velocityNorm * 1300;
+                existing.filter.frequency.setTargetAtTime(cutoff, now, 0.01);
+                const peak = (direction === 'forward' ? 0.22 : 0.15) * velocityNorm * Phaser.Math.Clamp(this.masterVolume, 0, 1) * 0.85;
+                existing.gain.gain.cancelScheduledValues(now);
+                existing.gain.gain.setTargetAtTime(Math.max(0.0001, peak * 0.8), now, 0.012);
+                this.lastMusicEventAtMs = performance.now();
+                return;
+            }
+            this.releaseVoice(event.noteId, 0.06);
+        }
+        this.pruneVoices(now);
+        if (this.activeVoices.size >= this.maxSimultaneousVoices) {
+            const oldest = this.activeVoices.keys().next().value;
+            if (oldest)
+                this.releaseVoice(oldest, 0.03);
+        }
+        const gain = synth.createGain();
+        const filter = synth.createBiquadFilter();
+        const oscA = synth.createOscillator();
+        const oscB = synth.createOscillator();
+        oscA.type = 'sawtooth';
+        oscA.frequency.value = event.frequency;
+        oscB.type = 'triangle';
+        oscB.frequency.value = event.frequency * 0.5;
+        filter.type = 'lowpass';
+        const velocityNorm = Phaser.Math.Clamp(event.velocity, 0.05, 1);
+        const cutoff = direction === 'forward' ? 900 + velocityNorm * 2200 : 500 + velocityNorm * 1300;
+        filter.frequency.value = cutoff;
+        filter.Q.value = direction === 'forward' ? 0.7 : 0.4;
+        const peak = (direction === 'forward' ? 0.22 : 0.15) * velocityNorm * Phaser.Math.Clamp(this.masterVolume, 0, 1) * 0.85;
+        const sustain = peak * (direction === 'forward' ? 0.55 : 0.45);
+        const attack = direction === 'forward' ? 0.012 : 0.045;
+        const decay = direction === 'forward' ? 0.08 : 0.11;
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, peak), now + attack);
+        gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, sustain), now + attack + decay);
+        oscA.connect(filter);
+        oscB.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.getAudioOutputNode(synth));
+        oscA.start(now);
+        oscB.start(now);
+        this.activeVoices.set(event.noteId, {
+            noteId: event.noteId,
+            frequency: event.frequency,
+            startedAt: now,
+            gain,
+            filter,
+            oscillators: [oscA, oscB]
+        });
+    }
+    playBackwardTransient(event) {
+        const synth = this.ensureSynthReady();
+        if (!synth)
+            return;
+        const now = synth.currentTime;
+        const gain = synth.createGain();
+        const filter = synth.createBiquadFilter();
+        const oscA = synth.createOscillator();
+        const oscB = synth.createOscillator();
+        const velocityNorm = Phaser.Math.Clamp(event.velocity, 0.05, 1);
+        const peak = 0.18 * velocityNorm * Phaser.Math.Clamp(this.masterVolume, 0, 1) * 0.75;
+        const attack = 0.028;
+        const release = 0.16;
+        oscA.type = 'triangle';
+        oscA.frequency.value = event.frequency;
+        oscB.type = 'sine';
+        oscB.frequency.value = event.frequency * 0.5;
+        filter.type = 'lowpass';
+        filter.frequency.value = 480 + velocityNorm * 950;
+        filter.Q.value = 0.35;
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, peak), now + attack);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + attack + release);
+        oscA.connect(filter);
+        oscB.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.getAudioOutputNode(synth));
+        oscA.start(now);
+        oscB.start(now);
+        oscA.stop(now + attack + release + 0.02);
+        oscB.stop(now + attack + release + 0.02);
+    }
+    releaseVoice(noteId, releaseSeconds) {
+        const voice = this.activeVoices.get(noteId);
+        if (!voice || !this.synth)
+            return;
+        const now = this.synth.currentTime;
+        const release = Phaser.Math.Clamp(releaseSeconds, 0.02, 0.45);
+        try {
+            const gainParam = voice.gain.gain;
+            if (typeof gainParam.cancelAndHoldAtTime === 'function') {
+                gainParam.cancelAndHoldAtTime(now);
+            }
+            else {
+                gainParam.cancelScheduledValues(now);
+                gainParam.setValueAtTime(Math.max(0.0001, gainParam.value), now);
+            }
+            gainParam.setTargetAtTime(0.0001, now, Math.max(0.01, release * 0.35));
+            for (const osc of voice.oscillators) {
+                osc.stop(now + Math.max(0.08, release * 1.6));
+            }
+        }
+        catch {
+            // Ignore errors from already-stopped oscillators.
+        }
+        this.activeVoices.delete(noteId);
+    }
+    pruneVoices(now) {
+        if (!this.synth)
+            return;
+        for (const [noteId, voice] of this.activeVoices.entries()) {
+            const level = voice.gain.gain.value;
+            if (!Number.isFinite(level) || level <= 0.00011) {
+                try {
+                    for (const osc of voice.oscillators)
+                        osc.stop(now + 0.01);
+                }
+                catch {
+                    // Ignore oscillators already stopped.
+                }
+                this.activeVoices.delete(noteId);
+            }
+        }
+    }
+    releaseAllVoices(immediate = false) {
+        const release = immediate ? 0.02 : 0.08;
+        for (const noteId of [...this.activeVoices.keys()]) {
+            this.releaseVoice(noteId, release);
+        }
     }
     ensureSynthReady() {
         try {
@@ -1249,11 +1636,23 @@ export class GameScene extends Phaser.Scene {
                 this.synth.resume().catch(() => undefined);
                 return null;
             }
+            this.getAudioOutputNode(this.synth);
             return this.synth;
         }
         catch {
             return null;
         }
+    }
+    getAudioOutputNode(synth) {
+        if (!this.masterGain) {
+            this.masterGain = synth.createGain();
+            this.masterGain.gain.setValueAtTime(Math.max(0.0001, this.masterVolume), synth.currentTime);
+            this.masterGain.connect(synth.destination);
+        }
+        const now = synth.currentTime;
+        this.masterGain.gain.cancelScheduledValues(now);
+        this.masterGain.gain.setTargetAtTime(Math.max(0.0001, this.masterVolume), now, 0.02);
+        return this.masterGain;
     }
     resolveLevelFromInputs() {
         const data = (this.scene.settings.data || {});
@@ -1278,8 +1677,10 @@ export class GameScene extends Phaser.Scene {
             this.availableLevels = data.levels;
         else
             this.availableLevels = LEVELS;
+        this.availableLevelNames = this.availableLevels.map((_level, i) => String(data.levelNames?.[i] || `level_${i + 1}.runtime.json`));
         const safeIndex = Math.max(1, Math.min(this.availableLevels.length, Math.floor(parsedIndex)));
         const resolvedLevel = this.availableLevels[safeIndex - 1] ?? getLevelByOneBasedIndex(safeIndex);
+        this.gridMidiMap = null;
         this.currentLevel = {
             ...resolvedLevel,
             notes: [...(resolvedLevel.notes || [])],
@@ -1290,6 +1691,7 @@ export class GameScene extends Phaser.Scene {
             enemies: resolvedLevel.enemies ? { ...resolvedLevel.enemies } : undefined
         };
         this.currentLevelOneBasedIndex = safeIndex;
+        this.currentLevelName = String(this.availableLevelNames[safeIndex - 1] || `level_${safeIndex}.runtime.json`);
     }
     queueLevelMidiLoad() {
         const midiFile = String(this.currentLevel.midi_file || '').trim();
@@ -1312,6 +1714,11 @@ export class GameScene extends Phaser.Scene {
             return;
         try {
             const parsed = parseMidiFile(arrayBuffer);
+            this.gridMidiMap = buildGridMidiMapFromMidi(parsed, this.currentLevel.gridColumns, {
+                maxChannels: 2,
+                minMidiNote: 48,
+                maxMidiNote: 88
+            });
             const midiNotes = buildGridNotesFromMidi(parsed, this.currentLevel.gridColumns);
             if (midiNotes.length !== this.currentLevel.gridColumns)
                 return;
@@ -1333,10 +1740,21 @@ export class GameScene extends Phaser.Scene {
         const next = this.currentLevelOneBasedIndex + 1;
         if (next > this.availableLevels.length)
             return;
-        this.scene.restart({ levelIndex: next, mode: 'play', volume: this.masterVolume, levels: this.availableLevels });
+        this.scene.restart({
+            levelIndex: next,
+            mode: 'play',
+            volume: this.masterVolume,
+            levels: this.availableLevels,
+            levelNames: this.availableLevelNames
+        });
     }
-    getBestTimeStorageKey(levelOneBasedIndex) {
-        return `${BEST_TIME_STORAGE_PREFIX}.${Math.max(1, Math.floor(levelOneBasedIndex))}.bestTimeMs`;
+    getBestTimeStorageKey(levelName) {
+        const storageId = this.getLevelStorageId(levelName);
+        return `${BEST_TIME_STORAGE_PREFIX}.name.${storageId}.bestTimeMs`;
+    }
+    getLevelStorageId(levelName) {
+        const normalized = String(levelName || '').trim().toLowerCase();
+        return encodeURIComponent(normalized || 'unnamed-level');
     }
     getPreviewIntent(nowMs) {
         if (nowMs >= this.nextPreviewToggleMs) {
@@ -1371,15 +1789,24 @@ export class GameScene extends Phaser.Scene {
         }
     }
     buildSegmentEnemyPlans() {
-        if (!this.useSegmentEnemySpawns)
+        if (!this.useSegmentEnemySpawns) {
+            if (this.isEnemyPlanDebugEnabled())
+                console.log('[EnemyDebug] skip buildSegmentEnemyPlans: segment mode disabled');
             return;
-        if (!Array.isArray(this.currentLevel.segmentEnemies) || this.currentLevel.segmentEnemies.length === 0)
+        }
+        if (!Array.isArray(this.currentLevel.segmentEnemies) || this.currentLevel.segmentEnemies.length === 0) {
+            if (this.isEnemyPlanDebugEnabled())
+                console.log('[EnemyDebug] skip buildSegmentEnemyPlans: no segmentEnemies');
             return;
+        }
         const segments = [...this.segmentPlatforms]
             .map((platform) => platform.shape)
             .sort((a, b) => a.x - b.x);
-        if (segments.length === 0)
+        if (segments.length === 0) {
+            if (this.isEnemyPlanDebugEnabled())
+                console.log('[EnemyDebug] skip buildSegmentEnemyPlans: no segment platforms');
             return;
+        }
         const rawRows = this.currentLevel.segmentEnemies
             .map((row) => ({
             sourceIdx: Math.floor(Number(row?.segmentIndex)),
@@ -1387,9 +1814,10 @@ export class GameScene extends Phaser.Scene {
             flyingCount: Math.max(0, Math.floor(Number(row?.flyingCount) || 0)),
             flyingSpawnIntervalMs: (() => {
                 const rawInterval = Number(row?.flyingSpawnIntervalMs);
-                return Number.isFinite(rawInterval) && rawInterval > 0
-                    ? Math.max(500, Math.min(30000, Math.floor(rawInterval)))
-                    : 0;
+                if (!Number.isFinite(rawInterval) || rawInterval <= 0)
+                    return 0;
+                const bounded = Math.max(500, Math.min(30000, Math.floor(rawInterval)));
+                return this.scaleSpawnIntervalMs(bounded);
             })()
         }))
             .filter((row) => Number.isFinite(row.sourceIdx));
@@ -1463,6 +1891,24 @@ export class GameScene extends Phaser.Scene {
             });
         }
         this.segmentEnemyPlans = plans.sort((a, b) => a.triggerX - b.triggerX);
+        if (this.isEnemyPlanDebugEnabled()) {
+            const mappingRows = rawRows.map((row) => ({
+                sourceIdx: row.sourceIdx,
+                mappedSegmentIdx: toSegmentIndex(row.sourceIdx),
+                patrolCount: row.patrolCount,
+                flyingSpawnIntervalMs: row.flyingSpawnIntervalMs
+            }));
+            const planRows = this.segmentEnemyPlans.map((plan) => ({
+                segmentIndex: plan.segmentIndex,
+                patrolCount: plan.patrolCount,
+                flyingSpawnIntervalMs: plan.flyingSpawnIntervalMs,
+                triggerX: Math.round(plan.triggerX)
+            }));
+            console.groupCollapsed('[EnemyDebug] segment enemy plans');
+            console.table(mappingRows);
+            console.table(planRows);
+            console.groupEnd();
+        }
         this.spawnSegmentPatrolAtLevelStart();
     }
     triggerSegmentEnemyPlansAt(playerX) {
@@ -1490,6 +1936,14 @@ export class GameScene extends Phaser.Scene {
         const minSpacing = 34;
         const laneCapacity = Math.max(1, Math.floor(laneWidth / minSpacing) + 1);
         const spawnCount = Math.min(plan.patrolCount, laneCapacity);
+        if (this.isEnemyPlanDebugEnabled()) {
+            console.log('[EnemyDebug] patrol spawn', {
+                segmentIndex: plan.segmentIndex,
+                requested: plan.patrolCount,
+                spawned: spawnCount,
+                laneCapacity
+            });
+        }
         for (let i = 0; i < spawnCount; i++) {
             const t = (i + 1) / (spawnCount + 1);
             const x = laneRight > laneLeft ? laneLeft + (laneRight - laneLeft) * t : midX;
@@ -1502,6 +1956,17 @@ export class GameScene extends Phaser.Scene {
     queueFlyingForPlan(plan) {
         plan.pendingFlyingSpawns = Math.max(plan.flyingCount, plan.flyingSpawnIntervalMs > 0 ? 1 : 0);
         plan.nextFlyingSpawnMs = performance.now();
+    }
+    isEnemyPlanDebugEnabled() {
+        try {
+            if (typeof window === 'undefined')
+                return false;
+            const raw = new URLSearchParams(window.location.search).get('debugEnemyPlans');
+            return raw === '1' || raw === 'true';
+        }
+        catch {
+            return false;
+        }
     }
     getInitialPlayerYFromPlatforms() {
         const playerHalfHeight = 38 / 2;
@@ -1516,5 +1981,13 @@ export class GameScene extends Phaser.Scene {
             return this.groundY;
         const top = picked.y - picked.height / 2;
         return top - playerHalfHeight;
+    }
+    scaleEnemySpeed(baseSpeed) {
+        const scaled = scaleSpeedByTempo(baseSpeed, this.currentLevel.bpm, DEFAULT_REFERENCE_BPM);
+        return Phaser.Math.Clamp(scaled, baseSpeed * 0.35, baseSpeed * 3.5);
+    }
+    scaleSpawnIntervalMs(baseIntervalMs) {
+        const scaled = scaleIntervalByTempo(baseIntervalMs, this.currentLevel.bpm, DEFAULT_REFERENCE_BPM);
+        return Math.floor(Phaser.Math.Clamp(scaled, 250, 30000));
     }
 }

@@ -37,6 +37,7 @@ export class StartScene extends Phaser.Scene {
   private readonly sliderWidth = 280;
   private levelEntries: LevelEntry[] = [];
   private levels: LevelDefinition[] = [];
+  private levelNames: string[] = [];
 
   private levelListContainer!: any;
   private levelMaskGraphics!: any;
@@ -55,7 +56,12 @@ export class StartScene extends Phaser.Scene {
   }
 
   create(): void {
-    const data = (this.scene.settings.data || {}) as { levelIndex?: number; volume?: number; levels?: LevelDefinition[] };
+    const data = (this.scene.settings.data || {}) as {
+      levelIndex?: number;
+      volume?: number;
+      levels?: LevelDefinition[];
+      levelNames?: string[];
+    };
     this.cameras.main.setBackgroundColor('rgba(0,0,0,0)');
     this.volume = Number.isFinite(data.volume) ? Phaser.Math.Clamp(Number(data.volume), 0, 1) : this.loadVolume();
 
@@ -86,27 +92,41 @@ export class StartScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(6);
 
-    this.initLevels(data.levels, data.levelIndex).then(() => {
+    this.initLevels(data.levels, data.levelIndex, data.levelNames).then(() => {
       this.loadingText.setVisible(false);
       this.createLevelSelection();
       this.createVolumeSlider();
       this.createActions();
-      this.scene.launch('game', { mode: 'preview', levelIndex: this.selectedLevel, volume: this.volume, levels: this.levels });
+      this.scene.launch('game', {
+        mode: 'preview',
+        levelIndex: this.selectedLevel,
+        volume: this.volume,
+        levels: this.levels,
+        levelNames: this.levelNames
+      });
       this.scene.bringToTop('start');
     });
   }
 
-  private async initLevels(levelsFromData: LevelDefinition[] | undefined, levelIndexFromData: number | undefined): Promise<void> {
+  private async initLevels(
+    levelsFromData: LevelDefinition[] | undefined,
+    levelIndexFromData: number | undefined,
+    levelNamesFromData: string[] | undefined
+  ): Promise<void> {
     const apiEntries = await this.fetchLevelsFromApi();
     if (apiEntries.length > 0) {
       this.levelEntries = apiEntries;
     } else if (Array.isArray(levelsFromData) && levelsFromData.length > 0) {
-      this.levelEntries = levelsFromData.map((data, i) => ({ name: `level_${i + 1}.runtime.json`, data }));
+      this.levelEntries = levelsFromData.map((data, i) => ({
+        name: String(levelNamesFromData?.[i] || `level_${i + 1}.runtime.json`),
+        data
+      }));
     } else {
       this.levelEntries = LEVELS.map((data, i) => ({ name: `level_${i + 1}.runtime.json`, data }));
     }
 
     this.levels = this.levelEntries.map((entry) => entry.data);
+    this.levelNames = this.levelEntries.map((entry) => entry.name);
     this.selectedLevel = this.resolveInitialLevel(levelIndexFromData);
   }
 
@@ -149,9 +169,9 @@ export class StartScene extends Phaser.Scene {
 
     for (let idx = 0; idx < this.levelEntries.length; idx++) {
       const level = idx + 1;
-      const best = this.readBest(level);
-      const bestLabel = best === null ? '--:--.--' : this.formatElapsedTime(best);
       const entry = this.levelEntries[idx];
+      const best = this.readBest(entry.name);
+      const bestLabel = best === null ? '--:--.--' : this.formatElapsedTime(best);
       const row = this.add
         .text(
           this.levelViewport.left + 8,
@@ -173,7 +193,13 @@ export class StartScene extends Phaser.Scene {
         this.selectedLevel = level;
         this.refreshLevelButtons();
         this.scene.stop('game');
-        this.scene.launch('game', { mode: 'preview', levelIndex: this.selectedLevel, volume: this.volume, levels: this.levels });
+        this.scene.launch('game', {
+          mode: 'preview',
+          levelIndex: this.selectedLevel,
+          volume: this.volume,
+          levels: this.levels,
+          levelNames: this.levelNames
+        });
         this.scene.bringToTop('start');
       });
       this.levelButtons.push(row);
@@ -311,7 +337,13 @@ export class StartScene extends Phaser.Scene {
       this.saveVolume(this.volume);
       if (this.scene.isActive('game')) {
         this.scene.stop('game');
-        this.scene.launch('game', { mode: 'preview', levelIndex: this.selectedLevel, volume: this.volume, levels: this.levels });
+        this.scene.launch('game', {
+          mode: 'preview',
+          levelIndex: this.selectedLevel,
+          volume: this.volume,
+          levels: this.levels,
+          levelNames: this.levelNames
+        });
         this.scene.bringToTop('start');
       }
     };
@@ -381,7 +413,13 @@ export class StartScene extends Phaser.Scene {
 
     this.playButton.on('pointerdown', () => {
       this.scene.stop('game');
-      this.scene.start('game', { mode: 'play', levelIndex: this.selectedLevel, volume: this.volume, levels: this.levels });
+      this.scene.start('game', {
+        mode: 'play',
+        levelIndex: this.selectedLevel,
+        volume: this.volume,
+        levels: this.levels,
+        levelNames: this.levelNames
+      });
     });
 
     const editorLink = this.add
@@ -399,10 +437,10 @@ export class StartScene extends Phaser.Scene {
     });
   }
 
-  private readBest(levelOneBasedIndex: number): number | null {
+  private readBest(levelName: string): number | null {
     try {
       if (typeof window === 'undefined' || !window.localStorage) return null;
-      const raw = window.localStorage.getItem(this.bestTimeKey(levelOneBasedIndex));
+      const raw = window.localStorage.getItem(this.bestTimeKey(levelName));
       if (!raw) return null;
       const parsed = Number(raw);
       return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
@@ -411,8 +449,14 @@ export class StartScene extends Phaser.Scene {
     }
   }
 
-  private bestTimeKey(levelOneBasedIndex: number): string {
-    return `${BEST_TIME_STORAGE_PREFIX}.${Math.max(1, Math.floor(levelOneBasedIndex))}.bestTimeMs`;
+  private bestTimeKey(levelName: string): string {
+    const storageId = this.levelStorageId(levelName);
+    return `${BEST_TIME_STORAGE_PREFIX}.name.${storageId}.bestTimeMs`;
+  }
+
+  private levelStorageId(levelName: string): string {
+    const normalized = String(levelName || '').trim().toLowerCase();
+    return encodeURIComponent(normalized || 'unnamed-level');
   }
 
   private loadVolume(): number {
