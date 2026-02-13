@@ -275,6 +275,8 @@ Scale pulse: 2–4%
 Glow pulse: synced exactly to BPM
 Never distort or shake.
 Horizontal anchoring: moon stop position is one platform slot (2 grid cells) to the right of the authored level-end platform extent.
+Moon core and halo keep a guaranteed minimum alpha for readability in very low-intensity states (moon >= 0.30, halo >= 0.12).
+When darkness overlay enters high-opacity range, moon and halo use additional intensity compensation (alpha lift + color brightening toward white) to preserve legibility.
 
 ---
 
@@ -289,7 +291,7 @@ Intensity drives:
 Never drop below:
 
 ```
-intensity floor visibility ≈ 15%
+intensity floor visibility ≈ 5%
 ```
 
 Darkness overlay should:
@@ -297,6 +299,8 @@ Darkness overlay should:
 * Multiply blend
 * Never reach full opacity
 * Preserve silhouette outlines
+* Apply a small extra alpha boost during backward movement so rewind reads as distinctly darker than idle.
+* Apply an intensity-driven world alpha clamp to gameplay actors (platforms, enemies, player) so level readability drops coherently with low intensity.
 
 ---
 
@@ -324,10 +328,12 @@ Debug overlay (runtime):
 
 * Top-right, screen-anchored, right-aligned monospace block.
 * Color: dim pale blue (`#9DB6DE`) to avoid competing with primary HUD labels.
-* Three compact rows:
+* Six compact rows:
   * audio mode and selected MIDI channel count
-  * current grid column, movement direction, and step state
-  * note event counts (`on/off`) and active voice count
+  * tempo status (current/target/rate/zone)
+  * scheduler status (queue size + jitter avg/max)
+  * current grid column, movement direction, step state, note event counts (`on/off`), and active voice count
+  * alpha telemetry row (`level`, `player`, `moon`, `halo`, `dark`) with 2-decimal precision
 * Overlay must remain readable but secondary; no glow or animation.
 
 No excessive animations.
@@ -360,7 +366,13 @@ Editor controls should use the same hard-edged UI language used by runtime overl
 * Warm gold for primary/confirm actions
 * Red reserved for destructive actions
 * `Back to Game` is a primary warm action and should be placed at top of the editor control panel
-* Runtime export controls expose editable `BPM runtime` plus read-only `Grid columns (auto)` status text (no editable grid-columns input)
+* Runtime export controls expose editable `Default BPM fallback` plus read-only `Grid columns (auto)` status text (no editable grid-columns input)
+* Segment BPM editing is first-class in the segments table and drives runtime tempo zoning
+* Runtime export panel includes audio-quality authoring controls:
+  * profile selector (`performance`, `balanced`, `high`)
+  * optional numeric overrides (polyphony, scheduler lookahead/lead, saturation)
+  * synth style selector (`game`, `editorLike`, or preset default)
+* Editor playback-quality selector (MIDI parsing/playback) uses the same profile naming (`performance`, `balanced`, `high`) for consistency.
 
 Editor scrollbars must match runtime color families:
 
@@ -375,11 +387,14 @@ Layout editor grid must remain visually aligned with runtime snap rules:
 * Spawn guide line must overlap the snap-aligned anchor column
 * Horizontal navigation uses a dedicated range scrollbar under layout actions (replacing left/right buttons)
 * Platform kind label `static` is shown in the layout canvas for base platforms (runtime kind remains `segment`)
+* Layout canvas shows tempo-zone boundary bars in warm accent (`#FFB703`) with BPM labels
+* Top layout info strip shows `Current zone BPM` for the active camera area
 
 Segments table conventions:
 
 * Column headers use Title Case labels (not snake_case)
 * Segment ID is read-only text (non-editable)
+* `Segment BPM` is an editable numeric column (`20-300`) and appears immediately after Segment ID
 * `Duration Beats` is fixed to `2` internally and not shown in table UI
 * `Platform Types (CSV)` column is intentionally wider than numeric columns for readability
 * `Vertical Min` and `Vertical Max` are compact numeric columns with matched width/visual weight
@@ -395,6 +410,11 @@ Minimap energy legend:
 | Low    | `#3A4663` |
 | Medium | `#3A86FF` |
 | High   | `#F4D35E` |
+
+Minimap tempo markers:
+
+* Tempo-change boundaries are rendered as vertical warm lines (`#FFB703`)
+* Marker labels show target BPM near the boundary
 
 ---
 
@@ -441,3 +461,22 @@ It is not:
 * Painterly
 
 It is a diagram of rhythm made playable.
+
+---
+
+# 14. AI Asset Production Rules (ChatGPT Images)
+
+To keep generated static sprites aligned with this VSG, production must follow:
+
+- `GDD/ASSET_PIPELINE.md` for export constraints and acceptance checks.
+- `GDD/ASSET_PROMPTS_CHATGPT.md` for canonical prompt set.
+- `GDD/ASSET_MANIFEST.json` for full required runtime asset list.
+
+Mandatory constraints:
+
+- Keep all assets in minimal geometric language; no texture noise, no realism.
+- Preserve gameplay readability first (collision silhouette > decoration).
+- Respect state color semantics from sections 4 and 5.
+- Keep enemy palette isolated from warm/cool platform families.
+
+These assets are static sprite replacements for current primitive runtime shapes; animation is optional and not required for the baseline visual pack.

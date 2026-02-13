@@ -1,0 +1,444 @@
+{
+  "tempoMap": [
+    {
+      "startColumn": 0,
+      "bpm": 120
+    },
+    {
+      "startColumn": 11,
+      "bpm": 150
+    },
+    {
+      "startColumn": 20,
+      "bpm": 90
+    }
+  ],
+  "audioQualityMode": "balanced",
+  "audioQuality": {
+    "maxPolyphony": 5,
+    "schedulerLookaheadMs": 8,
+    "schedulerLeadMs": 4,
+    "saturationAmount": 0,
+    "synthStyle": "editorLike"
+  },
+  "gridColumns": 29,
+  "notes": [
+    261.6255653005986,
+    329.6275569128699,
+    391.99543598174927,
+    493.8833012561241,
+    391.99543598174927,
+    293.6647679174076,
+    349.2282314330039,
+    293.6647679174076,
+    587.3295358348151,
+    440,
+    349.2282314330039,
+    293.6647679174076,
+    329.6275569128699,
+    523.2511306011972,
+    349.2282314330039,
+    329.6275569128699,
+    349.2282314330039,
+    523.2511306011972,
+    391.99543598174927,
+    440,
+    293.6647679174076,
+    261.6255653005986,
+    329.6275569128699,
+    391.99543598174927,
+    523.2511306011972,
+    493.8833012561241,
+    391.99543598174927,
+    329.6275569128699,
+    293.6647679174076
+  ],
+  "platforms": [
+    {
+      "kind": "segment",
+      "x": 54,
+      "y": 384,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "segment",
+      "x": 118,
+      "y": 384,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "segment",
+      "x": 182,
+      "y": 384,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "segment",
+      "x": 246,
+      "y": 384,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "segment",
+      "x": 310,
+      "y": 384,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "segment",
+      "x": 374,
+      "y": 384,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "segment",
+      "x": 438,
+      "y": 384,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "beat",
+      "x": 502,
+      "y": 352,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "segment",
+      "x": 502,
+      "y": 384,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "ghost",
+      "x": 566,
+      "y": 320,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "segment",
+      "x": 566,
+      "y": 384,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "segment",
+      "x": 630,
+      "y": 384,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "beat",
+      "x": 694,
+      "y": 320,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "segment",
+      "x": 694,
+      "y": 384,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "segment",
+      "x": 758,
+      "y": 384,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "segment",
+      "x": 822,
+      "y": 320,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "segment",
+      "x": 822,
+      "y": 384,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "segment",
+      "x": 886,
+      "y": 256,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "segment",
+      "x": 886,
+      "y": 384,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "segment",
+      "x": 950,
+      "y": 192,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "segment",
+      "x": 950,
+      "y": 384,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "segment",
+      "x": 1014,
+      "y": 320,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "segment",
+      "x": 1014,
+      "y": 384,
+      "width": 64,
+      "height": 18
+    }
+  ],
+  "segmentEnemies": [],
+  "segments": [
+    {
+      "index": 0,
+      "duration_beats": 2,
+      "bpm": 120,
+      "energy_state": "high",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "ghost",
+        "reverseGhost",
+        "elevator",
+        "shuttle",
+        "cross"
+      ],
+      "vertical_range": [
+        1,
+        3
+      ],
+      "rhythm_density": 0.7244094488188977,
+      "patrol_enemies": 0,
+      "flying_spawn_interval_ms": 0
+    },
+    {
+      "index": 1,
+      "duration_beats": 2,
+      "bpm": 120,
+      "energy_state": "high",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "ghost",
+        "reverseGhost",
+        "elevator",
+        "shuttle",
+        "cross"
+      ],
+      "vertical_range": [
+        1,
+        3
+      ],
+      "rhythm_density": 0.7244094488188977,
+      "patrol_enemies": 0,
+      "flying_spawn_interval_ms": 0
+    },
+    {
+      "index": 2,
+      "duration_beats": 2,
+      "bpm": 120,
+      "energy_state": "high",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "ghost",
+        "reverseGhost",
+        "elevator",
+        "shuttle",
+        "cross"
+      ],
+      "vertical_range": [
+        1,
+        3
+      ],
+      "rhythm_density": 0.7244094488188977,
+      "patrol_enemies": 0,
+      "flying_spawn_interval_ms": 0
+    },
+    {
+      "index": 3,
+      "duration_beats": 2,
+      "bpm": 120,
+      "energy_state": "high",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "ghost",
+        "reverseGhost",
+        "elevator",
+        "shuttle",
+        "cross"
+      ],
+      "vertical_range": [
+        1,
+        3
+      ],
+      "rhythm_density": 0.7244094488188977,
+      "patrol_enemies": 0,
+      "flying_spawn_interval_ms": 0
+    },
+    {
+      "index": 4,
+      "duration_beats": 2,
+      "bpm": 150,
+      "energy_state": "high",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "ghost",
+        "reverseGhost",
+        "elevator",
+        "shuttle",
+        "cross"
+      ],
+      "vertical_range": [
+        1,
+        3
+      ],
+      "rhythm_density": 0.7244094488188977,
+      "patrol_enemies": 0,
+      "flying_spawn_interval_ms": 0
+    },
+    {
+      "index": 5,
+      "duration_beats": 2,
+      "bpm": 150,
+      "energy_state": "high",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "ghost",
+        "reverseGhost",
+        "elevator",
+        "shuttle",
+        "cross"
+      ],
+      "vertical_range": [
+        1,
+        3
+      ],
+      "rhythm_density": 0.7244094488188977,
+      "patrol_enemies": 0,
+      "flying_spawn_interval_ms": 0
+    },
+    {
+      "index": 6,
+      "duration_beats": 2,
+      "bpm": 150,
+      "energy_state": "high",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "ghost",
+        "reverseGhost",
+        "elevator",
+        "shuttle",
+        "cross"
+      ],
+      "vertical_range": [
+        1,
+        3
+      ],
+      "rhythm_density": 0.7244094488188977,
+      "patrol_enemies": 0,
+      "flying_spawn_interval_ms": 0
+    },
+    {
+      "index": 7,
+      "duration_beats": 2,
+      "bpm": 90,
+      "energy_state": "medium",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "ghost",
+        "reverseGhost"
+      ],
+      "vertical_range": [
+        1,
+        2
+      ],
+      "rhythm_density": 0.7244094488188977,
+      "patrol_enemies": 0,
+      "flying_spawn_interval_ms": 0
+    },
+    {
+      "index": 8,
+      "duration_beats": 2,
+      "bpm": 90,
+      "energy_state": "medium",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "ghost",
+        "reverseGhost"
+      ],
+      "vertical_range": [
+        1,
+        3
+      ],
+      "rhythm_density": 0.7244094488188977,
+      "patrol_enemies": 0,
+      "flying_spawn_interval_ms": 0
+    },
+    {
+      "index": 9,
+      "duration_beats": 2,
+      "bpm": 90,
+      "energy_state": "medium",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "ghost",
+        "reverseGhost"
+      ],
+      "vertical_range": [
+        1,
+        2
+      ],
+      "rhythm_density": 0.7244094488188977,
+      "patrol_enemies": 0,
+      "flying_spawn_interval_ms": 0
+    }
+  ],
+  "midi_file": "test_10s_tempo_changes.mid"
+}

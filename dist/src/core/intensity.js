@@ -2,7 +2,7 @@ export const defaultIntensityConfig = {
     intensityGainRate: 0.3,
     decayRate: 0.05,
     intensityLossRate: 0.3,
-    residualFloor: 0.15
+    residualFloor: 0.05
 };
 export function updateIntensity(current, direction, movementSpeed, deltaSeconds, config = defaultIntensityConfig) {
     let next = current;

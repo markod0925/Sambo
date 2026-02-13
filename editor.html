@@ -128,8 +128,8 @@
       table { width: 100%; border-collapse: collapse; }
       th, td { border-bottom: 1px solid var(--border); padding: 8px; text-align: left; }
       th { color: var(--text-dim); background: #0f182c; }
-      .segments-table th:nth-child(3),
-      .segments-table td:nth-child(3) { min-width: 340px; }
+      .segments-table th:nth-child(4),
+      .segments-table td:nth-child(4) { min-width: 340px; }
       .segments-table .size-75 { width: 75%; }
       select, input[type='number'], input[type='text'] { width: 100%; padding: 6px; border-radius: 0; border: 1px solid var(--border-2); background: var(--surface-2); color: var(--text); }
       .small { font-size: 12px; color: var(--text-dim); }
@@ -223,16 +223,37 @@
         <label for="qualityMode">Playback quality mode</label>
         <select id="qualityMode">
           <option value="balanced" selected>Balanced</option>
-          <option value="fast">Fast</option>
-          <option value="accurate">Accurate</option>
+          <option value="performance">Performance</option>
+          <option value="high">High</option>
         </select>
         <label for="levelBaseName">Level base name (saved in <code>Levels/</code>)</label>
         <input id="levelBaseName" type="text" value="level_01" />
         <p id="midiStatus" class="small">MIDI: no file loaded</p>
         <section class="runtime-box">
           <h3>Runtime export</h3>
-          <label for="runtimeBpm">BPM runtime</label>
+          <label for="runtimeBpm">Default BPM fallback</label>
           <input id="runtimeBpm" type="number" min="20" max="300" value="120" />
+          <p class="small">Default BPM fallback. Runtime uses a tempo map vector generated from segment BPM values.</p>
+          <label for="runtimeAudioQualityMode">Runtime audio quality profile</label>
+          <select id="runtimeAudioQualityMode">
+            <option value="performance">Performance</option>
+            <option value="balanced" selected>Balanced</option>
+            <option value="high">High</option>
+          </select>
+          <label for="runtimeAudioPolyphony">Runtime max polyphony (optional)</label>
+          <input id="runtimeAudioPolyphony" type="number" min="2" max="12" step="1" placeholder="Preset default" />
+          <label for="runtimeAudioLookaheadMs">Runtime scheduler lookahead ms (optional)</label>
+          <input id="runtimeAudioLookaheadMs" type="number" min="8" max="60" step="1" placeholder="Preset default" />
+          <label for="runtimeAudioLeadMs">Runtime scheduler lead ms (optional)</label>
+          <input id="runtimeAudioLeadMs" type="number" min="4" max="40" step="1" placeholder="Preset default" />
+          <label for="runtimeAudioSaturation">Runtime saturation amount (0-0.4, optional)</label>
+          <input id="runtimeAudioSaturation" type="number" min="0" max="0.4" step="0.01" placeholder="Preset default" />
+          <label for="runtimeAudioSynthStyle">Runtime synth style</label>
+          <select id="runtimeAudioSynthStyle">
+            <option value="">Preset default</option>
+            <option value="game">Game</option>
+            <option value="editorLike">Editor-like</option>
+          </select>
           <p class="small">Grid columns (auto): <span id="runtimeGridColumnsAuto">29</span></p>
           <div class="button-row">
             <button id="exportRuntime">Save runtime to Levels</button>
@@ -247,10 +268,12 @@
             <span class="l-low">Low</span>
             <span class="l-medium">Medium</span>
             <span class="l-high">High</span>
+            <span class="l-high">Tempo change marker</span>
           </div>
         </section>
         <section class="level-layout-editor">
           <h3>Layout editor (runtime platforms)</h3>
+          <p id="layoutTempoInfo" class="small">Current zone BPM: 120</p>
           <div class="button-row level-layout-actions">
             <button id="layoutCenterSpawn">Center spawn</button>
             <button id="layoutRegenerate">Regenerate from segments</button>
@@ -270,6 +293,7 @@
           <thead>
             <tr>
               <th>Segment ID</th>
+              <th>Segment BPM</th>
               <th>Energy State</th>
               <th>Platform Types (CSV)</th>
               <th>Vertical Min</th>
@@ -295,6 +319,12 @@
       const localMidiStatusEl = document.getElementById('localMidiStatus');
       const midiStatusEl = document.getElementById('midiStatus');
       const runtimeBpmInput = document.getElementById('runtimeBpm');
+      const runtimeAudioQualityModeInput = document.getElementById('runtimeAudioQualityMode');
+      const runtimeAudioPolyphonyInput = document.getElementById('runtimeAudioPolyphony');
+      const runtimeAudioLookaheadMsInput = document.getElementById('runtimeAudioLookaheadMs');
+      const runtimeAudioLeadMsInput = document.getElementById('runtimeAudioLeadMs');
+      const runtimeAudioSaturationInput = document.getElementById('runtimeAudioSaturation');
+      const runtimeAudioSynthStyleInput = document.getElementById('runtimeAudioSynthStyle');
       const runtimeGridColumnsAutoEl = document.getElementById('runtimeGridColumnsAuto');
       const qualityModeSelect = document.getElementById('qualityMode');
       const minimap = document.getElementById('minimap');
@@ -303,6 +333,7 @@
       const layoutEditorCanvas = document.getElementById('layoutEditorCanvas');
       const layoutEditorContainer = layoutEditorCanvas ? layoutEditorCanvas.closest('.level-layout-editor') : null;
       const layoutScrollBar = document.getElementById('layoutScrollBar');
+      const layoutTempoInfo = document.getElementById('layoutTempoInfo');
       const layoutCtx = layoutEditorCanvas ? layoutEditorCanvas.getContext('2d') : null;
       let model = { segments: [], midi_file: null };
       const GAME_PLAYER_START_X = 150;
@@ -349,6 +380,7 @@
       let midiPlayback = {
         fileName: null,
         notes: [],
+        tempoMap: [],
         playbackNotes: [],
         durationSec: 0,
         isPlaying: false,
@@ -573,8 +605,8 @@
 
       function getQualityConfig() {
         const mode = qualityModeSelect.value || 'balanced';
-        if (mode === 'fast') return { bucketStepSec: 1 / 18, maxPolyphonyPerBucket: 4, maxTotalNotes: 2400 };
-        if (mode === 'accurate') return { bucketStepSec: 1 / 48, maxPolyphonyPerBucket: 10, maxTotalNotes: 12000 };
+        if (mode === 'performance') return { bucketStepSec: 1 / 18, maxPolyphonyPerBucket: 4, maxTotalNotes: 2400 };
+        if (mode === 'high') return { bucketStepSec: 1 / 48, maxPolyphonyPerBucket: 10, maxTotalNotes: 12000 };
         return { bucketStepSec: 1 / 30, maxPolyphonyPerBucket: 6, maxTotalNotes: 5000 };
       }
 
@@ -681,6 +713,7 @@
         stopMidiPlayback();
         midiPlayback.fileName = null;
         midiPlayback.notes = [];
+        midiPlayback.tempoMap = [];
         midiPlayback.playbackNotes = [];
         midiPlayback.durationSec = 0;
         midiPlayback.initialBpm = null;
@@ -730,9 +763,9 @@
         }
 
         const chunkId = readAscii(4);
-        if (chunkId !== 'MThd') throw new Error('Header MIDI non valido');
+        if (chunkId !== 'MThd') throw new Error('Invalid MIDI header');
         const headerLength = readUint32();
-        if (headerLength < 6) throw new Error('Header MIDI incompleto');
+        if (headerLength < 6) throw new Error('Incomplete MIDI header');
 
         const format = readUint16();
         const ntrks = readUint16();
@@ -740,17 +773,17 @@
         offset += Math.max(0, headerLength - 6);
 
         if ((division & 0x8000) !== 0) {
-          throw new Error('Time division SMPTE non supportata');
+          throw new Error('SMPTE time division is not supported');
         }
         const ticksPerQuarter = division;
-        if (ticksPerQuarter <= 0) throw new Error('Ticks per quarter non valido');
+        if (ticksPerQuarter <= 0) throw new Error('Invalid ticks per quarter');
 
         const tempoEvents = [{ tick: 0, usPerQuarter: 500000 }];
         const noteEvents = [];
 
         for (let trackIndex = 0; trackIndex < ntrks; trackIndex++) {
           const trackId = readAscii(4);
-          if (trackId !== 'MTrk') throw new Error(`Track chunk non valido (#${trackIndex})`);
+          if (trackId !== 'MTrk') throw new Error(`Invalid MIDI track chunk #${trackIndex}`);
           const trackLength = readUint32();
           const trackEnd = offset + trackLength;
           let tick = 0;
@@ -763,7 +796,7 @@
 
             let status = view.getUint8(offset);
             if (status < 0x80) {
-              if (!runningStatus) throw new Error('Running status MIDI non valido');
+              if (!runningStatus) throw new Error('Invalid MIDI running status');
               status = runningStatus;
             } else {
               offset += 1;
@@ -878,7 +911,12 @@
 
         const primaryTempo = mergedTempo[0]?.usPerQuarter || 500000;
         const initialBpm = 60000000 / primaryTempo;
-        return { format, ticksPerQuarter, notes, durationSec, initialBpm };
+        const tempoMap = tempoTimeline.map((event) => ({
+          startBeat: event.tick / ticksPerQuarter,
+          startSec: event.startSec,
+          bpm: Math.round(60000000 / event.usPerQuarter)
+        }));
+        return { format, ticksPerQuarter, notes, durationSec, initialBpm, tempoMap };
       }
 
       async function handleLoadedMidi(fileName, arrayBuffer, options = {}) {
@@ -890,6 +928,7 @@
         const parsed = parseMidiFile(arrayBuffer);
         midiPlayback.fileName = fileName;
         midiPlayback.notes = parsed.notes;
+        midiPlayback.tempoMap = Array.isArray(parsed.tempoMap) ? parsed.tempoMap : [];
         qualityModeSelect.value = 'balanced';
         midiPlayback.playbackNotes = buildPlaybackNotes(parsed.notes);
         midiPlayback.durationSec = parsed.durationSec;
@@ -945,12 +984,24 @@
         return reduced;
       }
 
+      function getMidiTempoAtSecond(second) {
+        const safeSecond = Math.max(0, Number(second) || 0);
+        const timeline = Array.isArray(midiPlayback.tempoMap) ? midiPlayback.tempoMap : [];
+        if (timeline.length === 0) return clampBpm(Number(runtimeBpmInput.value) || 120);
+        let picked = timeline[0];
+        for (const row of timeline) {
+          if (Number(row.startSec) > safeSecond) break;
+          picked = row;
+        }
+        return clampBpm(Number(picked.bpm), Number(runtimeBpmInput.value) || 120);
+      }
+
       function buildDraftFromMidi() {
         if (!midiPlayback.notes.length || !midiPlayback.durationSec) {
           throw new Error('Load a MIDI file first (from folder or local file)');
         }
 
-        const bpm = Math.max(20, Math.min(300, Number(runtimeBpmInput.value) || 120));
+        const bpm = clampBpm(Number(runtimeBpmInput.value) || 120);
         const beatsPerSegment = 2;
         const segmentSeconds = (beatsPerSegment * 60) / bpm;
         const segmentCount = Math.max(1, Math.ceil(midiPlayback.durationSec / Math.max(0.1, segmentSeconds)));
@@ -998,6 +1049,7 @@
           segments.push({
             index: i,
             duration_beats: beatsPerSegment,
+            bpm: getMidiTempoAtSecond((i + 0.5) * segmentSeconds),
             energy_state: energyState,
             platform_types: platformTypes,
             vertical_range: verticalRange,
@@ -1160,8 +1212,82 @@
         return Math.max(min, Math.min(max, value));
       }
 
+      function clampBpm(value, fallback = 120) {
+        const n = Number(value);
+        if (!Number.isFinite(n) || n <= 0) return clampNumber(Math.round(fallback), 20, 300);
+        return clampNumber(Math.round(n), 20, 300);
+      }
+
+      function parseOptionalNumber(value, min, max, roundInt = false) {
+        const n = Number(value);
+        if (!Number.isFinite(n)) return undefined;
+        const clamped = clampNumber(n, min, max);
+        return roundInt ? Math.round(clamped) : clamped;
+      }
+
+      function getSegmentBpm(segment) {
+        return clampBpm(segment?.bpm, Number(runtimeBpmInput.value) || 120);
+      }
+
+      function normalizeTempoMap(tempoMap, fallbackBpm = 120) {
+        const rows = Array.isArray(tempoMap) ? tempoMap : [];
+        const normalized = rows
+          .map((row) => ({
+            startColumn: Math.max(0, Math.floor(Number(row?.startColumn) || 0)),
+            bpm: clampBpm(Number(row?.bpm), fallbackBpm)
+          }))
+          .sort((a, b) => a.startColumn - b.startColumn);
+        const deduped = [];
+        for (const row of normalized) {
+          const last = deduped[deduped.length - 1];
+          if (last && last.startColumn === row.startColumn) last.bpm = row.bpm;
+          else deduped.push({ ...row });
+        }
+        if (deduped.length === 0 || deduped[0].startColumn !== 0) {
+          deduped.unshift({ startColumn: 0, bpm: clampBpm(fallbackBpm, 120) });
+        }
+        return deduped;
+      }
+
+      function segmentStartColumnForIndex(segmentIndex, totalSegments, gridColumns) {
+        if (totalSegments <= 0) return 0;
+        return clampNumber(
+          Math.round((Math.max(0, segmentIndex) / Math.max(1, totalSegments)) * Math.max(0, gridColumns - 1)),
+          0,
+          Math.max(0, gridColumns - 1)
+        );
+      }
+
+      function getTempoAtColumn(tempoMap, column) {
+        const safeColumn = Math.max(0, Math.floor(Number(column) || 0));
+        const normalized = normalizeTempoMap(tempoMap, Number(runtimeBpmInput.value) || 120);
+        let picked = normalized[0];
+        for (const row of normalized) {
+          if (row.startColumn > safeColumn) break;
+          picked = row;
+        }
+        return picked;
+      }
+
+      function buildTempoMapFromSegments(gridColumns) {
+        const ordered = [...model.segments].sort((a, b) => Number(a.index) - Number(b.index));
+        if (ordered.length === 0) {
+          return [{ startColumn: 0, bpm: clampBpm(Number(runtimeBpmInput.value) || 120) }];
+        }
+        const out = [];
+        for (let i = 0; i < ordered.length; i++) {
+          const startColumn = segmentStartColumnForIndex(i, ordered.length, gridColumns);
+          const bpm = getSegmentBpm(ordered[i]);
+          const last = out[out.length - 1];
+          if (!last || last.bpm !== bpm) out.push({ startColumn, bpm });
+        }
+        return normalizeTempoMap(out, Number(runtimeBpmInput.value) || 120);
+      }
+
       function runtimeLevelToDraftModel(raw) {
         if (!raw || typeof raw !== 'object') throw new Error('Invalid level file format');
+        const fallbackBpm = clampBpm(Number(runtimeBpmInput.value) || 120);
+        const runtimeTempoMap = normalizeTempoMap(raw.tempoMap, fallbackBpm);
         const runtimePlatforms = Array.isArray(raw.platforms) ? raw.platforms : [];
         const segmentPlatforms = runtimePlatforms
           .filter((platform) => platform && platform.kind === 'segment')
@@ -1175,6 +1301,9 @@
         }
 
         const segmentsSource = segmentPlatforms.length > 0 ? segmentPlatforms : [{ x: 150, y: 405, width: 96, height: 18 }];
+        const inferredGridColumns = Number.isFinite(Number(raw.gridColumns))
+          ? clampNumber(Math.floor(Number(raw.gridColumns)), 1, 128)
+          : deriveGridColumnsFromPlatforms(runtimePlatforms);
 
         const segments = segmentsSource.map((platform, idx) => {
           const avgV = clampNumber((415 - Number(platform.y || 405)) / 32, 0, 4);
@@ -1196,9 +1325,13 @@
 
           const platformTypes = platformTypesByEnergy(energyState);
 
+          const segmentColumn = segmentStartColumnForIndex(idx, segmentsSource.length, inferredGridColumns);
+          const segmentBpm = getTempoAtColumn(runtimeTempoMap, segmentColumn).bpm;
+
           return {
             index: idx,
             duration_beats: 2,
+            bpm: segmentBpm,
             energy_state: energyState,
             platform_types: [...new Set(platformTypes)],
             vertical_range: [minV, maxV],
@@ -1226,15 +1359,36 @@
         stopMidiPlayback();
         midiPlayback.fileName = null;
         midiPlayback.notes = [];
+        midiPlayback.tempoMap = [];
         midiPlayback.playbackNotes = [];
         midiPlayback.durationSec = 0;
         midiPlayback.initialBpm = null;
         if (midiInput) midiInput.value = '';
         setLocalMidiStatus('No local MIDI selected');
 
-        const bpm = Number(rawLevel?.bpm);
+        const tempoMap = normalizeTempoMap(rawLevel?.tempoMap, Number(runtimeBpmInput.value) || 120);
+        const bpm = Number(tempoMap[0]?.bpm);
         const gridColumns = Number(rawLevel?.gridColumns);
+        const audioQualityMode = String(rawLevel?.audioQualityMode || 'balanced');
+        const audioQuality = rawLevel?.audioQuality && typeof rawLevel.audioQuality === 'object' ? rawLevel.audioQuality : {};
         if (Number.isFinite(bpm)) runtimeBpmInput.value = String(clampNumber(Math.round(bpm), 20, 300));
+        runtimeAudioQualityModeInput.value = ['performance', 'balanced', 'high'].includes(audioQualityMode)
+          ? audioQualityMode
+          : 'balanced';
+        runtimeAudioPolyphonyInput.value = Number.isFinite(Number(audioQuality.maxPolyphony))
+          ? String(Math.round(Number(audioQuality.maxPolyphony)))
+          : '';
+        runtimeAudioLookaheadMsInput.value = Number.isFinite(Number(audioQuality.schedulerLookaheadMs))
+          ? String(Math.round(Number(audioQuality.schedulerLookaheadMs)))
+          : '';
+        runtimeAudioLeadMsInput.value = Number.isFinite(Number(audioQuality.schedulerLeadMs))
+          ? String(Math.round(Number(audioQuality.schedulerLeadMs)))
+          : '';
+        runtimeAudioSaturationInput.value = Number.isFinite(Number(audioQuality.saturationAmount))
+          ? String(Number(audioQuality.saturationAmount))
+          : '';
+        runtimeAudioSynthStyleInput.value =
+          audioQuality.synthStyle === 'game' || audioQuality.synthStyle === 'editorLike' ? String(audioQuality.synthStyle) : '';
         if (Number.isFinite(gridColumns)) setRuntimeGridColumns(gridColumns);
         else setRuntimeGridColumns(deriveGridColumnsFromPlatforms(rawLevel?.platforms));
         setLevelBaseNameFromLevelFile(sourceName);
@@ -1408,7 +1562,7 @@
       }
 
       function buildRuntimeModel() {
-        const bpm = Math.max(20, Math.min(300, Number(runtimeBpmInput.value) || 120));
+        const fallbackBpm = clampBpm(Number(runtimeBpmInput.value) || 120);
         const generatedPlatforms = buildRuntimePlatforms();
         const platforms = sortPlatformsForExport(
           Array.isArray(customRuntimePlatforms) ? clonePlatforms(customRuntimePlatforms) : generatedPlatforms
@@ -1416,12 +1570,29 @@
         const gridColumns = deriveGridColumnsFromPlatforms(platforms);
         setRuntimeGridColumns(gridColumns);
         const notes = buildRuntimeNotes(gridColumns);
+        const tempoMap = buildTempoMapFromSegments(gridColumns);
+        const runtimeAudioQualityMode = ['performance', 'balanced', 'high'].includes(String(runtimeAudioQualityModeInput.value))
+          ? String(runtimeAudioQualityModeInput.value)
+          : 'balanced';
+        const runtimeAudioQuality = {
+          maxPolyphony: parseOptionalNumber(runtimeAudioPolyphonyInput.value, 2, 12, true),
+          schedulerLookaheadMs: parseOptionalNumber(runtimeAudioLookaheadMsInput.value, 8, 60, true),
+          schedulerLeadMs: parseOptionalNumber(runtimeAudioLeadMsInput.value, 4, 40, true),
+          saturationAmount: parseOptionalNumber(runtimeAudioSaturationInput.value, 0, 0.4, false),
+          synthStyle: ['game', 'editorLike'].includes(String(runtimeAudioSynthStyleInput.value))
+            ? String(runtimeAudioSynthStyleInput.value)
+            : undefined
+        };
+        const runtimeAudioQualityFiltered = Object.fromEntries(
+          Object.entries(runtimeAudioQuality).filter(([, value]) => value !== undefined)
+        );
         const segmentEnemies = buildRuntimeSegmentEnemies();
         const segments = [...model.segments]
           .sort((a, b) => Number(a.index) - Number(b.index))
           .map((seg, idx) => ({
             index: Number.isFinite(Number(seg.index)) ? Math.max(0, Math.floor(Number(seg.index))) : idx,
             duration_beats: 2,
+            bpm: clampBpm(seg.bpm, fallbackBpm),
             energy_state: ['low', 'medium', 'high'].includes(String(seg.energy_state)) ? String(seg.energy_state) : 'medium',
             platform_types: Array.isArray(seg.platform_types)
               ? seg.platform_types.map((v) => String(v).trim()).filter(Boolean)
@@ -1443,7 +1614,9 @@
         const midiFile =
           typeof model.midi_file === 'string' && model.midi_file.trim() ? model.midi_file.trim() : undefined;
         return {
-          bpm,
+          tempoMap,
+          audioQualityMode: runtimeAudioQualityMode,
+          ...(Object.keys(runtimeAudioQualityFiltered).length > 0 ? { audioQuality: runtimeAudioQualityFiltered } : {}),
           gridColumns,
           notes,
           platforms,
@@ -1454,16 +1627,39 @@
       }
 
       async function saveLevelJsonInLevels(filename, data) {
-        const response = await fetch('/api/save-level', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filename, data })
-        });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          throw new Error(payload.error || 'Error while saving to Levels');
+        const preferred = '/api/save-level';
+        const localFallback = 'http://127.0.0.1:4173/api/save-level';
+        const endpoints = [preferred];
+        if (typeof window !== 'undefined' && window.location.origin !== 'http://127.0.0.1:4173') {
+          endpoints.push(localFallback);
         }
-        return payload.path || `Levels/${filename}`;
+
+        let lastError = null;
+        for (const endpoint of endpoints) {
+          try {
+            const response = await fetch(endpoint, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ filename, data })
+            });
+            const rawText = await response.text().catch(() => '');
+            const payload = (() => {
+              try {
+                return rawText ? JSON.parse(rawText) : {};
+              } catch {
+                return {};
+              }
+            })();
+            if (!response.ok) {
+              const detail = payload.error || rawText || 'Error while saving to Levels';
+              throw new Error(`${detail} (HTTP ${response.status})`);
+            }
+            return payload.path || `Levels/${filename}`;
+          } catch (err) {
+            lastError = err;
+          }
+        }
+        throw lastError instanceof Error ? lastError : new Error('Error while saving to Levels');
       }
 
       function resizeMinimapCanvas() {
@@ -1518,16 +1714,31 @@
 
         const totalBeats = Math.max(1, segments.reduce((acc, s) => acc + Math.max(1, Number(s.duration_beats) || 1), 0));
         let cursorX = 8;
+        let previousBpm = null;
 
-        for (const seg of segments) {
+        for (let i = 0; i < segments.length; i++) {
+          const seg = segments[i];
           const segBeats = Math.max(1, Number(seg.duration_beats) || 1);
           const width = Math.max(6, ((w - 16) * segBeats) / totalBeats);
           const minV = Number(seg.vertical_range[0] || 0);
           const maxV = Number(seg.vertical_range[1] || 1);
+          const bpm = getSegmentBpm(seg);
           const maxHeightUnits = 4;
           const top = 14 + (Math.max(0, maxHeightUnits - maxV) / maxHeightUnits) * (h - 28);
           const bottom = 14 + (Math.max(0, maxHeightUnits - minV) / maxHeightUnits) * (h - 28);
           const segHeight = Math.max(6, bottom - top);
+
+          if (i > 0 && previousBpm !== bpm) {
+            mapCtx.strokeStyle = '#ffb703';
+            mapCtx.lineWidth = 2;
+            mapCtx.beginPath();
+            mapCtx.moveTo(cursorX, 10);
+            mapCtx.lineTo(cursorX, h - 10);
+            mapCtx.stroke();
+            mapCtx.fillStyle = '#ffb703';
+            mapCtx.font = '10px monospace';
+            mapCtx.fillText(`${bpm}`, Math.min(w - 28, cursorX + 3), 18);
+          }
 
           mapCtx.fillStyle = energyColor(seg.energy_state);
           mapCtx.fillRect(cursorX, top, width - 2, segHeight);
@@ -1542,6 +1753,7 @@
           }
 
           cursorX += width;
+          previousBpm = bpm;
         }
       }
 
@@ -1554,6 +1766,14 @@
         const width = layoutEditorCanvas.width;
         const height = layoutEditorCanvas.height;
         const worldWidth = getLayoutWorldWidth(platforms);
+        const tempoMap = buildTempoMapFromSegments(runtimeGridColumns);
+        const cameraCenterWorldX = cameraX + width / 2;
+        const cameraCenterColumn = clampNumber(
+          Math.round((cameraCenterWorldX - GAME_PLAYER_START_X) / GRID_STEP),
+          0,
+          Math.max(0, runtimeGridColumns - 1)
+        );
+        const activeTempo = getTempoAtColumn(tempoMap, cameraCenterColumn);
 
         layoutCtx.clearRect(0, 0, width, height);
         layoutCtx.fillStyle = EDITOR_COLORS.canvasBackground;
@@ -1591,6 +1811,22 @@
         layoutCtx.font = '12px monospace';
         layoutCtx.fillText('SPAWN', spawnCanvasX + 6, 16);
 
+        for (const zone of tempoMap) {
+          if (zone.startColumn <= 0) continue;
+          const zoneWorldX = GAME_PLAYER_START_X + zone.startColumn * GRID_STEP;
+          const zoneCanvasX = zoneWorldX - cameraX;
+          if (zoneCanvasX < -4 || zoneCanvasX > width + 4) continue;
+          layoutCtx.strokeStyle = '#ffb703';
+          layoutCtx.lineWidth = 2;
+          layoutCtx.beginPath();
+          layoutCtx.moveTo(zoneCanvasX, 0);
+          layoutCtx.lineTo(zoneCanvasX, height);
+          layoutCtx.stroke();
+          layoutCtx.fillStyle = '#ffb703';
+          layoutCtx.font = '11px monospace';
+          layoutCtx.fillText(`${zone.bpm}`, zoneCanvasX + 4, 14);
+        }
+
         platforms.forEach((platform, idx) => {
           const x = Number(platform.x);
           const y = Number(platform.y);
@@ -1616,12 +1852,15 @@
         layoutCtx.fillStyle = EDITOR_COLORS.canvasMuted;
         layoutCtx.font = '12px monospace';
         layoutCtx.fillText(
-          `X: ${Math.round(cameraX)} / ${Math.max(0, worldWidth - width)} | platforms: ${platforms.length} | mode: ${
+          `X: ${Math.round(cameraX)} / ${Math.max(0, worldWidth - width)} | platforms: ${platforms.length} | bpm: ${activeTempo.bpm} | mode: ${
             Array.isArray(customRuntimePlatforms) ? 'manual layout' : 'generated from segments'
           }`,
           10,
           height - 10
         );
+        if (layoutTempoInfo) {
+          layoutTempoInfo.textContent = `Current zone BPM: ${activeTempo.bpm} (column ${activeTempo.startColumn})`;
+        }
       }
 
       function render() {
@@ -1631,6 +1870,7 @@
           const badgeClass = segment.energy_state === 'low' ? 'low' : segment.energy_state === 'medium' ? 'medium' : 'high';
           tr.innerHTML = `
             <td>${segment.index}</td>
+            <td><input class="size-75" type="number" min="20" max="300" step="1" value="${getSegmentBpm(segment)}" data-k="bpm" data-i="${i}" /></td>
             <td>
               <select data-k="energy_state" data-i="${i}">
                 <option ${segment.energy_state === 'low' ? 'selected' : ''}>low</option>
@@ -1658,7 +1898,10 @@
         }, {});
         const currentPlatforms = getEditablePlatforms();
         setRuntimeGridColumns(deriveGridColumnsFromPlatforms(currentPlatforms));
-        summaryEl.textContent = `Total segments: ${model.segments.length} | low: ${counts.low || 0}, medium: ${counts.medium || 0}, high: ${counts.high || 0}`;
+        const tempoZones = buildTempoMapFromSegments(runtimeGridColumns);
+        summaryEl.textContent = `Total segments: ${model.segments.length} | low: ${counts.low || 0}, medium: ${counts.medium || 0}, high: ${
+          counts.high || 0
+        } | tempo zones: ${tempoZones.length}`;
         renderMinimap();
         renderLayoutEditor();
       }
@@ -1667,11 +1910,13 @@
         if (!raw || !Array.isArray(raw.segments)) {
           throw new Error('Invalid format: expected { segments: [] }');
         }
+        const fallbackBpm = clampBpm(Number(runtimeBpmInput.value) || 120);
         return {
           midi_file: typeof raw.midi_file === 'string' && raw.midi_file.trim() ? raw.midi_file.trim() : null,
           segments: raw.segments.map((s, idx) => ({
             index: Number.isFinite(+s.index) ? +s.index : idx,
             duration_beats: 2,
+            bpm: clampBpm(s.bpm, fallbackBpm),
             energy_state: ['low', 'medium', 'high'].includes(s.energy_state) ? s.energy_state : 'medium',
             platform_types: Array.isArray(s.platform_types)
               ? s.platform_types
@@ -1822,6 +2067,10 @@
         }
       };
 
+      runtimeBpmInput.addEventListener('input', () => {
+        render();
+      });
+
       rowsEl.addEventListener('input', (ev) => {
         const t = ev.target;
         const i = Number(t.dataset.i);
@@ -1830,6 +2079,7 @@
         const s = model.segments[i];
 
         if (key === 'platform_types') s.platform_types = t.value.split(',').map((v) => v.trim()).filter(Boolean);
+        if (key === 'bpm') s.bpm = clampBpm(t.value, Number(runtimeBpmInput.value) || 120);
         if (key === 'vertical_min') s.vertical_range[0] = Number(t.value);
         if (key === 'vertical_max') s.vertical_range[1] = Number(t.value);
         if (key === 'energy_state') {

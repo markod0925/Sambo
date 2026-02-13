@@ -3,7 +3,15 @@ import assert from 'node:assert/strict';
 import { Metronome } from '../dist/src/core/metronome.js';
 import { updateIntensity, defaultIntensityConfig } from '../dist/src/core/intensity.js';
 import { BeatSnapMover } from '../dist/src/core/beatMovement.js';
-import { getTempoScale, scaleIntervalByTempo, scaleSpeedByTempo } from '../dist/src/core/tempo.js';
+import {
+  getTempoAtColumn,
+  getTempoScale,
+  normalizeTempoMap,
+  scaleIntervalByTempo,
+  scaleSpeedByTempo,
+  stepTempoToward
+} from '../dist/src/core/tempo.js';
+import { resolveAudioQualitySettings } from '../dist/src/core/audioQuality.js';
 import { buildGridMidiMapFromMidi } from '../dist/src/core/midi.js';
 import {
   getCrossOffsetSteps,
@@ -22,6 +30,14 @@ test('metronome subdivision alignment works', () => {
   assert.equal(metro.subdivisionIntervalMs, 125);
   assert.equal(metro.nextSubdivisionAt(1), 125);
   assert.equal(metro.nextSubdivisionAt(249), 250);
+});
+
+test('metronome keeps beat continuity when BPM changes at runtime', () => {
+  const metro = new Metronome(120, 4);
+  metro.setBpm(180, 250);
+  assert.equal(metro.beatIndexAt(250), 0);
+  assert.equal(metro.beatIndexAt(500), 1);
+  assert.ok(Math.abs(metro.nextSubdivisionAt(251) - 333.3333333333333) < 1e-6);
 });
 
 test('intensity increases, decays and clamps at floor', () => {
@@ -77,6 +93,51 @@ test('tempo scaling helpers map speed and interval to BPM', () => {
   assert.equal(scaleSpeedByTempo(90, 60), 45);
   assert.equal(scaleIntervalByTempo(1000, 120), 1000);
   assert.equal(scaleIntervalByTempo(1000, 240), 500);
+});
+
+test('tempo map helpers normalize and pick BPM by grid column', () => {
+  const map = normalizeTempoMap([
+    { startColumn: 12, bpm: 90 },
+    { startColumn: 4, bpm: 140 },
+    { startColumn: 4, bpm: 132 }
+  ]);
+  assert.deepEqual(map, [
+    { startColumn: 0, bpm: 120 },
+    { startColumn: 4, bpm: 132 },
+    { startColumn: 12, bpm: 90 }
+  ]);
+  assert.equal(getTempoAtColumn(map, 0).bpm, 120);
+  assert.equal(getTempoAtColumn(map, 9).bpm, 132);
+  assert.equal(getTempoAtColumn(map, 40).bpm, 90);
+});
+
+test('tempo smoothing approaches target BPM at configured rate', () => {
+  const atHalfSecond = stepTempoToward(120, 180, 40, 0.5);
+  assert.equal(atHalfSecond, 140);
+
+  const atOneSecond = stepTempoToward(atHalfSecond, 180, 40, 1);
+  assert.equal(atOneSecond, 180);
+});
+
+test('audio quality resolver merges presets and bounded overrides', () => {
+  const perf = resolveAudioQualitySettings('performance');
+  assert.equal(perf.mode, 'performance');
+  assert.equal(perf.maxPolyphony, 4);
+  assert.equal(perf.synthStyle, 'game');
+
+  const custom = resolveAudioQualitySettings('high', {
+    maxPolyphony: 20,
+    schedulerLookaheadMs: 5,
+    schedulerLeadMs: 100,
+    saturationAmount: 0.8,
+    synthStyle: 'game'
+  });
+  assert.equal(custom.mode, 'high');
+  assert.equal(custom.maxPolyphony, 12);
+  assert.equal(custom.schedulerLookaheadMs, 8);
+  assert.equal(custom.schedulerLeadMs, 40);
+  assert.equal(custom.saturationAmount, 0.4);
+  assert.equal(custom.synthStyle, 'game');
 });
 
 test('grid midi map preserves note on/off timing and ignores drum channel', () => {

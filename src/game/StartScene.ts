@@ -143,7 +143,7 @@ export class StartScene extends Phaser.Scene {
         const name = typeof row.name === 'string' ? row.name : '';
         const level = (row as { data?: LevelDefinition }).data;
         if (!name || !level) continue;
-        if (!Number.isFinite(Number(level.bpm))) continue;
+        if (!Array.isArray(level.tempoMap) || level.tempoMap.length === 0) continue;
         if (!Number.isFinite(Number(level.gridColumns))) continue;
         if (!Array.isArray(level.notes) || !Array.isArray(level.platforms)) continue;
         out.push({ name, data: level });

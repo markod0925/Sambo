@@ -10,6 +10,7 @@ export interface ParsedMidi {
   notes: MidiNoteEvent[];
   durationSec: number;
   initialBpm: number;
+  tempoMap: Array<{ startBeat: number; bpm: number }>;
 }
 
 export interface GridMidiNoteEvent {
@@ -168,20 +169,26 @@ export function parseMidiFile(arrayBuffer: ArrayBufferLike): ParsedMidi {
     offset = trackEnd;
   }
 
-  if (notesWithTicks.length === 0) {
-    return { notes: [], durationSec: 0, initialBpm: Math.round(60000000 / tempoEvents[0].usPerQuarter) };
-  }
-
   tempoEvents.sort((a, b) => a.tick - b.tick);
+  const mergedTempo: Array<{ tick: number; usPerQuarter: number }> = [];
+  for (const event of tempoEvents) {
+    const prev = mergedTempo[mergedTempo.length - 1];
+    if (!prev || prev.tick !== event.tick) mergedTempo.push({ ...event });
+    else prev.usPerQuarter = event.usPerQuarter;
+  }
+  const tempoMap = mergedTempo.map((event) => ({
+    startBeat: event.tick / ticksPerQuarter,
+    bpm: Math.round(60000000 / event.usPerQuarter)
+  }));
 
   function tickToSeconds(targetTick: number): number {
     let sec = 0;
     let prevTick = 0;
     let tempoIndex = 0;
-    let currentUsPerQuarter = tempoEvents[0].usPerQuarter;
+    let currentUsPerQuarter = mergedTempo[0].usPerQuarter;
 
-    while (tempoIndex + 1 < tempoEvents.length && tempoEvents[tempoIndex + 1].tick <= targetTick) {
-      const next = tempoEvents[tempoIndex + 1];
+    while (tempoIndex + 1 < mergedTempo.length && mergedTempo[tempoIndex + 1].tick <= targetTick) {
+      const next = mergedTempo[tempoIndex + 1];
       const deltaTicks = next.tick - prevTick;
       sec += (deltaTicks * currentUsPerQuarter) / (ticksPerQuarter * 1_000_000);
       prevTick = next.tick;
@@ -206,8 +213,8 @@ export function parseMidiFile(arrayBuffer: ArrayBufferLike): ParsedMidi {
     .sort((a, b) => a.startSec - b.startSec);
 
   const durationSec = notes.reduce((maxSec, n) => Math.max(maxSec, n.endSec), 0);
-  const initialBpm = Math.round(60000000 / tempoEvents[0].usPerQuarter);
-  return { notes, durationSec, initialBpm };
+  const initialBpm = Math.round(60000000 / mergedTempo[0].usPerQuarter);
+  return { notes, durationSec, initialBpm, tempoMap };
 }
 
 export function buildGridNotesFromMidi(parsed: ParsedMidi, gridColumns: number): number[] {

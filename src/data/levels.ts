@@ -11,7 +11,7 @@ const levelTwoNotes = [
 ];
 
 const LEVEL_TWO: LevelDefinition = {
-  bpm: 132,
+  tempoMap: [{ startColumn: 0, bpm: 132 }],
   gridColumns: 29,
   notes: levelTwoNotes.map(midiToHz),
   platforms: [

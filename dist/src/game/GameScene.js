@@ -3,7 +3,8 @@ import { Metronome } from '../core/metronome.js';
 import { buildGridMidiMapFromMidi, buildGridNotesFromMidi, parseMidiFile } from '../core/midi.js';
 import { getBeatPlatformState, getCrossOffsetSteps, getElevatorOffsetSteps, getShuttleOffsetSteps, isAlternateBeatPlatformSolid } from '../core/platforms.js';
 import { defaultIntensityConfig } from '../core/intensity.js';
-import { DEFAULT_REFERENCE_BPM, scaleIntervalByTempo, scaleSpeedByTempo } from '../core/tempo.js';
+import { resolveAudioQualitySettings } from '../core/audioQuality.js';
+import { DEFAULT_TEMPO_SMOOTHING_BPM_PER_SECOND, DEFAULT_REFERENCE_BPM, getTempoAtColumn, normalizeTempoMap, scaleIntervalByTempo, scaleSpeedByTempo, stepTempoToward } from '../core/tempo.js';
 import { getLevelByOneBasedIndex, LEVELS } from '../data/levels.js';
 import { resolveIntent } from '../core/input.js';
 import { applyDamage, resolveEnemyCollision, updateFlyingEnemy, updatePatrolEnemy } from '../core/enemies.js';
@@ -12,6 +13,9 @@ const ENEMY_TIME_BONUS_MS = 200;
 const BASE_PATROL_SPEED = 90;
 const BASE_FLYING_SPEED_X = 180;
 const BASE_FLYING_HOMING_RATE = 90;
+const PLAYER_STEP_SUBDIVISIONS = 2;
+const VOICE_RETRIGGER_WINDOW_MS = 90;
+const MIN_VOICE_HOLD_SEC = 0.03;
 const CONTROL_HINT_TEXT = 'A/D or Arrows: move | W/Space/Up: jump.';
 const HUD_FONT = 'monospace';
 const DEPTH_ENVIRONMENT = 2;
@@ -138,10 +142,21 @@ export class GameScene extends Phaser.Scene {
     segmentEnemyPlans = [];
     useSegmentEnemySpawns = false;
     activeSegmentFlyingSpawnIntervalMs = 0;
+    tempoMap = [{ startColumn: 0, bpm: DEFAULT_REFERENCE_BPM }];
+    currentTempoZoneIndex = 0;
+    currentBpm = DEFAULT_REFERENCE_BPM;
+    targetBpm = DEFAULT_REFERENCE_BPM;
+    tempoSmoothingBpmPerSecond = DEFAULT_TEMPO_SMOOTHING_BPM_PER_SECOND;
+    pendingTempoChange = null;
     levelMidiCacheKey = null;
     gridMidiMap = null;
     activeVoices = new Map();
     masterGain = null;
+    musicBusGain = null;
+    metronomeBusGain = null;
+    saturationNode = null;
+    lastAppliedSaturationAmount = -1;
+    audioQuality = resolveAudioQualitySettings('balanced');
     patrolSquashBaseScaleY = 0.93;
     patrolSquashAmplitude = 0.05;
     flyingStretchBaseScaleX = 1.03;
@@ -154,6 +169,18 @@ export class GameScene extends Phaser.Scene {
     debugLastOnCount = 0;
     debugLastOffCount = 0;
     debugAudioMode = 'legacy';
+    debugLevelAlpha = 1;
+    debugPlayerAlpha = 1;
+    debugMoonAlpha = 1;
+    debugMoonHaloAlpha = 1;
+    debugDarknessAlpha = 0.82;
+    queuedGridAudioEvents = [];
+    audioSchedulerTimer = null;
+    audioJitterAvgMs = 0;
+    audioJitterMaxMs = 0;
+    audioJitterSampleCount = 0;
+    audioSchedulerLookaheadMs = 20;
+    audioSchedulerLeadMs = 12;
     constructor() {
         super('game');
     }
@@ -288,7 +315,8 @@ export class GameScene extends Phaser.Scene {
         this.scoreText.setScrollFactor(0);
         this.cursors = this.input.keyboard.createCursorKeys();
         this.keys = this.input.keyboard.addKeys('W,A,S,D,SPACE,UP,LEFT,RIGHT,ESC');
-        this.nextFlyingSpawnMs = performance.now() + Math.max(900, this.flyingSpawnIntervalMs * 0.5);
+        const openingSpawnInterval = this.flyingSpawnIntervalMs > 0 ? this.scaleSpawnIntervalMs(this.flyingSpawnIntervalMs, this.currentBpm) : 1800;
+        this.nextFlyingSpawnMs = performance.now() + Math.max(900, openingSpawnInterval * 0.5);
         this.nextPreviewToggleMs = performance.now() + 1200;
         this.nextPreviewJumpMs = performance.now() + 1600;
         this.runStartMs = performance.now();
@@ -298,6 +326,9 @@ export class GameScene extends Phaser.Scene {
         this.updateTimerLabel(this.runStartMs);
         this.createGameOverUI();
         this.createPauseUI();
+        this.startAudioScheduler();
+        this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.stopAudioScheduler());
+        this.events.once(Phaser.Scenes.Events.DESTROY, () => this.stopAudioScheduler());
     }
     update(_time, delta) {
         if (!this.isPreviewMode && !this.isGameOver) {
@@ -314,6 +345,8 @@ export class GameScene extends Phaser.Scene {
         if (this.isGameOver)
             return;
         const now = performance.now();
+        const deltaSeconds = delta / 1000;
+        this.updateTempoFromPlayerPosition(now, deltaSeconds);
         this.updateTimerLabel(now);
         let intent;
         if (this.isPreviewMode) {
@@ -365,7 +398,7 @@ export class GameScene extends Phaser.Scene {
             this.idleVoiceReleaseAtMs = 0;
         }
         if (movement.arrived)
-            this.playGridAudioAtIndex(this.getGridIndexFromX(this.player.x), movement.direction);
+            this.enqueueGridAudioEvent(this.getGridIndexFromX(this.player.x), movement.direction, now);
         if (movedX < -this.movementEpsilon)
             this.ghostPlatformLatchedSolid = true;
         else if (movedX > this.movementEpsilon)
@@ -409,7 +442,6 @@ export class GameScene extends Phaser.Scene {
         const groundedBeforeJump = this.isPlayerGrounded(beatSolid, alternateBeatSolid, ghostSolid, reverseGhostSolid, true);
         if (groundedBeforeJump)
             this.lastGroundedAtMs = now;
-        const deltaSeconds = delta / 1000;
         const canUseCoyoteJump = now - this.lastGroundedAtMs <= this.coyoteJumpWindowMs;
         if (intent.jump && (groundedBeforeJump || canUseCoyoteJump))
             this.verticalVelocity = -560;
@@ -456,6 +488,7 @@ export class GameScene extends Phaser.Scene {
                 reverseGhostPlatform.setAlpha(0.15);
             }
         }
+        this.applyWorldVisibilityClamp();
         this.infoText.setText(CONTROL_HINT_TEXT);
         this.updateDebugOverlay();
     }
@@ -490,7 +523,14 @@ export class GameScene extends Phaser.Scene {
         this.patrolEnemies.push({
             sprite,
             alive: true,
-            state: { x: deoverlappedX, speed: this.scaleEnemySpeed(BASE_PATROL_SPEED), direction: 1, minX, maxX }
+            baseSpeed: BASE_PATROL_SPEED,
+            state: {
+                x: deoverlappedX,
+                speed: this.scaleEnemySpeed(BASE_PATROL_SPEED, this.currentBpm),
+                direction: 1,
+                minX,
+                maxX
+            }
         });
     }
     resolvePatrolSpawnX(preferredX, y, minX, maxX) {
@@ -533,11 +573,13 @@ export class GameScene extends Phaser.Scene {
         this.flyingEnemies.push({
             sprite,
             alive: true,
+            baseSpeedX: BASE_FLYING_SPEED_X,
+            baseHomingRate: BASE_FLYING_HOMING_RATE,
             state: {
                 x: safeX,
                 y,
-                speedX: this.scaleEnemySpeed(BASE_FLYING_SPEED_X),
-                homingRate: this.scaleEnemySpeed(BASE_FLYING_HOMING_RATE),
+                speedX: this.scaleEnemySpeed(BASE_FLYING_SPEED_X, this.currentBpm),
+                homingRate: this.scaleEnemySpeed(BASE_FLYING_HOMING_RATE, this.currentBpm),
                 active: true
             }
         });
@@ -547,6 +589,7 @@ export class GameScene extends Phaser.Scene {
         for (const enemy of this.patrolEnemies) {
             if (!enemy.alive)
                 continue;
+            enemy.state.speed = this.scaleEnemySpeed(enemy.baseSpeed, this.currentBpm);
             enemy.state = updatePatrolEnemy(enemy.state, deltaSeconds);
             enemy.sprite.x = enemy.state.x;
             const fill = enemy.state.direction < 0 ? 0xc1121f : COLORS.patrolFill;
@@ -564,6 +607,8 @@ export class GameScene extends Phaser.Scene {
         for (const enemy of this.flyingEnemies) {
             if (!enemy.alive)
                 continue;
+            enemy.state.speedX = this.scaleEnemySpeed(enemy.baseSpeedX, this.currentBpm);
+            enemy.state.homingRate = this.scaleEnemySpeed(enemy.baseHomingRate, this.currentBpm);
             enemy.state = updateFlyingEnemy(enemy.state, this.player.y, deltaSeconds, -40);
             enemy.sprite.x = enemy.state.x;
             enemy.sprite.y = enemy.state.y;
@@ -650,7 +695,10 @@ export class GameScene extends Phaser.Scene {
             const spawnY = Phaser.Math.Between(160, 330);
             this.spawnFlyingEnemyAt(spawnX, spawnY);
             plan.pendingFlyingSpawns -= 1;
-            const spacing = Math.max(250, plan.flyingSpawnIntervalMs || this.scaleSpawnIntervalMs(1200));
+            const planBpm = this.getBpmForWorldX(plan.triggerX);
+            const spacing = plan.flyingSpawnIntervalMs > 0
+                ? Math.max(250, this.scaleSpawnIntervalMs(plan.flyingSpawnIntervalMs, planBpm))
+                : Math.max(250, this.scaleSpawnIntervalMs(1200, planBpm));
             plan.nextFlyingSpawnMs = nowMs + spacing;
         }
     }
@@ -673,16 +721,20 @@ export class GameScene extends Phaser.Scene {
         const voices = this.activeVoices.size;
         const stepState = this.mover.currentStep ? 'moving' : 'idle';
         this.debugText.setText([
-            `Debug Audio: ${modeLabel} | channels=${channels}`,
+            `Debug Audio: ${modeLabel} | profile=${this.audioQuality.mode} | channels=${channels}`,
+            `Tempo: bpm=${this.currentBpm.toFixed(1)} target=${this.targetBpm.toFixed(1)} rate=${this.tempoSmoothingBpmPerSecond}/s zone=${this.currentTempoZoneIndex}${this.pendingTempoChange ? ' (pending)' : ''}`,
+            `Scheduler: q=${this.queuedGridAudioEvents.length} jitter=${this.audioJitterAvgMs.toFixed(1)}ms max=${this.audioJitterMaxMs.toFixed(1)}ms`,
             `Grid: col=${this.debugLastGridColumn} dir=${this.debugLastDirection} step=${stepState}`,
-            `Events: on=${this.debugLastOnCount} off=${this.debugLastOffCount} voices=${voices}`
+            `Events: on=${this.debugLastOnCount} off=${this.debugLastOffCount} voices=${voices}`,
+            `Alpha: level=${this.debugLevelAlpha.toFixed(2)} player=${this.debugPlayerAlpha.toFixed(2)} moon=${this.debugMoonAlpha.toFixed(2)} halo=${this.debugMoonHaloAlpha.toFixed(2)} dark=${this.debugDarknessAlpha.toFixed(2)}`
         ].join('\n'));
     }
     applyBeatPlatformVisual(state, nowMs) {
         if (this.beatPlatforms.length === 0)
             return;
-        const timeIntoBeat = nowMs % this.metronome.beatIntervalMs;
-        const nearTransition = timeIntoBeat >= this.metronome.beatIntervalMs - 100;
+        const beatIntervalMs = this.metronome.beatIntervalMs;
+        const timeIntoBeat = this.metronome.beatProgressAt(nowMs) * beatIntervalMs;
+        const nearTransition = timeIntoBeat >= beatIntervalMs - 100;
         if (state === 'solid') {
             for (const beatPlatform of this.beatPlatforms) {
                 beatPlatform.setFillStyle(COLORS.beatSolidFill, 1);
@@ -786,7 +838,7 @@ export class GameScene extends Phaser.Scene {
     syncElevatorPlatforms(nowMs) {
         if (this.elevatorPlatforms.length === 0)
             return 0;
-        const beatIndex = Math.floor(nowMs / this.metronome.beatIntervalMs);
+        const beatIndex = this.metronome.beatIndexAt(nowMs);
         const offsetSteps = getElevatorOffsetSteps(beatIndex);
         const deltaSteps = offsetSteps - this.lastElevatorOffsetSteps;
         const stepSize = this.mover.stepSize;
@@ -799,7 +851,7 @@ export class GameScene extends Phaser.Scene {
     syncShuttlePlatforms(nowMs) {
         if (this.shuttlePlatforms.length === 0)
             return 0;
-        const beatIndex = Math.floor(nowMs / this.metronome.beatIntervalMs);
+        const beatIndex = this.metronome.beatIndexAt(nowMs);
         const offsetSteps = getShuttleOffsetSteps(beatIndex);
         const deltaSteps = offsetSteps - this.lastShuttleOffsetSteps;
         const stepSize = this.getPlatformGridStepX();
@@ -812,7 +864,7 @@ export class GameScene extends Phaser.Scene {
     syncCrossPlatforms(nowMs) {
         if (this.crossPlatforms.length === 0)
             return { deltaX: 0, deltaY: 0 };
-        const beatIndex = Math.floor(nowMs / this.metronome.beatIntervalMs);
+        const beatIndex = this.metronome.beatIndexAt(nowMs);
         const offsetSteps = getCrossOffsetSteps(beatIndex);
         const deltaXSteps = offsetSteps.x - this.lastCrossOffsetSteps.x;
         const deltaYSteps = offsetSteps.y - this.lastCrossOffsetSteps.y;
@@ -845,6 +897,52 @@ export class GameScene extends Phaser.Scene {
         const step = this.mover.stepSize;
         const relative = Math.round((playerX - this.minPlayerX) / step);
         return Phaser.Math.Clamp(relative, 0, this.gridColumns - 1);
+    }
+    getTempoZoneIndexForColumn(column) {
+        const safeColumn = Math.max(0, Math.floor(Number(column) || 0));
+        let picked = 0;
+        for (let i = 0; i < this.tempoMap.length; i++) {
+            if (this.tempoMap[i].startColumn > safeColumn)
+                break;
+            picked = i;
+        }
+        return picked;
+    }
+    getBpmForColumn(column) {
+        return getTempoAtColumn(this.tempoMap, column).bpm;
+    }
+    getBpmForWorldX(worldX) {
+        const step = this.mover.stepSize;
+        const relative = Math.round((worldX - this.minPlayerX) / step);
+        const column = Phaser.Math.Clamp(relative, 0, Math.max(0, this.gridColumns - 1));
+        return this.getBpmForColumn(column);
+    }
+    updateTempoFromPlayerPosition(nowMs, deltaSeconds) {
+        const currentColumn = this.getGridIndexFromX(this.player.x);
+        const zoneIndex = this.getTempoZoneIndexForColumn(currentColumn);
+        const desiredBpm = this.tempoMap[zoneIndex]?.bpm ?? this.currentBpm;
+        if (zoneIndex !== this.currentTempoZoneIndex || desiredBpm !== this.targetBpm) {
+            const pendingMatches = this.pendingTempoChange &&
+                this.pendingTempoChange.zoneIndex === zoneIndex &&
+                Math.abs(this.pendingTempoChange.bpm - desiredBpm) < 1e-6;
+            if (!pendingMatches) {
+                this.pendingTempoChange = {
+                    atMs: this.metronome.nextSubdivisionAt(nowMs),
+                    bpm: desiredBpm,
+                    zoneIndex
+                };
+            }
+        }
+        if (this.pendingTempoChange && nowMs >= this.pendingTempoChange.atMs) {
+            this.currentTempoZoneIndex = this.pendingTempoChange.zoneIndex;
+            this.targetBpm = this.pendingTempoChange.bpm;
+            this.pendingTempoChange = null;
+        }
+        const nextBpm = stepTempoToward(this.currentBpm, this.targetBpm, this.tempoSmoothingBpmPerSecond, deltaSeconds);
+        if (Math.abs(nextBpm - this.currentBpm) > 1e-6) {
+            this.currentBpm = nextBpm;
+            this.metronome.setBpm(this.currentBpm, nowMs);
+        }
     }
     updateIntensityFromMovement(deltaSeconds, movedX) {
         const stepRatio = Math.abs(movedX) / this.mover.stepSize;
@@ -985,9 +1083,70 @@ export class GameScene extends Phaser.Scene {
         this.player.y = this.playerY;
     }
     applyBrightnessFromIntensity() {
-        const visibility = Phaser.Math.Clamp((this.intensity - 0.2) / 0.8, 0, 1);
-        const darknessAlpha = 0.74 - visibility * 0.54;
+        const visibility = this.getIntensityVisibility();
+        const backwardDarknessBoost = this.currentDirection === 'backward' ? 0.05 : 0;
+        const darknessAlpha = Phaser.Math.Clamp(0.84 - visibility * 0.64 + backwardDarknessBoost, 0, 0.95);
         this.darknessOverlay.setAlpha(darknessAlpha);
+        this.debugDarknessAlpha = darknessAlpha;
+    }
+    getIntensityVisibility() {
+        return Phaser.Math.Clamp((this.intensity - defaultIntensityConfig.residualFloor) / (1 - defaultIntensityConfig.residualFloor), 0, 1);
+    }
+    getWorldVisibilityClamp() {
+        const visibility = this.getIntensityVisibility();
+        const backwardPenalty = this.currentDirection === 'backward' ? 0.16 : 0;
+        return Phaser.Math.Clamp(0.32 + visibility * 0.68 - backwardPenalty, 0.08, 1);
+    }
+    applyWorldVisibilityClamp() {
+        const worldVisibility = this.getWorldVisibilityClamp();
+        const characterVisibility = Phaser.Math.Clamp(0.58 + worldVisibility * 0.42, 0.42, 1);
+        this.debugLevelAlpha = worldVisibility;
+        this.debugPlayerAlpha = characterVisibility;
+        for (const platform of this.segmentPlatforms) {
+            platform.shape.setAlpha(0.3 + worldVisibility * 0.62);
+        }
+        for (const beatPlatform of this.beatPlatforms) {
+            beatPlatform.setAlpha(beatPlatform.alpha * worldVisibility);
+        }
+        for (const alternateBeatPlatform of this.alternateBeatPlatforms) {
+            alternateBeatPlatform.setAlpha(alternateBeatPlatform.alpha * worldVisibility);
+        }
+        for (const ghostPlatform of this.ghostPlatforms) {
+            ghostPlatform.setAlpha(ghostPlatform.alpha * worldVisibility);
+        }
+        for (const reverseGhostPlatform of this.reverseGhostPlatforms) {
+            reverseGhostPlatform.setAlpha(reverseGhostPlatform.alpha * worldVisibility);
+        }
+        for (const elevatorPlatform of this.elevatorPlatforms) {
+            elevatorPlatform.shape.setAlpha(elevatorPlatform.shape.alpha * worldVisibility);
+        }
+        for (const shuttlePlatform of this.shuttlePlatforms) {
+            shuttlePlatform.shape.setAlpha(shuttlePlatform.shape.alpha * worldVisibility);
+        }
+        for (const crossPlatform of this.crossPlatforms) {
+            crossPlatform.shape.setAlpha(crossPlatform.shape.alpha * worldVisibility);
+        }
+        for (const enemy of this.patrolEnemies) {
+            if (!enemy.alive)
+                continue;
+            enemy.sprite.setAlpha(0.28 + worldVisibility * 0.67);
+        }
+        for (const enemy of this.flyingEnemies) {
+            if (!enemy.alive)
+                continue;
+            enemy.sprite.setAlpha(0.24 + worldVisibility * 0.71);
+        }
+        this.player.setAlpha(characterVisibility);
+    }
+    brightenColor(color, amount) {
+        const clamped = Phaser.Math.Clamp(amount, 0, 1);
+        const r = (color >> 16) & 0xff;
+        const g = (color >> 8) & 0xff;
+        const b = color & 0xff;
+        const nr = Math.round(r + (255 - r) * clamped);
+        const ng = Math.round(g + (255 - g) * clamped);
+        const nb = Math.round(b + (255 - b) * clamped);
+        return (nr << 16) | (ng << 8) | nb;
     }
     updateMoonVisual(deltaSeconds) {
         const moonScreenTargetX = this.cameras.main.scrollX + this.cameras.main.width - 140;
@@ -1003,17 +1162,24 @@ export class GameScene extends Phaser.Scene {
             : this.currentDirection === 'backward'
                 ? COLORS.moonCool
                 : COLORS.moonLow;
-        const moonAlpha = 0.28 + this.intensity * 0.64;
-        const haloAlpha = (this.currentDirection === 'backward' ? 0.13 : 0.18) + this.intensity * 0.24;
+        const darknessCompensation = Phaser.Math.Clamp((this.debugDarknessAlpha - 0.74) / 0.2, 0, 1);
+        const moonColorBoost = this.brightenColor(moonColor, 0.4 * darknessCompensation);
+        const moonMinAlpha = 0.3 + 0.18 * darknessCompensation;
+        const haloMinAlpha = 0.12 + 0.14 * darknessCompensation;
+        const moonAlpha = Phaser.Math.Clamp(0.28 + this.intensity * 0.64 + 0.2 * darknessCompensation, moonMinAlpha, 0.98);
+        const haloBaseAlpha = this.currentDirection === 'backward' ? 0.12 : 0.15;
+        const haloAlpha = Phaser.Math.Clamp(haloBaseAlpha + this.intensity * 0.24 + 0.12 * darknessCompensation, haloMinAlpha, 0.8);
         const baseScale = 0.94 + this.intensity * 0.22;
         const pulseScale = 0.04 * this.moonBeatPulse;
         const haloScale = 1.02 + this.intensity * 0.28 + 0.08 * this.moonBeatPulse;
-        this.moon.setFillStyle(moonColor, moonAlpha);
+        this.moon.setFillStyle(moonColorBoost, moonAlpha);
         this.moon.setAlpha(moonAlpha);
         this.moon.setScale(baseScale + pulseScale);
-        this.moonHalo.setFillStyle(moonColor, haloAlpha);
+        this.moonHalo.setFillStyle(moonColorBoost, haloAlpha);
         this.moonHalo.setAlpha(haloAlpha);
         this.moonHalo.setScale(haloScale);
+        this.debugMoonAlpha = moonAlpha;
+        this.debugMoonHaloAlpha = haloAlpha;
     }
     handleBeatPulse(beatInBar) {
         if (this.lastBeatInBar === beatInBar)
@@ -1037,7 +1203,8 @@ export class GameScene extends Phaser.Scene {
         filter.frequency.value = isBarAccent ? 1400 : 1100;
         osc.connect(filter);
         filter.connect(gain);
-        gain.connect(this.getAudioOutputNode(synth));
+        gain.connect(this.getMetronomeOutputNode(synth));
+        this.applyMetronomeDucking(synth);
         const now = synth.currentTime;
         const peak = Math.max(0.0001, (isBarAccent ? 0.16 : 0.11) * this.masterVolume);
         gain.gain.setValueAtTime(0.0001, now);
@@ -1235,6 +1402,12 @@ export class GameScene extends Phaser.Scene {
         if (this.currentLevel.notes.length !== this.currentLevel.gridColumns) {
             throw new Error(`Invalid level definition: notes(${this.currentLevel.notes.length}) must equal gridColumns(${this.currentLevel.gridColumns}).`);
         }
+        if (!Array.isArray(this.currentLevel.tempoMap) || this.currentLevel.tempoMap.length === 0) {
+            throw new Error('Invalid level definition: tempoMap must contain at least one zone.');
+        }
+        if (this.currentLevel.tempoMap[0].startColumn !== 0) {
+            throw new Error('Invalid level definition: tempoMap first zone must start at column 0.');
+        }
     }
     triggerGameOver() {
         if (this.isPreviewMode)
@@ -1314,8 +1487,18 @@ export class GameScene extends Phaser.Scene {
     }
     resetGameplayState() {
         this.releaseAllVoices(true);
-        this.metronome = new Metronome(this.currentLevel.bpm, 4);
-        this.mover = new BeatSnapMover(this.metronome, 32);
+        this.tempoMap = normalizeTempoMap(this.currentLevel.tempoMap, DEFAULT_REFERENCE_BPM);
+        this.currentTempoZoneIndex = 0;
+        this.currentBpm = this.tempoMap[0]?.bpm ?? DEFAULT_REFERENCE_BPM;
+        this.targetBpm = this.currentBpm;
+        this.tempoSmoothingBpmPerSecond = Math.max(1, Number(this.currentLevel.tempoSmoothingBpmPerSecond) || DEFAULT_TEMPO_SMOOTHING_BPM_PER_SECOND);
+        this.audioQuality = resolveAudioQualitySettings(this.currentLevel.audioQualityMode, this.currentLevel.audioQuality);
+        this.maxSimultaneousVoices = this.audioQuality.maxPolyphony;
+        this.audioSchedulerLookaheadMs = this.audioQuality.schedulerLookaheadMs;
+        this.audioSchedulerLeadMs = this.audioQuality.schedulerLeadMs;
+        this.pendingTempoChange = null;
+        this.metronome = new Metronome(this.currentBpm, 4);
+        this.mover = new BeatSnapMover(this.metronome, 32, PLAYER_STEP_SUBDIVISIONS);
         this.segmentPlatforms = [];
         this.patrolEnemies = [];
         this.flyingEnemies = [];
@@ -1330,7 +1513,7 @@ export class GameScene extends Phaser.Scene {
         const baseSpawnInterval = hasSegmentEnemyAuthoring
             ? 0
             : Math.max(500, Math.floor(this.currentLevel.enemies?.flyingSpawnIntervalMs ?? 3400));
-        this.flyingSpawnIntervalMs = baseSpawnInterval > 0 ? this.scaleSpawnIntervalMs(baseSpawnInterval) : 0;
+        this.flyingSpawnIntervalMs = baseSpawnInterval > 0 ? baseSpawnInterval : 0;
         this.segmentEnemyPlans = [];
         this.useSegmentEnemySpawns = hasSegmentEnemyAuthoring;
         if (this.isEnemyPlanDebugEnabled()) {
@@ -1373,6 +1556,15 @@ export class GameScene extends Phaser.Scene {
         this.debugLastOnCount = 0;
         this.debugLastOffCount = 0;
         this.debugAudioMode = 'legacy';
+        this.debugLevelAlpha = 1;
+        this.debugPlayerAlpha = 1;
+        this.debugMoonAlpha = 1;
+        this.debugMoonHaloAlpha = 1;
+        this.debugDarknessAlpha = 0.82;
+        this.queuedGridAudioEvents = [];
+        this.audioJitterAvgMs = 0;
+        this.audioJitterMaxMs = 0;
+        this.audioJitterSampleCount = 0;
         this.idleVoiceReleaseAtMs = 0;
         this.lastMusicEventAtMs = 0;
         const step = 32;
@@ -1401,6 +1593,51 @@ export class GameScene extends Phaser.Scene {
         const centiseconds = Math.floor((safeMs % 1000) / 10);
         return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(centiseconds).padStart(2, '0')}`;
     }
+    startAudioScheduler() {
+        if (typeof window === 'undefined')
+            return;
+        if (this.audioSchedulerTimer !== null)
+            return;
+        this.audioSchedulerTimer = window.setInterval(() => this.flushQueuedGridAudioEvents(), this.audioSchedulerLookaheadMs);
+    }
+    stopAudioScheduler() {
+        if (typeof window === 'undefined')
+            return;
+        if (this.audioSchedulerTimer !== null) {
+            window.clearInterval(this.audioSchedulerTimer);
+            this.audioSchedulerTimer = null;
+        }
+        this.queuedGridAudioEvents = [];
+    }
+    enqueueGridAudioEvent(gridIndex, direction, queuedAtMs) {
+        if (this.isPreviewMode || this.masterVolume <= 0)
+            return;
+        this.queuedGridAudioEvents.push({
+            gridIndex,
+            direction,
+            queuedAtMs
+        });
+    }
+    flushQueuedGridAudioEvents() {
+        if (this.queuedGridAudioEvents.length === 0)
+            return;
+        const synth = this.ensureSynthReady();
+        if (!synth)
+            return;
+        const nowMs = performance.now();
+        const nowCtx = synth.currentTime;
+        const dispatchBeforeMs = nowMs + this.audioSchedulerLookaheadMs;
+        while (this.queuedGridAudioEvents.length > 0 && this.queuedGridAudioEvents[0].queuedAtMs <= dispatchBeforeMs) {
+            const event = this.queuedGridAudioEvents.shift();
+            const scheduledAtSec = nowCtx + this.audioSchedulerLeadMs / 1000;
+            const jitterMs = Math.max(0, nowMs - event.queuedAtMs);
+            this.audioJitterSampleCount += 1;
+            this.audioJitterAvgMs =
+                ((this.audioJitterAvgMs * (this.audioJitterSampleCount - 1)) + jitterMs) / this.audioJitterSampleCount;
+            this.audioJitterMaxMs = Math.max(this.audioJitterMaxMs, jitterMs);
+            this.playGridAudioAtIndex(event.gridIndex, event.direction, scheduledAtSec, event.queuedAtMs);
+        }
+    }
     loadBestTimeMs() {
         try {
             if (typeof window === 'undefined' || !window.localStorage)
@@ -1425,10 +1662,10 @@ export class GameScene extends Phaser.Scene {
             // Ignore storage failures (private mode / disabled storage).
         }
     }
-    playGridAudioAtIndex(gridIndex, direction) {
+    playGridAudioAtIndex(gridIndex, direction, scheduledAtSec, eventTimeMs) {
         if (this.isPreviewMode || this.masterVolume <= 0)
             return;
-        const nowMs = performance.now();
+        const nowMs = typeof eventTimeMs === 'number' && Number.isFinite(eventTimeMs) ? eventTimeMs : performance.now();
         const columnIndex = Phaser.Math.Clamp(Math.floor(gridIndex), 0, Math.max(0, this.currentLevel.gridColumns - 1));
         this.debugLastGridColumn = columnIndex;
         this.debugLastDirection = direction;
@@ -1438,7 +1675,7 @@ export class GameScene extends Phaser.Scene {
             this.debugLastOnCount = 1;
             this.debugLastOffCount = 0;
             this.lastMusicEventAtMs = nowMs;
-            this.playLegacyNoteAtGridIndex(columnIndex, direction);
+            this.playLegacyNoteAtGridIndex(columnIndex, direction, scheduledAtSec);
             return;
         }
         this.debugAudioMode = 'midi';
@@ -1448,156 +1685,249 @@ export class GameScene extends Phaser.Scene {
         if (columnEvents.on.length > 0 || columnEvents.off.length > 0)
             this.lastMusicEventAtMs = nowMs;
         if (direction === 'backward') {
-            for (const event of columnEvents.on)
-                this.releaseVoice(event.noteId, 0.1);
+            // Backward traversal uses short rewind transients only: drain sustained voices
+            // first to avoid long held notes while the player keeps moving backward.
+            this.releaseAllVoices(false);
             for (const event of columnEvents.off)
-                this.playBackwardTransient(event);
+                this.playBackwardTransient(event, scheduledAtSec);
             return;
         }
         for (const event of columnEvents.off)
-            this.releaseVoice(event.noteId, 0.08);
+            this.releaseVoice(event.noteId, 0.08, scheduledAtSec);
         for (const event of columnEvents.on)
-            this.startVoice(event, 'forward');
+            this.startVoice(event, 'forward', scheduledAtSec);
     }
-    playLegacyNoteAtGridIndex(gridIndex, direction) {
+    playLegacyNoteAtGridIndex(gridIndex, direction, scheduledAtSec) {
         const synth = this.ensureSynthReady();
         if (!synth)
             return;
+        const editorLike = this.audioQuality.synthStyle === 'editorLike';
         const osc = synth.createOscillator();
         const gain = synth.createGain();
         const filter = synth.createBiquadFilter();
         const freq = this.currentLevel.notes[gridIndex] ?? 220;
+        osc.type = editorLike ? 'triangle' : 'sawtooth';
         osc.frequency.value = freq;
         filter.type = 'lowpass';
-        filter.frequency.value = direction === 'forward' ? 1200 : 700;
+        filter.frequency.value = editorLike
+            ? direction === 'forward'
+                ? 9200
+                : 5200
+            : direction === 'forward'
+                ? 1200
+                : 700;
         osc.connect(filter);
         filter.connect(gain);
-        gain.connect(this.getAudioOutputNode(synth));
-        const now = synth.currentTime;
+        gain.connect(this.getMusicOutputNode(synth));
+        const now = Math.max(synth.currentTime, scheduledAtSec ?? synth.currentTime);
         if (direction === 'backward') {
             gain.gain.setValueAtTime(0.0001, now);
-            gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, 0.28 * this.masterVolume), now + 0.06);
-            gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+            if (editorLike) {
+                gain.gain.linearRampToValueAtTime(Math.max(0.0001, 0.14 * this.masterVolume), now + 0.012);
+                gain.gain.linearRampToValueAtTime(0.0001, now + 0.12);
+            }
+            else {
+                gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, 0.28 * this.masterVolume), now + 0.06);
+                gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+            }
         }
         else {
             gain.gain.setValueAtTime(0.0001, now);
-            gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, 0.42 * this.masterVolume), now + 0.012);
-            gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
+            if (editorLike) {
+                gain.gain.linearRampToValueAtTime(Math.max(0.0001, 0.16 * this.masterVolume), now + 0.008);
+                gain.gain.linearRampToValueAtTime(0.0001, now + 0.14);
+            }
+            else {
+                gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, 0.42 * this.masterVolume), now + 0.012);
+                gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
+            }
         }
         osc.start(now);
-        osc.stop(now + 0.22);
+        osc.stop(now + (editorLike ? 0.16 : 0.22));
     }
-    startVoice(event, direction) {
+    startVoice(event, direction, scheduledAtSec) {
         const synth = this.ensureSynthReady();
         if (!synth)
             return;
-        const now = synth.currentTime;
+        const editorLike = this.audioQuality.synthStyle === 'editorLike';
+        const now = Math.max(synth.currentTime, scheduledAtSec ?? synth.currentTime);
         const existing = this.activeVoices.get(event.noteId);
         if (existing) {
-            const retriggerMs = (now - existing.startedAt) * 1000;
-            if (retriggerMs <= 40) {
+            const retriggerMs = (now - existing.lastTriggeredAt) * 1000;
+            if (retriggerMs <= VOICE_RETRIGGER_WINDOW_MS) {
                 const velocityNorm = Phaser.Math.Clamp(event.velocity, 0.05, 1);
-                const cutoff = direction === 'forward' ? 900 + velocityNorm * 2200 : 500 + velocityNorm * 1300;
-                existing.filter.frequency.setTargetAtTime(cutoff, now, 0.01);
-                const peak = (direction === 'forward' ? 0.22 : 0.15) * velocityNorm * Phaser.Math.Clamp(this.masterVolume, 0, 1) * 0.85;
-                existing.gain.gain.cancelScheduledValues(now);
-                existing.gain.gain.setTargetAtTime(Math.max(0.0001, peak * 0.8), now, 0.012);
+                const cutoff = editorLike
+                    ? direction === 'forward'
+                        ? 9000 + velocityNorm * 5000
+                        : 4200 + velocityNorm * 2600
+                    : direction === 'forward'
+                        ? 900 + velocityNorm * 2200
+                        : 500 + velocityNorm * 1300;
+                const frequencyGlide = Math.max(0.002, Math.min(0.018, retriggerMs / 2000));
+                existing.filter.frequency.setTargetAtTime(cutoff, now, 0.012);
+                for (const osc of existing.oscillators) {
+                    osc.frequency.setTargetAtTime(event.frequency, now, frequencyGlide);
+                }
+                existing.frequency = event.frequency;
+                const peak = editorLike
+                    ? (direction === 'forward' ? 0.16 : 0.12) * velocityNorm * Phaser.Math.Clamp(this.masterVolume, 0, 1)
+                    : (direction === 'forward' ? 0.22 : 0.15) * velocityNorm * Phaser.Math.Clamp(this.masterVolume, 0, 1) * 0.85;
+                const gainParam = existing.gain.gain;
+                if (typeof gainParam.cancelAndHoldAtTime === 'function') {
+                    gainParam.cancelAndHoldAtTime(now);
+                }
+                else {
+                    gainParam.cancelScheduledValues(now);
+                    gainParam.setValueAtTime(Math.max(0.0001, gainParam.value), now);
+                }
+                gainParam.linearRampToValueAtTime(Math.max(0.0001, peak), now + (editorLike ? 0.008 : 0.01));
+                gainParam.linearRampToValueAtTime(Math.max(0.0001, peak * (editorLike ? 0.88 : 0.75)), now + (editorLike ? 0.04 : 0.06));
+                existing.peakGain = peak;
+                existing.lastTriggeredAt = now;
                 this.lastMusicEventAtMs = performance.now();
                 return;
             }
-            this.releaseVoice(event.noteId, 0.06);
+            this.releaseVoice(event.noteId, 0.06, now);
         }
         this.pruneVoices(now);
         if (this.activeVoices.size >= this.maxSimultaneousVoices) {
-            const oldest = this.activeVoices.keys().next().value;
-            if (oldest)
-                this.releaseVoice(oldest, 0.03);
+            const toSteal = this.pickVoiceToSteal(now);
+            if (toSteal)
+                this.releaseVoice(toSteal, 0.03, now);
         }
         const gain = synth.createGain();
         const filter = synth.createBiquadFilter();
         const oscA = synth.createOscillator();
-        const oscB = synth.createOscillator();
-        oscA.type = 'sawtooth';
+        const oscillators = [oscA];
+        oscA.type = editorLike ? 'triangle' : 'sawtooth';
         oscA.frequency.value = event.frequency;
-        oscB.type = 'triangle';
-        oscB.frequency.value = event.frequency * 0.5;
+        if (!editorLike) {
+            const oscB = synth.createOscillator();
+            oscB.type = 'triangle';
+            oscB.frequency.value = event.frequency * 0.5;
+            oscillators.push(oscB);
+        }
         filter.type = 'lowpass';
         const velocityNorm = Phaser.Math.Clamp(event.velocity, 0.05, 1);
-        const cutoff = direction === 'forward' ? 900 + velocityNorm * 2200 : 500 + velocityNorm * 1300;
+        const cutoff = editorLike
+            ? direction === 'forward'
+                ? 9000 + velocityNorm * 5000
+                : 4200 + velocityNorm * 2600
+            : direction === 'forward'
+                ? 900 + velocityNorm * 2200
+                : 500 + velocityNorm * 1300;
         filter.frequency.value = cutoff;
-        filter.Q.value = direction === 'forward' ? 0.7 : 0.4;
-        const peak = (direction === 'forward' ? 0.22 : 0.15) * velocityNorm * Phaser.Math.Clamp(this.masterVolume, 0, 1) * 0.85;
-        const sustain = peak * (direction === 'forward' ? 0.55 : 0.45);
-        const attack = direction === 'forward' ? 0.012 : 0.045;
-        const decay = direction === 'forward' ? 0.08 : 0.11;
+        filter.Q.value = editorLike ? 0.22 : direction === 'forward' ? 0.7 : 0.4;
+        const peak = editorLike
+            ? (direction === 'forward' ? 0.16 : 0.12) * velocityNorm * Phaser.Math.Clamp(this.masterVolume, 0, 1)
+            : (direction === 'forward' ? 0.22 : 0.15) * velocityNorm * Phaser.Math.Clamp(this.masterVolume, 0, 1) * 0.85;
+        const sustain = editorLike
+            ? peak * 0.88
+            : peak * (direction === 'forward' ? 0.55 : 0.45);
+        const attack = editorLike ? 0.008 : direction === 'forward' ? 0.012 : 0.045;
+        const decay = editorLike ? 0.03 : direction === 'forward' ? 0.08 : 0.11;
         gain.gain.setValueAtTime(0.0001, now);
-        gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, peak), now + attack);
-        gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, sustain), now + attack + decay);
+        if (editorLike) {
+            gain.gain.linearRampToValueAtTime(Math.max(0.0001, peak), now + attack);
+            gain.gain.linearRampToValueAtTime(Math.max(0.0001, sustain), now + attack + decay);
+        }
+        else {
+            gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, peak), now + attack);
+            gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, sustain), now + attack + decay);
+        }
         oscA.connect(filter);
-        oscB.connect(filter);
+        for (let i = 1; i < oscillators.length; i++) {
+            oscillators[i].connect(filter);
+        }
         filter.connect(gain);
-        gain.connect(this.getAudioOutputNode(synth));
-        oscA.start(now);
-        oscB.start(now);
+        gain.connect(this.getMusicOutputNode(synth));
+        for (const osc of oscillators)
+            osc.start(now);
         this.activeVoices.set(event.noteId, {
             noteId: event.noteId,
             frequency: event.frequency,
             startedAt: now,
+            lastTriggeredAt: now,
+            peakGain: peak,
             gain,
             filter,
-            oscillators: [oscA, oscB]
+            oscillators
         });
     }
-    playBackwardTransient(event) {
+    pickVoiceToSteal(now) {
+        let picked = null;
+        for (const [noteId, voice] of this.activeVoices.entries()) {
+            const ageSec = Math.max(0, now - voice.lastTriggeredAt);
+            const loudness = Math.max(0.0001, voice.gain.gain.value);
+            const score = loudness * 100 - ageSec * 25;
+            if (!picked || score < picked.score) {
+                picked = { noteId, score };
+            }
+        }
+        return picked?.noteId ?? null;
+    }
+    playBackwardTransient(event, scheduledAtSec) {
         const synth = this.ensureSynthReady();
         if (!synth)
             return;
-        const now = synth.currentTime;
+        const editorLike = this.audioQuality.synthStyle === 'editorLike';
+        const now = Math.max(synth.currentTime, scheduledAtSec ?? synth.currentTime);
         const gain = synth.createGain();
         const filter = synth.createBiquadFilter();
         const oscA = synth.createOscillator();
-        const oscB = synth.createOscillator();
+        const oscillators = [oscA];
         const velocityNorm = Phaser.Math.Clamp(event.velocity, 0.05, 1);
-        const peak = 0.18 * velocityNorm * Phaser.Math.Clamp(this.masterVolume, 0, 1) * 0.75;
-        const attack = 0.028;
-        const release = 0.16;
+        const peak = editorLike
+            ? 0.12 * velocityNorm * Phaser.Math.Clamp(this.masterVolume, 0, 1)
+            : 0.18 * velocityNorm * Phaser.Math.Clamp(this.masterVolume, 0, 1) * 0.75;
+        const attack = editorLike ? 0.012 : 0.028;
+        const release = editorLike ? 0.12 : 0.16;
         oscA.type = 'triangle';
         oscA.frequency.value = event.frequency;
-        oscB.type = 'sine';
-        oscB.frequency.value = event.frequency * 0.5;
+        if (!editorLike) {
+            const oscB = synth.createOscillator();
+            oscB.type = 'sine';
+            oscB.frequency.value = event.frequency * 0.5;
+            oscillators.push(oscB);
+        }
         filter.type = 'lowpass';
-        filter.frequency.value = 480 + velocityNorm * 950;
-        filter.Q.value = 0.35;
+        filter.frequency.value = editorLike ? 4200 + velocityNorm * 1800 : 480 + velocityNorm * 950;
+        filter.Q.value = editorLike ? 0.22 : 0.35;
         gain.gain.setValueAtTime(0.0001, now);
         gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, peak), now + attack);
         gain.gain.exponentialRampToValueAtTime(0.0001, now + attack + release);
         oscA.connect(filter);
-        oscB.connect(filter);
+        for (let i = 1; i < oscillators.length; i++) {
+            oscillators[i].connect(filter);
+        }
         filter.connect(gain);
-        gain.connect(this.getAudioOutputNode(synth));
-        oscA.start(now);
-        oscB.start(now);
-        oscA.stop(now + attack + release + 0.02);
-        oscB.stop(now + attack + release + 0.02);
+        gain.connect(this.getMusicOutputNode(synth));
+        for (const osc of oscillators) {
+            osc.start(now);
+            osc.stop(now + attack + release + 0.02);
+        }
     }
-    releaseVoice(noteId, releaseSeconds) {
+    releaseVoice(noteId, releaseSeconds, startAtSec, enforceMinHold = true) {
         const voice = this.activeVoices.get(noteId);
         if (!voice || !this.synth)
             return;
-        const now = this.synth.currentTime;
+        const now = Math.max(this.synth.currentTime, startAtSec ?? this.synth.currentTime);
+        const releaseStart = enforceMinHold ? Math.max(now, voice.startedAt + MIN_VOICE_HOLD_SEC) : now;
         const release = Phaser.Math.Clamp(releaseSeconds, 0.02, 0.45);
         try {
             const gainParam = voice.gain.gain;
             if (typeof gainParam.cancelAndHoldAtTime === 'function') {
-                gainParam.cancelAndHoldAtTime(now);
+                gainParam.cancelAndHoldAtTime(releaseStart);
             }
             else {
-                gainParam.cancelScheduledValues(now);
-                gainParam.setValueAtTime(Math.max(0.0001, gainParam.value), now);
+                gainParam.cancelScheduledValues(releaseStart);
+                gainParam.setValueAtTime(Math.max(0.0001, gainParam.value), releaseStart);
             }
-            gainParam.setTargetAtTime(0.0001, now, Math.max(0.01, release * 0.35));
+            const releaseTimeConstant = Math.max(0.008, release * 0.35);
+            gainParam.setTargetAtTime(0.0001, releaseStart, releaseTimeConstant);
             for (const osc of voice.oscillators) {
-                osc.stop(now + Math.max(0.08, release * 1.6));
+                // Keep a slightly longer tail so stop happens after the gain has settled.
+                osc.stop(releaseStart + Math.max(0.16, release * 3.5));
             }
         }
         catch {
@@ -1613,7 +1943,7 @@ export class GameScene extends Phaser.Scene {
             if (!Number.isFinite(level) || level <= 0.00011) {
                 try {
                     for (const osc of voice.oscillators)
-                        osc.stop(now + 0.01);
+                        osc.stop(now + 0.08);
                 }
                 catch {
                     // Ignore oscillators already stopped.
@@ -1625,7 +1955,7 @@ export class GameScene extends Phaser.Scene {
     releaseAllVoices(immediate = false) {
         const release = immediate ? 0.02 : 0.08;
         for (const noteId of [...this.activeVoices.keys()]) {
-            this.releaseVoice(noteId, release);
+            this.releaseVoice(noteId, release, undefined, !immediate);
         }
     }
     ensureSynthReady() {
@@ -1636,23 +1966,98 @@ export class GameScene extends Phaser.Scene {
                 this.synth.resume().catch(() => undefined);
                 return null;
             }
-            this.getAudioOutputNode(this.synth);
+            this.ensureAudioGraph(this.synth);
             return this.synth;
         }
         catch {
             return null;
         }
     }
-    getAudioOutputNode(synth) {
+    buildSaturationCurve(amount) {
+        const k = Math.max(0, Math.min(1, amount)) * 80;
+        const samples = 1024;
+        const buffer = new ArrayBuffer(samples * Float32Array.BYTES_PER_ELEMENT);
+        const curve = new Float32Array(buffer);
+        for (let i = 0; i < samples; i++) {
+            const x = (i * 2) / (samples - 1) - 1;
+            curve[i] = ((1 + k) * x) / (1 + k * Math.abs(x));
+        }
+        return curve;
+    }
+    ensureAudioGraph(synth) {
         if (!this.masterGain) {
             this.masterGain = synth.createGain();
             this.masterGain.gain.setValueAtTime(Math.max(0.0001, this.masterVolume), synth.currentTime);
-            this.masterGain.connect(synth.destination);
+            const limiter = synth.createDynamicsCompressor();
+            limiter.threshold.setValueAtTime(-4, synth.currentTime);
+            limiter.knee.setValueAtTime(14, synth.currentTime);
+            limiter.ratio.setValueAtTime(8, synth.currentTime);
+            limiter.attack.setValueAtTime(0.003, synth.currentTime);
+            limiter.release.setValueAtTime(0.12, synth.currentTime);
+            this.masterGain.connect(limiter);
+            limiter.connect(synth.destination);
+        }
+        if (!this.musicBusGain) {
+            this.musicBusGain = synth.createGain();
+            this.musicBusGain.gain.setValueAtTime(this.audioQuality.musicGain, synth.currentTime);
+            this.musicBusGain.connect(this.masterGain);
+        }
+        if (!this.metronomeBusGain) {
+            this.metronomeBusGain = synth.createGain();
+            this.metronomeBusGain.gain.setValueAtTime(this.audioQuality.metronomeGain, synth.currentTime);
+            this.metronomeBusGain.connect(this.masterGain);
+        }
+        if (!this.saturationNode) {
+            this.saturationNode = synth.createWaveShaper();
+            this.saturationNode.oversample = '2x';
+            this.lastAppliedSaturationAmount = this.audioQuality.saturationAmount;
+            this.saturationNode.curve = this.buildSaturationCurve(this.lastAppliedSaturationAmount);
+            if (this.musicBusGain) {
+                this.musicBusGain.disconnect();
+                this.musicBusGain.connect(this.saturationNode);
+                this.saturationNode.connect(this.masterGain);
+            }
         }
         const now = synth.currentTime;
         this.masterGain.gain.cancelScheduledValues(now);
         this.masterGain.gain.setTargetAtTime(Math.max(0.0001, this.masterVolume), now, 0.02);
-        return this.masterGain;
+        if (this.musicBusGain) {
+            this.musicBusGain.gain.cancelScheduledValues(now);
+            this.musicBusGain.gain.setTargetAtTime(Math.max(0.0001, this.audioQuality.musicGain), now, 0.03);
+        }
+        if (this.metronomeBusGain) {
+            this.metronomeBusGain.gain.cancelScheduledValues(now);
+            this.metronomeBusGain.gain.setTargetAtTime(Math.max(0.0001, this.audioQuality.metronomeGain), now, 0.03);
+        }
+        if (this.saturationNode && Math.abs(this.audioQuality.saturationAmount - this.lastAppliedSaturationAmount) > 0.0005) {
+            this.lastAppliedSaturationAmount = this.audioQuality.saturationAmount;
+            this.saturationNode.curve = this.buildSaturationCurve(this.lastAppliedSaturationAmount);
+        }
+    }
+    getMusicOutputNode(synth) {
+        this.ensureAudioGraph(synth);
+        return this.musicBusGain ?? this.masterGain ?? synth.destination;
+    }
+    getMetronomeOutputNode(synth) {
+        this.ensureAudioGraph(synth);
+        return this.metronomeBusGain ?? this.masterGain ?? synth.destination;
+    }
+    applyMetronomeDucking(synth) {
+        if (!this.musicBusGain)
+            return;
+        const now = synth.currentTime;
+        const base = Math.max(0.0001, this.audioQuality.musicGain);
+        const ducked = Math.max(0.0001, base * (1 - this.audioQuality.metronomeDuckAmount));
+        const gainParam = this.musicBusGain.gain;
+        if (typeof gainParam.cancelAndHoldAtTime === 'function') {
+            gainParam.cancelAndHoldAtTime(now);
+        }
+        else {
+            gainParam.cancelScheduledValues(now);
+            gainParam.setValueAtTime(Math.max(0.0001, gainParam.value), now);
+        }
+        gainParam.setTargetAtTime(ducked, now, 0.008);
+        gainParam.setTargetAtTime(base, now + 0.035, 0.05);
     }
     resolveLevelFromInputs() {
         const data = (this.scene.settings.data || {});
@@ -1683,12 +2088,15 @@ export class GameScene extends Phaser.Scene {
         this.gridMidiMap = null;
         this.currentLevel = {
             ...resolvedLevel,
+            tempoMap: normalizeTempoMap(resolvedLevel.tempoMap, DEFAULT_REFERENCE_BPM).map((entry) => ({ ...entry })),
             notes: [...(resolvedLevel.notes || [])],
             platforms: [...(resolvedLevel.platforms || [])],
             segmentEnemies: Array.isArray(resolvedLevel.segmentEnemies)
                 ? resolvedLevel.segmentEnemies.map((entry) => ({ ...entry }))
                 : undefined,
-            enemies: resolvedLevel.enemies ? { ...resolvedLevel.enemies } : undefined
+            enemies: resolvedLevel.enemies ? { ...resolvedLevel.enemies } : undefined,
+            audioQualityMode: resolvedLevel.audioQualityMode,
+            audioQuality: resolvedLevel.audioQuality ? { ...resolvedLevel.audioQuality } : undefined
         };
         this.currentLevelOneBasedIndex = safeIndex;
         this.currentLevelName = String(this.availableLevelNames[safeIndex - 1] || `level_${safeIndex}.runtime.json`);
@@ -1714,11 +2122,7 @@ export class GameScene extends Phaser.Scene {
             return;
         try {
             const parsed = parseMidiFile(arrayBuffer);
-            this.gridMidiMap = buildGridMidiMapFromMidi(parsed, this.currentLevel.gridColumns, {
-                maxChannels: 2,
-                minMidiNote: 48,
-                maxMidiNote: 88
-            });
+            this.gridMidiMap = buildGridMidiMapFromMidi(parsed, this.currentLevel.gridColumns, this.getMidiGridBuildOptions());
             const midiNotes = buildGridNotesFromMidi(parsed, this.currentLevel.gridColumns);
             if (midiNotes.length !== this.currentLevel.gridColumns)
                 return;
@@ -1735,6 +2139,15 @@ export class GameScene extends Phaser.Scene {
             return raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength);
         }
         return null;
+    }
+    getMidiGridBuildOptions() {
+        if (this.audioQuality.mode === 'performance') {
+            return { maxChannels: 3, minMidiNote: 42, maxMidiNote: 92 };
+        }
+        if (this.audioQuality.mode === 'high') {
+            return { maxChannels: 8, minMidiNote: 32, maxMidiNote: 108 };
+        }
+        return { maxChannels: 5, minMidiNote: 36, maxMidiNote: 100 };
     }
     goToNextLevel() {
         const next = this.currentLevelOneBasedIndex + 1;
@@ -1816,8 +2229,7 @@ export class GameScene extends Phaser.Scene {
                 const rawInterval = Number(row?.flyingSpawnIntervalMs);
                 if (!Number.isFinite(rawInterval) || rawInterval <= 0)
                     return 0;
-                const bounded = Math.max(500, Math.min(30000, Math.floor(rawInterval)));
-                return this.scaleSpawnIntervalMs(bounded);
+                return Math.max(500, Math.min(30000, Math.floor(rawInterval)));
             })()
         }))
             .filter((row) => Number.isFinite(row.sourceIdx));
@@ -1982,12 +2394,12 @@ export class GameScene extends Phaser.Scene {
         const top = picked.y - picked.height / 2;
         return top - playerHalfHeight;
     }
-    scaleEnemySpeed(baseSpeed) {
-        const scaled = scaleSpeedByTempo(baseSpeed, this.currentLevel.bpm, DEFAULT_REFERENCE_BPM);
+    scaleEnemySpeed(baseSpeed, bpm) {
+        const scaled = scaleSpeedByTempo(baseSpeed, bpm, DEFAULT_REFERENCE_BPM);
         return Phaser.Math.Clamp(scaled, baseSpeed * 0.35, baseSpeed * 3.5);
     }
-    scaleSpawnIntervalMs(baseIntervalMs) {
-        const scaled = scaleIntervalByTempo(baseIntervalMs, this.currentLevel.bpm, DEFAULT_REFERENCE_BPM);
+    scaleSpawnIntervalMs(baseIntervalMs, bpm) {
+        const scaled = scaleIntervalByTempo(baseIntervalMs, bpm, DEFAULT_REFERENCE_BPM);
         return Math.floor(Phaser.Math.Clamp(scaled, 250, 30000));
     }
 }

@@ -62,7 +62,10 @@ Reduced visibility increases uncertainty, not punishment.
 
 ### Global Metronome
 
-* A global beat clock runs continuously at a fixed BPM.
+* A global beat clock runs continuously with a **runtime tempo map** (`tempoMap`), not a single fixed BPM.
+* The active BPM is selected by the current map zone (grid column range).
+* BPM transitions are applied on beat subdivisions to avoid phase jumps.
+* After boundary activation, BPM moves toward the zone target using configurable smoothing (`tempoSmoothingBpmPerSecond`) to reduce audio glitches.
 * The beat is authoritative for:
 
   * musical note triggering
@@ -87,17 +90,18 @@ Player movement is **quantized and magnetized to the beat grid**.
 * The character:
 
   * starts moving immediately
-  * completes the step **exactly on the next valid beat subdivision**
-    (¼ or ⅛ note, depending on tuning)
+  * completes the step **on beat-aligned timing** based on runtime tuning
+    (current prototype tuning: **1 grid step every 2 subdivisions = 1/2 beat**)
 * Small speed corrections are applied invisibly.
 
 ### BPM-Proportional Traversal and Enemy Motion
 
-Traversal speed is derived from tempo so authored MIDI timing remains correct across levels.
+Traversal speed is derived from the **active zone BPM** so authored MIDI timing and gameplay pressure stay coherent across tempo changes.
 
 ```text
 reference_bpm = 120
-tempo_scale = level_bpm / reference_bpm
+current_bpm = tempoMap[column]
+tempo_scale = current_bpm / reference_bpm
 
 player_step_duration = beat_interval / subdivision
 player_speed = grid_cell_size / player_step_duration
@@ -105,9 +109,9 @@ player_speed = grid_cell_size / player_step_duration
 
 Consequences:
 
-* 70 BPM levels produce slower continuous movement than 120 BPM levels.
-* 120 BPM keeps baseline traversal tuning.
-* Arrival remains subdivision-locked, so note triggers stay rhythmically correct.
+* Tempo can accelerate/decelerate within the same level.
+* Step arrival remains subdivision-locked, so note triggers stay rhythmically correct.
+* Movement and enemy pressure evolve with zone tempo rather than a single global BPM.
 
 Enemy pacing follows the same tempo scale:
 
@@ -116,7 +120,22 @@ enemy_speed = base_enemy_speed * tempo_scale
 enemy_spawn_interval_ms = base_spawn_interval_ms / tempo_scale
 ```
 
-This keeps pressure and readability coherent with the musical tempo of each level.
+This keeps pressure and readability coherent with the musical tempo of each zone.
+
+Tempo transition smoothing:
+
+```text
+current_bpm = move_toward(current_bpm, target_bpm, tempo_smoothing_bpm_per_second * delta)
+```
+
+`tempo_smoothing_bpm_per_second` is runtime-configurable per level (with engine default fallback).
+
+Runtime mix architecture:
+
+* note playback routes through a dedicated `music` bus
+* metronome routes through a separate `metronome` bus
+* master output includes a gentle limiter/compressor stage
+* metronome applies subtle short ducking on the music bus to keep pulse readability
 
 ```text
 Input → movement queued
@@ -185,7 +204,7 @@ Stopping to think should not punish the player with total blindness.
 **Solution:**
 Introduce a **Residual Intensity Floor**.
 
-* `residual_floor ≈ 0.15–0.25`
+* `residual_floor ≈ 0.05–0.15`
 * Below this:
 
   * beat continues
@@ -212,6 +231,11 @@ The runtime parses the MIDI file and builds a grid-aligned event map:
 * events are derived from MIDI start/end times, not from a single sampled pitch per column
 * channel 10 (drums) is excluded from melodic playback
 * playback can keep multiple concurrent notes (bounded polyphony)
+* MIDI channel/note-range selection for runtime grid mapping is quality-profile aware:
+  * `performance`: reduced capture (`maxChannels=3`, `42-92`) for stability
+  * `balanced`: wider capture (`maxChannels=5`, `36-100`) for fuller harmony
+  * `high`: broad capture (`maxChannels=8`, `32-108`) for closest editor parity
+* grid-triggered note events are enqueued and dispatched by a dedicated audio scheduler (lookahead), decoupled from render frame pacing to reduce onset jitter
 
 ---
 
@@ -231,6 +255,7 @@ The runtime parses the MIDI file and builds a grid-aligned event map:
   * forward note-on becomes note release
   * forward note-off becomes note start
 * Backward-started notes are transient and auto-release (fade-out), not sustained.
+* While moving backward, runtime now drains all currently sustained voices before triggering rewind transients, preventing held-note buildup during long backward holds.
 * When movement input stops, any remaining active voices are released to avoid stuck drones.
 * This preserves harmonic continuity while moving backward through authored musical states while keeping rewind audio readable and non-fatiguing.
 
@@ -243,6 +268,18 @@ The runtime parses the MIDI file and builds a grid-aligned event map:
   * no immediate global hard-cut when horizontal input briefly goes idle
   * short idle grace window before releasing held voices
   * smooth release ramps and legato handling for near-immediate retriggers on the same note
+  * minimum hold time before release to reduce micro-clicks on dense note transitions
+  * bounded polyphony with priority-based voice stealing (quiet/old voices are released first instead of FIFO-only policy)
+* Runtime quality profiles are supported (`performance`, `balanced`, `high`) with optional per-level overrides:
+  * max polyphony
+  * scheduler lookahead/lead timing
+  * saturation amount
+  * synth style (`game` or `editorLike`)
+* `editorLike` synth style aligns runtime oscillator/envelope behavior to editor playback (triangle-led timbre, faster linear attack/decay) for closer audible parity.
+* Anti-click smoothing is applied on runtime release/ducking automations (target-based ramps) to reduce hiss/click artifacts between close notes.
+* `high` profile keeps only light saturation by default to avoid transient frizz while retaining presence.
+* Saturation curve updates are now applied only when saturation amount changes materially (not every note scheduling pass), reducing occasional zipper noise.
+* Voice-stop tail timing is intentionally conservative so oscillator stop occurs after envelope decay settles.
 
 ---
 
@@ -531,10 +568,15 @@ Procedural variation occurs **within authored constraints**.
 ### Gameplay Overlay & States (Implemented)
 
 * Darkness overlay alpha is driven by intensity with a non-zero visibility floor.
+* Backward movement applies an additional darkness boost to make rewind states visibly dimmer than idle at the same intensity.
+* World actors (platforms, enemies, and player) are additionally alpha-clamped by intensity so low-intensity/backward states dim the whole scene, not only the moon/overlay.
+* Moon core/halo keep a guaranteed minimum alpha (moon >= 0.30, halo >= 0.12) to preserve diegetic guidance at very low intensity.
+* When darkness overlay is very high, moon core/halo apply dynamic visibility compensation (minimum alpha lift + color brightening) to remain readable as a navigation anchor.
 * HUD includes:
   * lives as hearts + numeric counter
   * timer (top-center, screen-anchored)
   * kill score with cumulative time discount display (`kills (-Xs)`, one decimal)
+  * debug overlay alpha telemetry for level/world clamp, player, moon core, moon halo, and darkness overlay alpha
 * Implemented state overlays:
   * pause menu (`ESC`)
   * game over panel
@@ -601,7 +643,7 @@ The project includes a browser editor at `/editor.html` for runtime-oriented lev
 * User-facing sections:
   * top `Back to Game` action
   * MIDI/Levels folder loaders
-  * playback quality mode selector (`fast`, `balanced`, `accurate`)
+  * playback quality mode selector (`performance`, `balanced`, `high`)
   * runtime export box
   * segment table editor
   * live minimap
@@ -616,6 +658,7 @@ The project includes a browser editor at `/editor.html` for runtime-oriented lev
   * Low: gray-blue
   * Medium: blue
   * High: amber
+* Minimap now overlays tempo-change markers (vertical yellow guides) whenever adjacent segments use different BPM.
 * Layout editor supports:
   * horizontal camera scrollbar
   * center on spawn
@@ -626,6 +669,8 @@ The project includes a browser editor at `/editor.html` for runtime-oriented lev
   * X snap aligned to runtime player anchor (`x = 150`) with `32px` grid step
   * Y snap aligned to runtime vertical grid with `32px` spacing
   * canvas grid overlay aligned to the same runtime snap lattice
+  * zone BPM readout at the top (`Current zone BPM`) based on current camera area
+  * visible BPM boundary bars with per-zone BPM labels
 * Platform type cycle:
   * `static -> beat -> alternateBeat -> ghost -> reverseGhost -> elevator -> shuttle -> cross`
   * editor label `static` maps to runtime/export kind `segment`
@@ -634,11 +679,13 @@ The project includes a browser editor at `/editor.html` for runtime-oriented lev
 ### Runtime Export Features
 
 * Runtime export parameters:
-  * BPM (20–300)
+  * default BPM fallback (20–300) for generation/bootstrap
+  * per-segment BPM values (20–300) as authoring source for tempo zoning
   * grid columns are auto-derived from authored platform extent (not user-editable in the editor UI)
   * platform kinds are exported from explicit layout/platform type definitions
 * Runtime outputs:
   * `Save runtime to Levels` writes `<base>.runtime.json` to `Levels/`
+  * runtime export writes `tempoMap: [{ startColumn, bpm }]` built from segment BPM zones
   * runtime export includes a `segments` metadata snapshot used by the editor for lossless round-trip of per-segment fields
 * Level load behavior:
   * when loading a level JSON with `midi_file`, the editor attempts to auto-load the linked MIDI from `MIDI/`
@@ -647,8 +694,9 @@ The project includes a browser editor at `/editor.html` for runtime-oriented lev
   * after load, the selected level remains selected in the `Levels/` dropdown
 * MIDI load behavior:
   * manual `Load MIDI file` / `Select local MIDI` rebuilds segments from the loaded MIDI and resets layout editor to generated mode
-  * segment count is derived from MIDI duration and current runtime BPM at generation time (`2 beats` per segment)
-  * changing runtime BPM after MIDI load does not rebuild segment count automatically; regenerate/reload is required to recalculate beats/segments
+  * segment count is derived from MIDI duration and current default BPM fallback at generation time (`2 beats` per segment)
+  * segment BPM values are auto-seeded from MIDI tempo changes (tempo map timeline)
+  * changing default BPM fallback after MIDI load does not rebuild segment count automatically; regenerate/reload is required to recalculate beats/segments
 * Runtime generation guarantees:
   * if no generated `static` segment covers spawn, a fallback spawn-support segment is injected immediately left of spawn (its right edge aligns to spawn)
   * default platform width is 2 horizontal grid cells
@@ -677,8 +725,10 @@ The project includes a browser editor at `/editor.html` for runtime-oriented lev
 * World bounds:
   * gameplay/camera width is derived from authored platform extent (grid columns are only a fallback when no platforms exist)
 * Tempo-change implications:
-  * changing runtime BPM keeps authored beat count/segment layout unchanged unless the draft is regenerated from MIDI
-  * traversal/enemy pacing follows the new BPM, so the same beat sequence is crossed faster/slower
+  * runtime no longer relies on a single level BPM
+  * active BPM is selected by tempo zone (`tempoMap`) using player grid position
+  * metronome BPM transitions are applied on subdivision boundaries
+  * traversal and enemy pacing scale dynamically with the active zone BPM
 
 ---
 
@@ -749,3 +799,23 @@ It is about **direction, momentum, and perception**.
 
 > The player does not play music.
 > **The player is the playback head.**
+
+---
+
+## **11. AI-Generated Static Sprite Pack (ChatGPT)**
+
+A production-ready static sprite replacement pipeline is defined for the current Phaser prototype.
+
+Reference files:
+
+- `GDD/ASSET_PIPELINE.md`
+- `GDD/ASSET_PROMPTS_CHATGPT.md`
+- `GDD/ASSET_MANIFEST.json`
+
+Scope:
+
+- Replace current primitive runtime shapes with static sprites for player, moon, platforms, and enemies.
+- Keep gameplay behavior and collision dimensions unchanged.
+- Follow `GDD/VSG.md` color/state semantics exactly.
+
+Animation is intentionally out of scope for this baseline pack; state readability is achieved through sprite variant swapping.

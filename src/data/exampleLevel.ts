@@ -6,8 +6,25 @@ export interface PlatformSpec {
   height: number;
 }
 
-export interface LevelDefinition {
+export interface TempoZone {
+  startColumn: number;
   bpm: number;
+}
+
+export interface LevelDefinition {
+  tempoMap: TempoZone[];
+  tempoSmoothingBpmPerSecond?: number;
+  audioQualityMode?: 'performance' | 'balanced' | 'high';
+  audioQuality?: {
+    maxPolyphony?: number;
+    schedulerLookaheadMs?: number;
+    schedulerLeadMs?: number;
+    saturationAmount?: number;
+    musicGain?: number;
+    metronomeGain?: number;
+    metronomeDuckAmount?: number;
+    synthStyle?: 'game' | 'editorLike';
+  };
   gridColumns: number;
   notes: number[];
   midi_file?: string;
@@ -36,7 +53,9 @@ function midiToHz(midi: number): number {
 }
 
 export const EXAMPLE_LEVEL: LevelDefinition = {
-  bpm: 120,
+  tempoMap: [{ startColumn: 0, bpm: 120 }],
+  tempoSmoothingBpmPerSecond: 90,
+  audioQualityMode: 'balanced',
   gridColumns: 29,
   notes: noteMidi.map(midiToHz),
   platforms: [

@@ -5,8 +5,11 @@ export class BeatSnapMover {
   private queue: MovementDirection[] = [];
   private activeStep: BeatStep | null = null;
   private position = 0;
+  private readonly subdivisionsPerStep: number;
 
-  constructor(private readonly metronome: Metronome, private readonly cellSize = 48) {}
+  constructor(private readonly metronome: Metronome, private readonly cellSize = 48, subdivisionsPerStep = 1) {
+    this.subdivisionsPerStep = Math.max(1, Math.floor(Number(subdivisionsPerStep) || 1));
+  }
 
   enqueue(direction: MovementDirection): void {
     if (direction !== 'idle') {
@@ -52,6 +55,7 @@ export class BeatSnapMover {
       if (this.activeStep.arrivalTime === nowMs) {
         this.activeStep.arrivalTime += this.metronome.subdivisionIntervalMs;
       }
+      this.activeStep.arrivalTime += this.metronome.subdivisionIntervalMs * (this.subdivisionsPerStep - 1);
     }
 
     if (!this.activeStep) {
