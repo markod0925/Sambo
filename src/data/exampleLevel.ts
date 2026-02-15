@@ -1,5 +1,5 @@
 export interface PlatformSpec {
-  kind: 'segment' | 'beat' | 'alternateBeat' | 'ghost' | 'reverseGhost' | 'elevator' | 'shuttle' | 'cross';
+  kind: 'segment' | 'beat' | 'alternateBeat' | 'ghost' | 'reverseGhost' | 'elevator' | 'shuttle' | 'cross' | 'spring';
   x: number;
   y: number;
   width: number;
@@ -64,6 +64,7 @@ export const EXAMPLE_LEVEL: LevelDefinition = {
     { kind: 'beat', x: 560, y: 340, width: 120, height: 16 },
     { kind: 'alternateBeat', x: 650, y: 300, width: 110, height: 16 },
     { kind: 'elevator', x: 700, y: 340, width: 100, height: 16 },
+    { kind: 'spring', x: 760, y: 340, width: 100, height: 16 },
     { kind: 'ghost', x: 720, y: 290, width: 100, height: 14 },
     { kind: 'reverseGhost', x: 820, y: 250, width: 100, height: 14 }
   ],

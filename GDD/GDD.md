@@ -91,8 +91,9 @@ Player movement is **quantized and magnetized to the beat grid**.
 
   * starts moving immediately
   * completes the step **on beat-aligned timing** based on runtime tuning
-    (current prototype tuning: **1 grid step every 2 subdivisions = 1/2 beat**)
+    (current prototype tuning: **1 grid step every 4 subdivisions = 1 beat**)
 * Small speed corrections are applied invisibly.
+* Runtime movement snap on X is finer than authoring grid (`16px` traversal snap over `32px` logical tempo/grid columns).
 
 ### BPM-Proportional Traversal and Enemy Motion
 
@@ -121,6 +122,13 @@ enemy_spawn_interval_ms = base_spawn_interval_ms / tempo_scale
 ```
 
 This keeps pressure and readability coherent with the musical tempo of each zone.
+
+Current prototype runtime tuning (Feb 2026):
+
+* player movement cadence: 1 step/beat (`4` subdivisions per step)
+* patrol enemy base speed: `45`
+* flying enemy base horizontal speed: `90`
+* flying enemy base homing rate: `45`
 
 Tempo transition smoothing:
 
@@ -244,8 +252,20 @@ The runtime parses the MIDI file and builds a grid-aligned event map:
 * On each arrived grid column, process:
   * note-off events first
   * then note-on events
+* Runtime predicts upcoming forward columns using current movement speed:
+  * `cellsPerSecond = 1000 / stepDurationMs`
+  * `lookaheadSteps = clamp(round(cellsPerSecond * 0.5), 1, 3)`
+  * if no active forward step is available, prediction falls back to recent average forward step duration
+* Predicted events are buffered with target timestamps and deduplicated with `direction:column:roundedTarget`.
+* Arrival events reconcile with buffered predictions:
+  * if the predicted event was already queued/dispatched, arrival does not retrigger it
+  * if no prediction exists, arrival enqueues an immediate fallback event (no lost notes)
 * Notes sustain until matching note-off is reached.
 * Synth voice uses a brighter low-pass cutoff and fast attack for legibility.
+* Idle continuity policy for forward playback:
+  * micro-idle windows up to `300ms` keep buffered continuity and held voices
+  * beyond `300ms`, pending forward predictions are purged and held voices are released
+* Forward playback continuity target: scheduler lateness should stay at or below `30ms` during continuous rightward traversal.
 
 ---
 
@@ -280,6 +300,10 @@ The runtime parses the MIDI file and builds a grid-aligned event map:
 * `high` profile keeps only light saturation by default to avoid transient frizz while retaining presence.
 * Saturation curve updates are now applied only when saturation amount changes materially (not every note scheduling pass), reducing occasional zipper noise.
 * Voice-stop tail timing is intentionally conservative so oscillator stop occurs after envelope decay settles.
+* Scheduler telemetry now tracks predictive queue depth and timing reliability (`late avg/max`, `underrun` over `30ms` threshold).
+* Runtime includes a live debug A/B toggle for de-click strategy (`F9`):
+  * `normal`: default release/duck behavior
+  * `strict`: slower release targets, longer oscillator stop tails, softer ducking, and reduced effective saturation
 
 ---
 
@@ -370,6 +394,19 @@ Cross platforms move on a 4-beat loop around their authored center, always snapp
 * Beat sequence is fixed: `down -> left -> up -> right`.
 * Positions map to grid offsets: `(0,+1) -> (-1,0) -> (0,-1) -> (+1,0)`.
 * If the player is standing on the platform, the player is carried by the same snapped delta on each beat.
+
+---
+
+## **4.6 Spring Platforms (Boost Jump)**
+
+Spring platforms are static platforms with a jump amplifier.
+
+**Rules:**
+
+* Visual family is dedicated green, distinct from beat/ghost/mobile families.
+* Landing/standing behavior is identical to a normal solid platform.
+* If jump starts from a spring platform (including coyote window), jump apex is exactly `2x` normal jump height.
+* Implementation keeps gravity unchanged and scales launch velocity by `sqrt(2)` versus base jump velocity.
 
 ---
 
@@ -545,6 +582,11 @@ Procedural variation occurs **within authored constraints**.
 ### Global Look & UI Theme
 
 * Runtime resolution: **960x540**
+* Gameplay camera follows the player with **2.0x zoom** and a slight upward follow offset.
+* Runtime blockout scale tuning:
+  * player body: `12x19`
+  * patrol enemy body: `15x12`
+  * flying enemy body: `15x10`
 * Dark atmospheric base palette:
   * Background: `#05070f` / `#0b0f1a`
   * Main text: `#d7e2ff`
@@ -562,14 +604,14 @@ Procedural variation occurs **within authored constraints**.
   * best-time persistence keyed by level file name (not by list index) to keep records stable when alphabetical order changes
   * no fallback to index-based legacy keys
   * volume slider with immediate audible preview
-  * direct link to level editor (`/editor.html`)
+  * direct links to level editor (`/editor.html`) and MIDI Step Composer (`/daw.html`)
 * A dimmed gameplay **preview mode** runs in the background behind the start UI.
 
 ### Gameplay Overlay & States (Implemented)
 
 * Darkness overlay alpha is driven by intensity with a non-zero visibility floor.
-* Backward movement applies an additional darkness boost to make rewind states visibly dimmer than idle at the same intensity.
-* World actors (platforms, enemies, and player) are additionally alpha-clamped by intensity so low-intensity/backward states dim the whole scene, not only the moon/overlay.
+* Directional movement no longer applies extra darkness/visibility penalties at equal intensity; alpha floors are intensity-driven and stable between `step=idle` and `step=moving`.
+* World actors (platforms, enemies, and player) are alpha-clamped by intensity using the same baseline rule in all movement directions.
 * Moon core/halo keep a guaranteed minimum alpha (moon >= 0.30, halo >= 0.12) to preserve diegetic guidance at very low intensity.
 * When darkness overlay is very high, moon core/halo apply dynamic visibility compensation (minimum alpha lift + color brightening) to remain readable as a navigation anchor.
 * HUD includes:
@@ -613,6 +655,10 @@ Procedural variation occurs **within authored constraints**.
   * same mobile blue family as elevator (`#3A86FF` + `#4CC9F0`)
   * moves on 4-beat cross pattern (`down -> left -> up -> right`, radius 1 cell)
   * carries player with both horizontal and vertical snapped deltas while standing on top
+* **Spring platform**:
+  * dedicated green family (`#2DC653` fill, `#95D5B2` border, pulse accent `#52B788`)
+  * static solid behavior
+  * jump from spring reaches exactly `2x` normal jump height
 
 ### Runtime Visual Identity Update (VSG Alignment, Feb 2026)
 
@@ -642,7 +688,9 @@ The project includes a browser editor at `/editor.html` for runtime-oriented lev
 * Left control panel + right workspace layout.
 * User-facing sections:
   * top `Back to Game` action
+  * top `Open MIDI Composer` action
   * MIDI/Levels folder loaders
+  * `Load DAW pattern` action (imports latest pattern sent from composer)
   * playback quality mode selector (`performance`, `balanced`, `high`)
   * runtime export box
   * segment table editor
@@ -661,9 +709,11 @@ The project includes a browser editor at `/editor.html` for runtime-oriented lev
 * Minimap now overlays tempo-change markers (vertical yellow guides) whenever adjacent segments use different BPM.
 * Layout editor supports:
   * horizontal camera scrollbar
+  * auto-follow camera while `Play MIDI` is active (playhead-based scrolling)
   * center on spawn
   * regenerate from segments
   * delete selected platform
+  * live MIDI playback cursor line (vertical) while `Play MIDI` is active
   * left-click select/drag
   * right-click cycle platform type or create platform
   * X snap aligned to runtime player anchor (`x = 150`) with `32px` grid step
@@ -672,7 +722,7 @@ The project includes a browser editor at `/editor.html` for runtime-oriented lev
   * zone BPM readout at the top (`Current zone BPM`) based on current camera area
   * visible BPM boundary bars with per-zone BPM labels
 * Platform type cycle:
-  * `static -> beat -> alternateBeat -> ghost -> reverseGhost -> elevator -> shuttle -> cross`
+  * `static -> beat -> alternateBeat -> ghost -> reverseGhost -> elevator -> shuttle -> cross -> spring`
   * editor label `static` maps to runtime/export kind `segment`
 * Canvas rendering includes visible platform borders, selected-state highlight stroke, spawn guide line, and kind labels.
 
@@ -694,6 +744,8 @@ The project includes a browser editor at `/editor.html` for runtime-oriented lev
   * after load, the selected level remains selected in the `Levels/` dropdown
 * MIDI load behavior:
   * manual `Load MIDI file` / `Select local MIDI` rebuilds segments from the loaded MIDI and resets layout editor to generated mode
+  * `Load DAW pattern` reads browser storage payload (`sambo.daw.toEditor.v1`), maps beat-step notes to a synthetic MIDI timeline, and preserves DAW tempo-map zones
+  * DAW-imported patterns are treated as local composition data (runtime export keeps generated `notes` and does not require `midi_file`)
   * segment count is derived from MIDI duration and current default BPM fallback at generation time (`2 beats` per segment)
   * segment BPM values are auto-seeded from MIDI tempo changes (tempo map timeline)
   * changing default BPM fallback after MIDI load does not rebuild segment count automatically; regenerate/reload is required to recalculate beats/segments
@@ -729,6 +781,50 @@ The project includes a browser editor at `/editor.html` for runtime-oriented lev
   * active BPM is selected by tempo zone (`tempoMap`) using player grid position
   * metronome BPM transitions are applied on subdivision boundaries
   * traversal and enemy pacing scale dynamically with the active zone BPM
+
+---
+
+## **6.3 MIDI Step Composer (Implemented Tooling)**
+
+The project includes a standalone browser MIDI composer at `/daw.html` for beat-grid composition before level authoring.
+
+### Composer Core Features
+
+* Piano-roll style beat grid (`Note x Beat`) with per-cell note toggle.
+* Note range for composition: `C0 -> C7`.
+* Grid is beat-based: each column is exactly 1 beat.
+* Per-beat chord authoring is supported (multiple notes in the same column).
+* MIDI loading workflow:
+  * load from project `MIDI/` folder list
+  * load from local `.mid/.midi` file
+  * imported notes are quantized to beat columns in the DAW grid.
+* Configurable authoring parameters:
+  * base BPM (`20-300`)
+  * beat count (`4-1024`)
+  * variable tempo map (`startBeat -> bpm`) for per-zone BPM changes across the pattern.
+* Transport:
+  * `Play` (looped scheduler playback)
+  * `Stop` (immediate scheduler stop + voice release)
+  * visual playhead highlights active beat column.
+
+### MIDI Export and Editor Handoff
+
+* Composer exports standard `.mid` files (single track, tempo meta + note on/off events).
+* Composer can send the active pattern to editor through browser storage:
+  * key: `sambo.daw.toEditor.v1`
+  * payload fields: `name`, `bpm`, `beats`, `tempoMap[]`, `steps[]`
+* `Send Pattern to Editor` opens `/editor.html?source=daw`.
+* Editor can load this payload via `Load DAW pattern` and convert it into the same internal note timeline format used by MIDI parsing, preserving DAW tempo-map changes.
+
+### Design Intent
+
+* Keep MIDI ideation in a dedicated, low-friction screen.
+* Preserve editor responsibilities for segment/platform/enemy/runtime authoring.
+* Enable a direct workflow:
+  * compose beat-note idea in DAW screen
+  * import pattern in editor
+  * generate/refine level segments
+  * export runtime level JSON
 
 ---
 

@@ -5,6 +5,14 @@
       "bpm": 125
     }
   ],
+  "audioQualityMode": "balanced",
+  "audioQuality": {
+    "maxPolyphony": 2,
+    "schedulerLookaheadMs": 8,
+    "schedulerLeadMs": 4,
+    "saturationAmount": 0,
+    "synthStyle": "editorLike"
+  },
   "gridColumns": 57,
   "notes": [
     523.2511306011972,

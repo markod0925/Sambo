@@ -14,6 +14,14 @@ import {
 import { resolveAudioQualitySettings } from '../dist/src/core/audioQuality.js';
 import { buildGridMidiMapFromMidi } from '../dist/src/core/midi.js';
 import {
+  buildGridEventKey,
+  computeLatenessMs,
+  computeScheduledAtSec,
+  deriveForwardSpeedSignal,
+  isAudioUnderrun,
+  planForwardGridEvents
+} from '../dist/src/core/predictivePlayback.js';
+import {
   getCrossOffsetSteps,
   getBeatPlatformState,
   getElevatorOffsetSteps,
@@ -172,6 +180,78 @@ test('grid midi map keeps silence when no playable channels are selected', () =>
   assert.equal(hasAnyEvent, false);
 });
 
+test('predictive playback derives forward speed and bounded lookahead from step duration', () => {
+  const medium = deriveForwardSpeedSignal({
+    inputDirection: 'forward',
+    activeStepDirection: 'forward',
+    activeStepDurationMs: 250
+  });
+  assert.equal(medium.coherentForward, true);
+  assert.equal(medium.stepDurationMs, 250);
+  assert.ok(Math.abs(medium.cellsPerSecond - 4) < 1e-9);
+  assert.equal(medium.lookaheadSteps, 2);
+
+  const fast = deriveForwardSpeedSignal({
+    inputDirection: 'forward',
+    activeStepDirection: 'forward',
+    activeStepDurationMs: 100
+  });
+  assert.equal(fast.lookaheadSteps, 3);
+});
+
+test('predictive playback falls back to average duration and disables on non-forward input', () => {
+  const fallback = deriveForwardSpeedSignal({
+    inputDirection: 'forward',
+    activeStepDirection: null,
+    averageStepDurationMs: 500
+  });
+  assert.equal(fallback.coherentForward, true);
+  assert.equal(fallback.stepDurationMs, 500);
+  assert.equal(fallback.lookaheadSteps, 1);
+
+  const idle = deriveForwardSpeedSignal({
+    inputDirection: 'idle',
+    averageStepDurationMs: 250
+  });
+  assert.equal(idle.coherentForward, false);
+  assert.equal(idle.lookaheadSteps, 0);
+
+  const backward = deriveForwardSpeedSignal({
+    inputDirection: 'backward',
+    activeStepDirection: 'backward',
+    activeStepDurationMs: 250
+  });
+  assert.equal(backward.coherentForward, false);
+  assert.equal(backward.lookaheadSteps, 0);
+});
+
+test('predictive planner clamps forward events at level end and builds rounded dedupe keys', () => {
+  const planned = planForwardGridEvents({
+    fromColumn: 27,
+    maxColumn: 28,
+    firstTargetTimeMs: 1000,
+    stepDurationMs: 250,
+    lookaheadSteps: 3
+  });
+  assert.equal(planned.length, 1);
+  assert.equal(planned[0].gridIndex, 28);
+  assert.equal(planned[0].eventKey, buildGridEventKey('forward', 28, 1000));
+  assert.equal(buildGridEventKey('forward', 4, 1234.4), 'forward:4:1234');
+  assert.equal(buildGridEventKey('forward', 4, 1234.6), 'forward:4:1235');
+});
+
+test('scheduler helpers keep target-time ordering and underrun threshold behavior', () => {
+  const nowCtx = 10;
+  const nowMs = 1000;
+  const scheduled = [1015, 1060, 1200].map((targetMs) => computeScheduledAtSec(nowCtx, nowMs, targetMs, 12));
+  assert.ok(scheduled[0] < scheduled[1] && scheduled[1] < scheduled[2]);
+
+  assert.equal(computeLatenessMs(1040, 1010), 30);
+  assert.equal(computeLatenessMs(1000, 1010), 0);
+  assert.equal(isAudioUnderrun(30, 30), false);
+  assert.equal(isAudioUnderrun(31, 30), true);
+});
+
 test('beat and ghost platform state transitions', () => {
   assert.equal(getBeatPlatformState(1), 'solid');
   assert.equal(getBeatPlatformState(2), 'fadeOut');
@@ -225,7 +305,8 @@ test('energy classification and segment generation follow templates', () => {
     'reverseGhost',
     'elevator',
     'shuttle',
-    'cross'
+    'cross',
+    'spring'
   ]);
 });
 

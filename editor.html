@@ -83,6 +83,7 @@
         outline-offset: 1px;
       }
       #backToGameStart,
+      #openMidiComposer,
       #exportRuntime,
       #playMidi {
         background: var(--accent-warm);
@@ -90,6 +91,7 @@
         border-color: #e8bf39;
       }
       #backToGameStart:hover,
+      #openMidiComposer:hover,
       #exportRuntime:hover,
       #playMidi:hover {
         background: #f8de82;
@@ -196,6 +198,7 @@
       <div class="panel">
         <h1>Level Draft Editor</h1>
         <button id="backToGameStart">Back to Game</button>
+        <button id="openMidiComposer">Open MIDI Composer</button>
         <label for="midiFolderSelect">MIDI files available in <code>MIDI/</code></label>
         <select id="midiFolderSelect">
           <option value="">(no file)</option>
@@ -207,6 +210,7 @@
         <input id="fileInput" class="hidden-file-input" type="file" accept="application/json" />
         <input id="midiInput" class="hidden-file-input" type="file" accept=".mid,.midi,audio/midi,audio/x-midi" />
         <button id="openMidiFile">Select local MIDI</button>
+        <button id="loadDawPattern">Load DAW pattern</button>
         <p id="localMidiStatus" class="small">No local MIDI selected</p>
         <div class="button-row">
           <button id="playMidi">Play MIDI</button>
@@ -335,6 +339,7 @@
       const layoutScrollBar = document.getElementById('layoutScrollBar');
       const layoutTempoInfo = document.getElementById('layoutTempoInfo');
       const layoutCtx = layoutEditorCanvas ? layoutEditorCanvas.getContext('2d') : null;
+      const DAW_TO_EDITOR_STORAGE_KEY = 'sambo.daw.toEditor.v1';
       let model = { segments: [], midi_file: null };
       const GAME_PLAYER_START_X = 150;
       const GRID_STEP = 32;
@@ -354,7 +359,7 @@
         dragOffsetX: 0,
         dragOffsetY: 0
       };
-      const platformKindCycle = ['segment', 'beat', 'alternateBeat', 'ghost', 'reverseGhost', 'elevator', 'shuttle', 'cross'];
+      const platformKindCycle = ['segment', 'beat', 'alternateBeat', 'ghost', 'reverseGhost', 'elevator', 'shuttle', 'cross', 'spring'];
       const FLYING_SPAWN_SEGMENT_STRIDE = 5;
       const EDITOR_COLORS = {
         segmentLow: '#3a4663',
@@ -368,12 +373,14 @@
         platformElevator: '#3a86ff',
         platformShuttle: '#3a86ff',
         platformCross: '#3a86ff',
+        platformSpring: '#2dc653',
         canvasBackground: '#0b0f1a',
         canvasGrid: '#1b2a45',
         canvasLabel: '#d7e2ff',
         canvasMuted: '#9db6de',
         canvasGhostStroke: '#cdefff',
         canvasSpawn: '#ffb703',
+        canvasMidiCursor: '#4cc9f0',
         canvasSelection: '#4cc9f0',
         canvasBorder: '#05070f'
       };
@@ -391,7 +398,8 @@
         masterGain: null,
         schedulerTimer: null,
         playbackStartCtxTime: 0,
-        scheduledNoteIndex: 0
+        scheduledNoteIndex: 0,
+        cursorAnimationFrameId: null
       };
 
       function enemyDefaultsByEnergy(energyState) {
@@ -412,7 +420,7 @@
       function platformTypesByEnergy(energyState) {
         if (energyState === 'low') return ['static', 'beat', 'alternateBeat'];
         if (energyState === 'medium') return ['static', 'beat', 'alternateBeat', 'ghost', 'reverseGhost'];
-        return ['static', 'beat', 'alternateBeat', 'ghost', 'reverseGhost', 'elevator', 'shuttle', 'cross'];
+        return ['static', 'beat', 'alternateBeat', 'ghost', 'reverseGhost', 'elevator', 'shuttle', 'cross', 'spring'];
       }
 
       function mapPlatformTypeToKind(platformType) {
@@ -451,6 +459,7 @@
         if (kind === 'elevator') return EDITOR_COLORS.platformElevator;
         if (kind === 'shuttle') return EDITOR_COLORS.platformShuttle;
         if (kind === 'cross') return EDITOR_COLORS.platformCross;
+        if (kind === 'spring') return EDITOR_COLORS.platformSpring;
         return EDITOR_COLORS.platformSegment;
       }
 
@@ -568,6 +577,59 @@
         const fromGrid = GAME_PLAYER_START_X + Math.max(0, gridColumns - 1) * GRID_STEP + 260;
         const fromPlatforms = platforms.reduce((max, p) => Math.max(max, Number(p.x) + Number(p.width) / 2), 0) + 220;
         return Math.max(960, Math.ceil(fromGrid), Math.ceil(fromPlatforms));
+      }
+
+      function getCurrentMidiPlaybackSecond() {
+        const ctx = midiPlayback.audioContext;
+        if (!midiPlayback.isPlaying || !ctx) return null;
+        return Math.max(0, ctx.currentTime - midiPlayback.playbackStartCtxTime);
+      }
+
+      function getLayoutMidiCursorWorldX() {
+        const playbackSec = getCurrentMidiPlaybackSecond();
+        if (!Number.isFinite(playbackSec) || midiPlayback.durationSec <= 0) return null;
+        const progress = clampNumber(playbackSec / Math.max(0.001, midiPlayback.durationSec), 0, 1);
+        const maxColumns = Math.max(0, runtimeGridColumns - 1);
+        return GAME_PLAYER_START_X + progress * maxColumns * GRID_STEP;
+      }
+
+      function followLayoutCameraToMidiCursor() {
+        if (!layoutEditorCanvas || !midiPlayback.isPlaying) return;
+        const cursorWorldX = getLayoutMidiCursorWorldX();
+        if (!Number.isFinite(cursorWorldX)) return;
+        const width = layoutEditorCanvas.width;
+        const leftMargin = width * 0.25;
+        const rightMargin = width * 0.72;
+        const leftWorld = layoutEditorState.cameraX + leftMargin;
+        const rightWorld = layoutEditorState.cameraX + rightMargin;
+        if (cursorWorldX > rightWorld) {
+          layoutEditorState.cameraX = cursorWorldX - rightMargin;
+          clampLayoutCamera();
+        } else if (cursorWorldX < leftWorld) {
+          layoutEditorState.cameraX = cursorWorldX - leftMargin;
+          clampLayoutCamera();
+        }
+      }
+
+      function stopMidiCursorAnimation() {
+        if (!Number.isInteger(midiPlayback.cursorAnimationFrameId)) return;
+        cancelAnimationFrame(midiPlayback.cursorAnimationFrameId);
+        midiPlayback.cursorAnimationFrameId = null;
+      }
+
+      function startMidiCursorAnimation() {
+        stopMidiCursorAnimation();
+        const tick = () => {
+          if (!midiPlayback.isPlaying) {
+            midiPlayback.cursorAnimationFrameId = null;
+            renderLayoutEditor();
+            return;
+          }
+          followLayoutCameraToMidiCursor();
+          renderLayoutEditor();
+          midiPlayback.cursorAnimationFrameId = requestAnimationFrame(tick);
+        };
+        midiPlayback.cursorAnimationFrameId = requestAnimationFrame(tick);
       }
 
       function clampLayoutCamera() {
@@ -919,22 +981,25 @@
         return { format, ticksPerQuarter, notes, durationSec, initialBpm, tempoMap };
       }
 
-      async function handleLoadedMidi(fileName, arrayBuffer, options = {}) {
+      function applyParsedMidiState(fileName, parsed, options = {}) {
         const rebuildDraft = options.rebuildDraft !== false;
         const updateRuntimeFromMidi = options.updateRuntimeFromMidi !== false;
         const updateBaseName = options.updateBaseName !== false;
         const resetLayoutFromSegments = options.resetLayoutFromSegments !== false;
-        stopMidiPlayback();
-        const parsed = parseMidiFile(arrayBuffer);
-        midiPlayback.fileName = fileName;
-        midiPlayback.notes = parsed.notes;
+        const persistMidiFile = options.persistMidiFile !== false;
+        const statusName = typeof options.statusName === 'string' && options.statusName.trim() ? options.statusName.trim() : fileName;
+        midiPlayback.fileName = fileName || null;
+        midiPlayback.notes = Array.isArray(parsed.notes) ? parsed.notes : [];
         midiPlayback.tempoMap = Array.isArray(parsed.tempoMap) ? parsed.tempoMap : [];
         qualityModeSelect.value = 'balanced';
-        midiPlayback.playbackNotes = buildPlaybackNotes(parsed.notes);
-        midiPlayback.durationSec = parsed.durationSec;
-        midiPlayback.initialBpm = parsed.initialBpm;
-        model.midi_file = fileName;
-        if (updateBaseName) setLevelBaseNameFromMidi(fileName);
+        midiPlayback.playbackNotes = buildPlaybackNotes(midiPlayback.notes);
+        midiPlayback.durationSec = Math.max(0, Number(parsed.durationSec) || 0);
+        midiPlayback.initialBpm = Number.isFinite(Number(parsed.initialBpm)) ? Number(parsed.initialBpm) : null;
+        model.midi_file = persistMidiFile && fileName ? fileName : null;
+        if (updateBaseName) {
+          if (typeof options.baseName === 'string' && options.baseName.trim()) levelBaseNameInput.value = sanitizeBaseName(options.baseName);
+          else setLevelBaseNameFromMidi(fileName);
+        }
         if (updateRuntimeFromMidi && Number.isFinite(parsed.initialBpm)) {
           runtimeBpmInput.value = String(Math.round(parsed.initialBpm));
         }
@@ -950,7 +1015,159 @@
           }
         }
         render();
-        setMidiStatus(`loaded ${fileName} (${parsed.notes.length} notes, ${parsed.durationSec.toFixed(2)}s)`);
+        setMidiStatus(
+          `loaded ${statusName} (${midiPlayback.notes.length} notes, ${Math.max(0, midiPlayback.durationSec).toFixed(2)}s)`
+        );
+      }
+
+      async function handleLoadedMidi(fileName, arrayBuffer, options = {}) {
+        stopMidiPlayback();
+        const parsed = parseMidiFile(arrayBuffer);
+        applyParsedMidiState(fileName, parsed, { ...options, persistMidiFile: options.persistMidiFile !== false });
+      }
+
+      function parseDawPatternPayload(rawPayload) {
+        if (!rawPayload || typeof rawPayload !== 'object') {
+          throw new Error('Invalid DAW pattern payload');
+        }
+        const rawSteps = Array.isArray(rawPayload.steps) ? rawPayload.steps : [];
+        const beats = clampNumber(Math.floor(Number(rawPayload.beats) || rawSteps.length || 32), 4, 128);
+        const fallbackBpm = Number(runtimeBpmInput.value) || 120;
+        const name = sanitizeBaseName(rawPayload.name || 'daw_pattern');
+        const steps = [];
+        for (let i = 0; i < beats; i++) {
+          const rawStep = Array.isArray(rawSteps[i]) ? rawSteps[i] : [];
+          const notes = [];
+          for (const candidate of rawStep) {
+            const midi = Math.floor(Number(candidate));
+            if (!Number.isFinite(midi) || midi < 0 || midi > 127) continue;
+            if (!notes.includes(midi)) notes.push(midi);
+          }
+          notes.sort((a, b) => a - b);
+          steps.push(notes);
+        }
+
+        const rawTempoRows = Array.isArray(rawPayload.tempoMap)
+          ? rawPayload.tempoMap
+          : [{ startBeat: 0, bpm: clampBpm(Number(rawPayload.bpm), fallbackBpm) }];
+        const byStartBeat = new Map();
+        for (const row of rawTempoRows) {
+          if (!row || typeof row !== 'object') continue;
+          const startBeat = clampNumber(Math.round(Number(row.startBeat) || 0), 0, beats - 1);
+          const bpm = clampBpm(Number(row.bpm), fallbackBpm);
+          byStartBeat.set(startBeat, bpm);
+        }
+
+        let tempoMap = [...byStartBeat.entries()]
+          .map(([startBeat, bpm]) => ({ startBeat: Number(startBeat), bpm: Number(bpm) }))
+          .sort((a, b) => a.startBeat - b.startBeat);
+
+        if (tempoMap.length === 0 || tempoMap[0].startBeat !== 0) {
+          tempoMap.unshift({ startBeat: 0, bpm: clampBpm(Number(rawPayload.bpm), fallbackBpm) });
+        } else {
+          tempoMap[0].startBeat = 0;
+        }
+
+        const compactTempo = [];
+        for (const row of tempoMap) {
+          if (compactTempo.length > 0 && compactTempo[compactTempo.length - 1].bpm === row.bpm) continue;
+          compactTempo.push({ startBeat: row.startBeat, bpm: row.bpm });
+        }
+
+        const bpm = compactTempo[0]?.bpm || clampBpm(Number(rawPayload.bpm), fallbackBpm);
+        return { name, bpm, beats, steps, tempoMap: compactTempo };
+      }
+
+      function dawPatternToParsedMidi(pattern) {
+        const beats = clampNumber(Math.floor(Number(pattern.beats) || pattern.steps?.length || 1), 1, 512);
+        const fallbackBpm = Number(runtimeBpmInput.value) || 120;
+        const tempoMap = Array.isArray(pattern.tempoMap) && pattern.tempoMap.length > 0
+          ? pattern.tempoMap
+              .map((row) => ({
+                startBeat: clampNumber(Math.round(Number(row.startBeat) || 0), 0, beats - 1),
+                bpm: clampBpm(Number(row.bpm), fallbackBpm)
+              }))
+              .sort((a, b) => a.startBeat - b.startBeat)
+          : [{ startBeat: 0, bpm: clampBpm(Number(pattern.bpm), fallbackBpm) }];
+        if (tempoMap[0].startBeat !== 0) tempoMap.unshift({ startBeat: 0, bpm: tempoMap[0].bpm });
+        else tempoMap[0].startBeat = 0;
+
+        function bpmAtBeat(beatIndex) {
+          const beat = clampNumber(Math.floor(Number(beatIndex) || 0), 0, beats - 1);
+          let picked = tempoMap[0];
+          for (const row of tempoMap) {
+            if (Number(row.startBeat) > beat) break;
+            picked = row;
+          }
+          return clampBpm(Number(picked.bpm), fallbackBpm);
+        }
+
+        const beatStartSec = new Array(beats + 1);
+        let cursorSec = 0;
+        for (let beat = 0; beat < beats; beat++) {
+          beatStartSec[beat] = cursorSec;
+          cursorSec += 60 / Math.max(1, bpmAtBeat(beat));
+        }
+        beatStartSec[beats] = cursorSec;
+
+        const notes = [];
+
+        for (let beat = 0; beat < beats; beat++) {
+          const step = Array.isArray(pattern.steps?.[beat]) ? pattern.steps[beat] : [];
+          for (const midi of step) {
+            const midiNote = Math.floor(Number(midi));
+            if (!Number.isFinite(midiNote) || midiNote < 0 || midiNote > 127) continue;
+            notes.push({
+              startSec: beatStartSec[beat],
+              endSec: beatStartSec[beat + 1],
+              midiNote,
+              velocity: 0.85
+            });
+          }
+        }
+
+        notes.sort((a, b) => a.startSec - b.startSec || b.velocity - a.velocity);
+        const normalizedTempoMap = tempoMap.map((row) => ({
+          startBeat: Number(row.startBeat),
+          startSec: Number(beatStartSec[row.startBeat] || 0),
+          bpm: clampBpm(Number(row.bpm), fallbackBpm)
+        }));
+        const durationSec = Math.max(Number(beatStartSec[beats] || 0), 0.01);
+        const initialBpm = clampBpm(Number(normalizedTempoMap[0]?.bpm), fallbackBpm);
+        return {
+          notes,
+          durationSec,
+          initialBpm,
+          tempoMap: normalizedTempoMap
+        };
+      }
+
+      function loadDawPatternFromStorage(options = {}) {
+        if (typeof window === 'undefined' || !window.localStorage) {
+          throw new Error('Browser storage is not available');
+        }
+        const raw = window.localStorage.getItem(DAW_TO_EDITOR_STORAGE_KEY);
+        if (!raw) {
+          throw new Error('No DAW pattern found. Use \"Send Pattern to Editor\" from MIDI Composer first.');
+        }
+        let payload;
+        try {
+          payload = JSON.parse(raw);
+        } catch {
+          throw new Error('DAW pattern in storage is invalid JSON');
+        }
+        const pattern = parseDawPatternPayload(payload);
+        const parsed = dawPatternToParsedMidi(pattern);
+        stopMidiPlayback();
+        applyParsedMidiState(`${pattern.name}.mid`, parsed, {
+          ...options,
+          updateBaseName: true,
+          persistMidiFile: false,
+          baseName: pattern.name,
+          statusName: `DAW ${pattern.name}`
+        });
+        setLocalMidiStatus(`Loaded DAW pattern (${pattern.beats} beats)`);
+        return pattern;
       }
 
       function buildPlaybackNotes(notes) {
@@ -1073,6 +1290,7 @@
       }
 
       function stopMidiPlayback() {
+        stopMidiCursorAnimation();
         if (midiPlayback.doneTimer) {
           clearTimeout(midiPlayback.doneTimer);
           midiPlayback.doneTimer = null;
@@ -1101,6 +1319,7 @@
         midiPlayback.playbackStartCtxTime = 0;
         if (midiPlayback.isPlaying) setMidiStatus(`${midiPlayback.fileName || 'MIDI'} stopped`);
         midiPlayback.isPlaying = false;
+        renderLayoutEditor();
       }
 
       async function playMidiLoaded() {
@@ -1169,6 +1388,7 @@
         };
 
         midiPlayback.isPlaying = true;
+        startMidiCursorAnimation();
         schedulePending();
         midiPlayback.schedulerTimer = setInterval(schedulePending, 40);
         setMidiStatus(
@@ -1181,6 +1401,8 @@
           }
           midiPlayback.activeOscillators = [];
           midiPlayback.isPlaying = false;
+          stopMidiCursorAnimation();
+          renderLayoutEditor();
           setMidiStatus(`loaded ${midiPlayback.fileName} (${midiPlayback.notes.length} notes)`);
           midiPlayback.doneTimer = null;
         }, Math.max(0, midiPlayback.durationSec * 1000 + 250));
@@ -1849,6 +2071,23 @@
           layoutCtx.fillText(kindToEditorLabel(platform.kind), left + 4, Math.max(12, top - 4));
         });
 
+        const midiCursorWorldX = getLayoutMidiCursorWorldX();
+        if (Number.isFinite(midiCursorWorldX)) {
+          const midiCursorCanvasX = midiCursorWorldX - cameraX;
+          if (midiCursorCanvasX >= -4 && midiCursorCanvasX <= width + 4) {
+            const lineX = Math.round(midiCursorCanvasX) + 0.5;
+            layoutCtx.strokeStyle = EDITOR_COLORS.canvasMidiCursor;
+            layoutCtx.lineWidth = 2;
+            layoutCtx.beginPath();
+            layoutCtx.moveTo(lineX, 0);
+            layoutCtx.lineTo(lineX, height);
+            layoutCtx.stroke();
+            layoutCtx.fillStyle = EDITOR_COLORS.canvasMidiCursor;
+            layoutCtx.font = '11px monospace';
+            layoutCtx.fillText('MIDI', lineX + 4, Math.max(24, height - 26));
+          }
+        }
+
         layoutCtx.fillStyle = EDITOR_COLORS.canvasMuted;
         layoutCtx.font = '12px monospace';
         layoutCtx.fillText(
@@ -1943,6 +2182,10 @@
         if (typeof window !== 'undefined') window.location.href = '/';
       };
 
+      document.getElementById('openMidiComposer').onclick = () => {
+        if (typeof window !== 'undefined') window.location.href = '/daw.html';
+      };
+
       document.getElementById('exportRuntime').onclick = async () => {
         const runtime = buildRuntimeModel();
         const base = sanitizeBaseName(levelBaseNameInput.value);
@@ -1959,6 +2202,14 @@
 
       document.getElementById('openMidiFile').onclick = () => {
         midiInput.click();
+      };
+
+      document.getElementById('loadDawPattern').onclick = () => {
+        try {
+          loadDawPatternFromStorage();
+        } catch (err) {
+          alert(err.message || 'Unable to load DAW pattern');
+        }
       };
 
       midiInput.onchange = async (ev) => {
@@ -2205,6 +2456,12 @@
 
       refreshMidiFolderList();
       refreshLevelsFolderList();
+      try {
+        const source = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('source') : '';
+        if (source === 'daw') loadDawPatternFromStorage();
+      } catch {
+        // Ignore query parsing/storage errors.
+      }
       render();
     </script>
   </body>

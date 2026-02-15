@@ -27,6 +27,14 @@ import {
   stepTempoToward,
   type TempoMapEntry
 } from '../core/tempo.js';
+import {
+  buildGridEventKey,
+  computeLatenessMs,
+  computeScheduledAtSec,
+  deriveForwardSpeedSignal,
+  isAudioUnderrun,
+  planForwardGridEvents
+} from '../core/predictivePlayback.js';
 import { getLevelByOneBasedIndex, LEVELS } from '../data/levels.js';
 import type { LevelDefinition } from '../data/exampleLevel.js';
 import { resolveIntent } from '../core/input.js';
@@ -42,12 +50,27 @@ import {
 
 const BEST_TIME_STORAGE_PREFIX = 'sambo.level';
 const ENEMY_TIME_BONUS_MS = 200;
-const BASE_PATROL_SPEED = 90;
-const BASE_FLYING_SPEED_X = 180;
-const BASE_FLYING_HOMING_RATE = 90;
-const PLAYER_STEP_SUBDIVISIONS = 2;
+const BASE_PATROL_SPEED = 45;
+const BASE_FLYING_SPEED_X = 90;
+const BASE_FLYING_HOMING_RATE = 45;
+const PLAYER_STEP_SUBDIVISIONS = 4;
+const PLAYER_SNAP_STEP_X = 16;
+const WORLD_GRID_STEP = 32;
+const PLAYER_WIDTH = 12;
+const PLAYER_HEIGHT = 19;
+const PATROL_ENEMY_WIDTH = 15;
+const PATROL_ENEMY_HEIGHT = 12;
+const FLYING_ENEMY_WIDTH = 15;
+const FLYING_ENEMY_HEIGHT = 10;
+const PLAYER_CAMERA_ZOOM = 2;
 const VOICE_RETRIGGER_WINDOW_MS = 90;
 const MIN_VOICE_HOLD_SEC = 0.03;
+const FORWARD_IDLE_GRACE_MS = 300;
+const AUDIO_UNDERRUN_THRESHOLD_MS = 30;
+const AUDIO_EVENT_KEY_TTL_MS = 2400;
+const BASE_JUMP_VELOCITY = -560;
+const SPRING_JUMP_HEIGHT_MULTIPLIER = 2;
+const SPRING_JUMP_VELOCITY = BASE_JUMP_VELOCITY * Math.sqrt(SPRING_JUMP_HEIGHT_MULTIPLIER);
 const CONTROL_HINT_TEXT = 'A/D or Arrows: move | W/Space/Up: jump.';
 const HUD_FONT = 'monospace';
 const DEPTH_ENVIRONMENT = 2;
@@ -79,6 +102,9 @@ const COLORS = {
   reverseGhostInactiveBorder: 0x5e1a57,
   elevatorFill: 0x3a86ff,
   elevatorBorder: 0x4cc9f0,
+  springFill: 0x2dc653,
+  springPulseFill: 0x52b788,
+  springBorder: 0x95d5b2,
   patrolFill: 0xa4161a,
   patrolBorder: 0x660708,
   flyingFill: 0x9d0208,
@@ -153,7 +179,9 @@ interface SegmentEnemyPlan {
 interface QueuedGridAudioEvent {
   gridIndex: number;
   direction: MovementDirection;
-  queuedAtMs: number;
+  targetTimeMs: number;
+  source: 'arrival' | 'prediction';
+  eventKey: string;
 }
 
 export class GameScene extends Phaser.Scene {
@@ -174,6 +202,7 @@ export class GameScene extends Phaser.Scene {
   private elevatorPlatforms: ElevatorPlatform[] = [];
   private shuttlePlatforms: ShuttlePlatform[] = [];
   private crossPlatforms: CrossPlatform[] = [];
+  private springPlatforms: any[] = [];
   private segmentPlatforms: WorldPlatform[] = [];
   private darknessOverlay!: any;
   private gameOverBackdrop!: any;
@@ -218,6 +247,7 @@ export class GameScene extends Phaser.Scene {
   private playerY = 380;
   private verticalVelocity = 0;
   private lastGroundedAtMs = 0;
+  private lastGroundedOnSpring = false;
   private lastBeatInBar: 1 | 2 | 3 | 4 | null = null;
   private lastElevatorOffsetSteps = 0;
   private lastShuttleOffsetSteps = 0;
@@ -269,16 +299,23 @@ export class GameScene extends Phaser.Scene {
   private debugLastOnCount = 0;
   private debugLastOffCount = 0;
   private debugAudioMode: 'midi' | 'legacy' = 'legacy';
+  private debugAudioDeClickStrict = false;
   private debugLevelAlpha = 1;
   private debugPlayerAlpha = 1;
   private debugMoonAlpha = 1;
   private debugMoonHaloAlpha = 1;
   private debugDarknessAlpha = 0.82;
+  private forwardHoldMs = 0;
+  private avgForwardStepDurationMs = 0;
   private queuedGridAudioEvents: QueuedGridAudioEvent[] = [];
+  private queuedAudioEventKeys = new Set<string>();
+  private predictionKeys = new Set<string>();
+  private dispatchedAudioEventKeys = new Map<string, number>();
   private audioSchedulerTimer: number | null = null;
-  private audioJitterAvgMs = 0;
-  private audioJitterMaxMs = 0;
-  private audioJitterSampleCount = 0;
+  private audioLatenessAvgMs = 0;
+  private audioLatenessMaxMs = 0;
+  private audioLatenessSampleCount = 0;
+  private audioUnderrunCount = 0;
   private audioSchedulerLookaheadMs = 20;
   private audioSchedulerLeadMs = 12;
 
@@ -400,6 +437,19 @@ export class GameScene extends Phaser.Scene {
           .setStrokeStyle(2, COLORS.elevatorBorder, 0.9)
           .setDepth(DEPTH_ENVIRONMENT);
         this.crossPlatforms.push({ shape: cross, baseX: cross.x, baseY: cross.y });
+      } else if (platform.kind === 'spring') {
+        const spring = this.add
+          .rectangle(
+            this.snapXToGrid(platform.x),
+            this.snapYToGrid(platform.y),
+            this.snapLengthToGrid(platform.width),
+            this.platformBlockHeight,
+            COLORS.springFill,
+            0.9
+          )
+          .setStrokeStyle(2, COLORS.springBorder, 0.9)
+          .setDepth(DEPTH_ENVIRONMENT);
+        this.springPlatforms.push(spring);
       }
     }
     const initialNow = performance.now();
@@ -408,8 +458,9 @@ export class GameScene extends Phaser.Scene {
     this.syncCrossPlatforms(initialNow);
     this.playerY = this.getInitialPlayerYFromPlatforms();
 
-    this.player = this.add.rectangle(150, this.playerY, 24, 38, COLORS.player, 1).setDepth(DEPTH_PLAYER);
-    this.cameras.main.startFollow(this.player, false, 0.12, 0.12);
+    this.player = this.add.rectangle(150, this.playerY, PLAYER_WIDTH, PLAYER_HEIGHT, COLORS.player, 1).setDepth(DEPTH_PLAYER);
+    this.cameras.main.setZoom(PLAYER_CAMERA_ZOOM);
+    this.cameras.main.startFollow(this.player, false, 0.12, 0.12, 0, -48);
     this.initializeGridBounds();
     this.moonHalo = this.add.circle(this.moonMaxWorldX, 90, 72, COLORS.moonLow, 0.12).setDepth(DEPTH_MOON - 1);
     this.moon = this.add.circle(this.moonMaxWorldX, 90, 42, COLORS.moonLow, 0.32).setDepth(DEPTH_MOON);
@@ -460,14 +511,15 @@ export class GameScene extends Phaser.Scene {
     this.infoText.setDepth(11);
     this.debugText.setDepth(11);
     this.scoreText.setDepth(11);
-    this.livesText.setScrollFactor(0);
-    this.timerText.setScrollFactor(0);
-    this.infoText.setScrollFactor(0);
-    this.debugText.setScrollFactor(0);
-    this.scoreText.setScrollFactor(0);
+    this.configureScreenUi(this.darknessOverlay);
+    this.configureScreenUi(this.livesText);
+    this.configureScreenUi(this.timerText);
+    this.configureScreenUi(this.infoText);
+    this.configureScreenUi(this.debugText);
+    this.configureScreenUi(this.scoreText);
 
     this.cursors = this.input.keyboard.createCursorKeys();
-    this.keys = this.input.keyboard.addKeys('W,A,S,D,SPACE,UP,LEFT,RIGHT,ESC');
+    this.keys = this.input.keyboard.addKeys('W,A,S,D,SPACE,UP,LEFT,RIGHT,ESC,F9');
     const openingSpawnInterval =
       this.flyingSpawnIntervalMs > 0 ? this.scaleSpawnIntervalMs(this.flyingSpawnIntervalMs, this.currentBpm) : 1800;
     this.nextFlyingSpawnMs = performance.now() + Math.max(900, openingSpawnInterval * 0.5);
@@ -486,6 +538,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(_time: number, delta: number): void {
+    if (Phaser.Input.Keyboard.JustDown(this.keys.F9)) {
+      this.debugAudioDeClickStrict = !this.debugAudioDeClickStrict;
+    }
     if (!this.isPreviewMode && !this.isGameOver) {
       const escPressed = Phaser.Input.Keyboard.JustDown(this.keys.ESC);
       if (escPressed) {
@@ -524,7 +579,7 @@ export class GameScene extends Phaser.Scene {
     if (canQueueStep) {
       this.mover.enqueue(intent.direction);
     }
-
+    const stepBeforeMovement = this.mover.currentStep;
     const movement = this.mover.update(now);
 
     const previousPlayerX = this.player.x;
@@ -542,15 +597,47 @@ export class GameScene extends Phaser.Scene {
     else if (movedX < -this.movementEpsilon) this.currentDirection = 'backward';
     else if (this.mover.currentStep) this.currentDirection = this.mover.currentStep.direction;
     else this.currentDirection = 'idle';
-    if (!this.mover.currentStep && intent.direction === 'idle' && this.activeVoices.size > 0) {
-      if (this.idleVoiceReleaseAtMs <= 0) this.idleVoiceReleaseAtMs = now + 150;
+
+    if (intent.direction === 'forward') this.forwardHoldMs += delta;
+    else this.forwardHoldMs = 0;
+
+    if (!this.mover.currentStep && intent.direction === 'idle') {
+      if (this.idleVoiceReleaseAtMs <= 0) this.idleVoiceReleaseAtMs = now + FORWARD_IDLE_GRACE_MS;
       const longEnoughIdle = now >= this.idleVoiceReleaseAtMs;
-      const noRecentMusic = now - this.lastMusicEventAtMs >= 80;
-      if (longEnoughIdle && noRecentMusic) this.releaseAllVoices();
+      if (longEnoughIdle) {
+        this.purgeForwardPredictionEvents();
+        if (this.activeVoices.size > 0 && now - this.lastMusicEventAtMs >= 80) this.releaseAllVoices();
+      }
     } else {
       this.idleVoiceReleaseAtMs = 0;
     }
-    if (movement.arrived) this.enqueueGridAudioEvent(this.getGridIndexFromX(this.player.x), movement.direction, now);
+    if (movement.arrived) {
+      const previousGridIndex = this.getGridIndexFromX(previousPlayerX);
+      const gridIndex = this.getGridIndexFromX(this.player.x);
+      if (gridIndex !== previousGridIndex) {
+        const targetTimeMs =
+          movement.direction === 'forward' && stepBeforeMovement?.direction === 'forward'
+            ? stepBeforeMovement.arrivalTime
+            : now;
+        const eventKey = buildGridEventKey(movement.direction, gridIndex, targetTimeMs);
+        this.enqueueGridAudioEvent({
+          gridIndex,
+          direction: movement.direction,
+          targetTimeMs,
+          source: 'arrival',
+          eventKey
+        });
+        if (movement.direction === 'forward' && stepBeforeMovement?.direction === 'forward') {
+          this.rememberForwardStepDuration(stepBeforeMovement.arrivalTime - stepBeforeMovement.startTime);
+        }
+      }
+    }
+
+    if (intent.direction === 'backward') {
+      this.purgeForwardPredictionEvents();
+    } else if (intent.direction === 'forward') {
+      this.queueForwardPredictedEvents(now);
+    }
 
     if (movedX < -this.movementEpsilon) this.ghostPlatformLatchedSolid = true;
     else if (movedX > this.movementEpsilon) this.ghostPlatformLatchedSolid = false;
@@ -588,10 +675,16 @@ export class GameScene extends Phaser.Scene {
     const ghostSolid = this.ghostPlatformLatchedSolid;
     const reverseGhostSolid = this.reverseGhostPlatformLatchedSolid;
     const groundedBeforeJump = this.isPlayerGrounded(beatSolid, alternateBeatSolid, ghostSolid, reverseGhostSolid, true);
-    if (groundedBeforeJump) this.lastGroundedAtMs = now;
+    if (groundedBeforeJump) {
+      this.lastGroundedAtMs = now;
+      this.lastGroundedOnSpring = this.isStandingOnAnySpring();
+    }
 
     const canUseCoyoteJump = now - this.lastGroundedAtMs <= this.coyoteJumpWindowMs;
-    if (intent.jump && (groundedBeforeJump || canUseCoyoteJump)) this.verticalVelocity = -560;
+    if (intent.jump && (groundedBeforeJump || canUseCoyoteJump)) {
+      const jumpFromSpring = groundedBeforeJump ? this.isStandingOnAnySpring() : this.lastGroundedOnSpring;
+      this.verticalVelocity = jumpFromSpring ? SPRING_JUMP_VELOCITY : BASE_JUMP_VELOCITY;
+    }
 
     const previousPlayerY = this.playerY;
     this.verticalVelocity += 1400 * deltaSeconds;
@@ -615,6 +708,7 @@ export class GameScene extends Phaser.Scene {
     this.applyBeatPlatformVisual(beatState, now);
     this.applyAlternateBeatPlatformVisual(alternateBeatSolid);
     this.applyMobilePlatformVisual();
+    this.applySpringPlatformVisual(now);
     for (const ghostPlatform of this.ghostPlatforms) {
       if (ghostSolid) {
         ghostPlatform.setFillStyle(COLORS.ghostActiveFill, 0.85);
@@ -666,7 +760,7 @@ export class GameScene extends Phaser.Scene {
     if (deoverlappedX === null) return;
 
     const sprite = this.add
-      .rectangle(deoverlappedX, y, 30, 24, COLORS.patrolFill, 0.95)
+      .rectangle(deoverlappedX, y, PATROL_ENEMY_WIDTH, PATROL_ENEMY_HEIGHT, COLORS.patrolFill, 0.95)
       .setStrokeStyle(2, COLORS.patrolBorder, 0.9)
       .setDepth(DEPTH_ENEMY);
     this.patrolEnemies.push({
@@ -684,8 +778,11 @@ export class GameScene extends Phaser.Scene {
   }
 
   private resolvePatrolSpawnX(preferredX: number, y: number, minX: number, maxX: number): number | null {
-    const spacing = 34;
-    const sameLaneEnemies = this.patrolEnemies.filter((enemy) => enemy.alive && Math.abs(enemy.sprite.y - y) <= 14);
+    const spacing = Math.max(8, Math.round(PATROL_ENEMY_WIDTH + 2));
+    const sameLaneTolerance = Math.max(4, Math.round(PATROL_ENEMY_HEIGHT * 0.6));
+    const sameLaneEnemies = this.patrolEnemies.filter(
+      (enemy) => enemy.alive && Math.abs(enemy.sprite.y - y) <= sameLaneTolerance
+    );
     if (sameLaneEnemies.length === 0) return Phaser.Math.Clamp(preferredX, minX, maxX);
 
     const collides = (candidateX: number): boolean =>
@@ -721,7 +818,7 @@ export class GameScene extends Phaser.Scene {
     if (safeX === null) return;
 
     const sprite = this.add
-      .rectangle(safeX, y, 30, 20, COLORS.flyingFill, 0.95)
+      .rectangle(safeX, y, FLYING_ENEMY_WIDTH, FLYING_ENEMY_HEIGHT, COLORS.flyingFill, 0.95)
       .setStrokeStyle(2, COLORS.flyingBorder, 0.85)
       .setDepth(DEPTH_ENEMY);
     this.flyingEnemies.push({
@@ -847,7 +944,7 @@ export class GameScene extends Phaser.Scene {
       const laneRight = Math.min(this.worldWidth - 120, plan.rightX - 14);
       const midX = (laneLeft + laneRight) * 0.5;
       const offset = 70 + (plan.flyingCount - plan.pendingFlyingSpawns) * 28;
-      const cameraRightEdge = this.cameras.main.scrollX + this.cameras.main.width;
+      const cameraRightEdge = this.cameras.main.worldView.right;
       const offscreenRightX = cameraRightEdge + 48;
       const spawnX = Math.max(offscreenRightX, Math.max(midX + 20, plan.rightX + offset));
       const spawnY = Phaser.Math.Between(160, 330);
@@ -883,9 +980,9 @@ export class GameScene extends Phaser.Scene {
     const stepState = this.mover.currentStep ? 'moving' : 'idle';
     this.debugText.setText(
       [
-        `Debug Audio: ${modeLabel} | profile=${this.audioQuality.mode} | channels=${channels}`,
+        `Debug Audio: ${modeLabel} | profile=${this.audioQuality.mode} | channels=${channels} | deClick=${this.debugAudioDeClickStrict ? 'strict' : 'normal'} (F9)`,
         `Tempo: bpm=${this.currentBpm.toFixed(1)} target=${this.targetBpm.toFixed(1)} rate=${this.tempoSmoothingBpmPerSecond}/s zone=${this.currentTempoZoneIndex}${this.pendingTempoChange ? ' (pending)' : ''}`,
-        `Scheduler: q=${this.queuedGridAudioEvents.length} jitter=${this.audioJitterAvgMs.toFixed(1)}ms max=${this.audioJitterMaxMs.toFixed(1)}ms`,
+        `Scheduler: q=${this.queuedGridAudioEvents.length} predQ=${this.predictionKeys.size} late=${this.audioLatenessAvgMs.toFixed(1)}ms max=${this.audioLatenessMaxMs.toFixed(1)}ms underrun=${this.audioUnderrunCount}`,
         `Grid: col=${this.debugLastGridColumn} dir=${this.debugLastDirection} step=${stepState}`,
         `Events: on=${this.debugLastOnCount} off=${this.debugLastOffCount} voices=${voices}`,
         `Alpha: level=${this.debugLevelAlpha.toFixed(2)} player=${this.debugPlayerAlpha.toFixed(2)} moon=${this.debugMoonAlpha.toFixed(2)} halo=${this.debugMoonHaloAlpha.toFixed(2)} dark=${this.debugDarknessAlpha.toFixed(2)}`
@@ -942,6 +1039,19 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  private applySpringPlatformVisual(nowMs: number): void {
+    if (this.springPlatforms.length === 0) return;
+    const pulse = (Math.sin(nowMs / 180) + 1) * 0.5;
+    const fill = pulse > 0.58 ? COLORS.springPulseFill : COLORS.springFill;
+    const fillAlpha = 0.72 + pulse * 0.24;
+    const borderAlpha = 0.78 + pulse * 0.2;
+    for (const springPlatform of this.springPlatforms) {
+      springPlatform.setFillStyle(fill, fillAlpha);
+      springPlatform.setStrokeStyle(2, COLORS.springBorder, borderAlpha);
+      springPlatform.setAlpha(0.84 + pulse * 0.12);
+    }
+  }
+
   private applyMobilePlatformVisual(): void {
     if (this.elevatorPlatforms.length + this.shuttlePlatforms.length + this.crossPlatforms.length === 0) return;
     const movingUp = this.lastElevatorOffsetSteps > 0 && this.lastElevatorOffsetSteps < 4;
@@ -993,7 +1103,7 @@ export class GameScene extends Phaser.Scene {
     const beatIndex = this.metronome.beatIndexAt(nowMs);
     const offsetSteps = getElevatorOffsetSteps(beatIndex);
     const deltaSteps = offsetSteps - this.lastElevatorOffsetSteps;
-    const stepSize = this.mover.stepSize;
+    const stepSize = WORLD_GRID_STEP;
     for (const elevatorPlatform of this.elevatorPlatforms) {
       elevatorPlatform.shape.y = elevatorPlatform.baseY - offsetSteps * stepSize;
     }
@@ -1021,7 +1131,7 @@ export class GameScene extends Phaser.Scene {
     const deltaXSteps = offsetSteps.x - this.lastCrossOffsetSteps.x;
     const deltaYSteps = offsetSteps.y - this.lastCrossOffsetSteps.y;
     const stepSizeX = this.getPlatformGridStepX();
-    const stepSizeY = this.mover.stepSize;
+    const stepSizeY = WORLD_GRID_STEP;
     for (const crossPlatform of this.crossPlatforms) {
       crossPlatform.shape.x = crossPlatform.baseX + offsetSteps.x * stepSizeX;
       crossPlatform.shape.y = crossPlatform.baseY + offsetSteps.y * stepSizeY;
@@ -1031,27 +1141,27 @@ export class GameScene extends Phaser.Scene {
   }
 
   private getPlatformGridStepX(): number {
-    return this.mover.stepSize * 2;
+    return WORLD_GRID_STEP * 2;
   }
 
   private snapLengthToGrid(length: number): number {
     void length;
-    return this.mover.stepSize * 2;
+    return WORLD_GRID_STEP * 2;
   }
 
   private snapXToGrid(x: number): number {
-    const step = this.mover.stepSize;
+    const step = WORLD_GRID_STEP;
     const snappedSteps = Math.round((x - this.playerStartX) / step);
     return this.playerStartX + snappedSteps * step;
   }
 
   private snapYToGrid(y: number): number {
-    const step = this.mover.stepSize;
+    const step = WORLD_GRID_STEP;
     return Math.round(y / step) * step;
   }
 
   private getGridIndexFromX(playerX: number): number {
-    const step = this.mover.stepSize;
+    const step = WORLD_GRID_STEP;
     const relative = Math.round((playerX - this.minPlayerX) / step);
     return Phaser.Math.Clamp(relative, 0, this.gridColumns - 1);
   }
@@ -1071,7 +1181,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private getBpmForWorldX(worldX: number): number {
-    const step = this.mover.stepSize;
+    const step = WORLD_GRID_STEP;
     const relative = Math.round((worldX - this.minPlayerX) / step);
     const column = Phaser.Math.Clamp(relative, 0, Math.max(0, this.gridColumns - 1));
     return this.getBpmForColumn(column);
@@ -1160,6 +1270,9 @@ export class GameScene extends Phaser.Scene {
     for (const crossPlatform of this.crossPlatforms) {
       if (this.isStandingOnPlatform(crossPlatform.shape, true)) return true;
     }
+    for (const springPlatform of this.springPlatforms) {
+      if (this.isStandingOnPlatform(springPlatform, true)) return true;
+    }
     for (const platform of this.segmentPlatforms) {
       if (this.isStandingOnPlatform(platform.shape, platform.solid)) return true;
     }
@@ -1183,6 +1296,13 @@ export class GameScene extends Phaser.Scene {
   private isStandingOnAnyCross(): boolean {
     for (const crossPlatform of this.crossPlatforms) {
       if (this.isStandingOnPlatform(crossPlatform.shape, true)) return true;
+    }
+    return false;
+  }
+
+  private isStandingOnAnySpring(): boolean {
+    for (const springPlatform of this.springPlatforms) {
+      if (this.isStandingOnPlatform(springPlatform, true)) return true;
     }
     return false;
   }
@@ -1260,6 +1380,9 @@ export class GameScene extends Phaser.Scene {
     for (const crossPlatform of this.crossPlatforms) {
       tryLandOnPlatform(crossPlatform.shape, true);
     }
+    for (const springPlatform of this.springPlatforms) {
+      tryLandOnPlatform(springPlatform, true);
+    }
 
     if (landingY !== null) {
       this.playerY = landingY;
@@ -1271,8 +1394,7 @@ export class GameScene extends Phaser.Scene {
 
   private applyBrightnessFromIntensity(): void {
     const visibility = this.getIntensityVisibility();
-    const backwardDarknessBoost = this.currentDirection === 'backward' ? 0.05 : 0;
-    const darknessAlpha = Phaser.Math.Clamp(0.84 - visibility * 0.64 + backwardDarknessBoost, 0, 0.95);
+    const darknessAlpha = Phaser.Math.Clamp(0.84 - visibility * 0.64, 0, 0.95);
     this.darknessOverlay.setAlpha(darknessAlpha);
     this.debugDarknessAlpha = darknessAlpha;
   }
@@ -1287,8 +1409,7 @@ export class GameScene extends Phaser.Scene {
 
   private getWorldVisibilityClamp(): number {
     const visibility = this.getIntensityVisibility();
-    const backwardPenalty = this.currentDirection === 'backward' ? 0.16 : 0;
-    return Phaser.Math.Clamp(0.32 + visibility * 0.68 - backwardPenalty, 0.08, 1);
+    return Phaser.Math.Clamp(0.32 + visibility * 0.68, 0.08, 1);
   }
 
   private applyWorldVisibilityClamp(): void {
@@ -1320,6 +1441,9 @@ export class GameScene extends Phaser.Scene {
     for (const crossPlatform of this.crossPlatforms) {
       crossPlatform.shape.setAlpha(crossPlatform.shape.alpha * worldVisibility);
     }
+    for (const springPlatform of this.springPlatforms) {
+      springPlatform.setAlpha(springPlatform.alpha * worldVisibility);
+    }
     for (const enemy of this.patrolEnemies) {
       if (!enemy.alive) continue;
       enemy.sprite.setAlpha(0.28 + worldVisibility * 0.67);
@@ -1343,7 +1467,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private updateMoonVisual(deltaSeconds: number): void {
-    const moonScreenTargetX = this.cameras.main.scrollX + this.cameras.main.width - 140;
+    const moonScreenTargetX = this.cameras.main.worldView.right - 140;
     const moonX = Math.min(moonScreenTargetX, this.moonMaxWorldX);
     this.moon.x = moonX;
     this.moonHalo.x = moonX;
@@ -1422,6 +1546,7 @@ export class GameScene extends Phaser.Scene {
       .setVisible(false)
       .setDepth(20)
       .setScrollFactor(0);
+    this.configureScreenUi(this.gameOverBackdrop);
 
     this.gameOverText = this.add
       .text(480, 230, this.endStateTitle, {
@@ -1433,6 +1558,7 @@ export class GameScene extends Phaser.Scene {
       .setVisible(false)
       .setDepth(21)
       .setScrollFactor(0);
+    this.configureScreenUi(this.gameOverText);
 
     this.gameOverDetailsText = this.add
       .text(480, 276, '', {
@@ -1445,6 +1571,7 @@ export class GameScene extends Phaser.Scene {
       .setVisible(false)
       .setDepth(21)
       .setScrollFactor(0);
+    this.configureScreenUi(this.gameOverDetailsText);
 
     this.restartButton = this.add
       .text(480, 300, 'Restart', {
@@ -1459,6 +1586,7 @@ export class GameScene extends Phaser.Scene {
       .setDepth(21)
       .setScrollFactor(0)
       .setInteractive({ useHandCursor: true });
+    this.configureScreenUi(this.restartButton);
 
     this.nextLevelButton = this.add
       .text(480, 390, 'Next Level', {
@@ -1473,6 +1601,7 @@ export class GameScene extends Phaser.Scene {
       .setDepth(21)
       .setScrollFactor(0)
       .setInteractive({ useHandCursor: true });
+    this.configureScreenUi(this.nextLevelButton);
 
     this.backToMenuButton = this.add
       .text(480, 430, 'Back To Start', {
@@ -1487,6 +1616,7 @@ export class GameScene extends Phaser.Scene {
       .setDepth(21)
       .setScrollFactor(0)
       .setInteractive({ useHandCursor: true });
+    this.configureScreenUi(this.backToMenuButton);
 
     this.restartButton.on('pointerdown', () =>
       this.scene.restart({
@@ -1514,6 +1644,7 @@ export class GameScene extends Phaser.Scene {
       .setVisible(false)
       .setDepth(30)
       .setScrollFactor(0);
+    this.configureScreenUi(this.pauseBackdrop);
 
     this.pauseTitleText = this.add
       .text(480, 220, 'PAUSED', {
@@ -1525,6 +1656,7 @@ export class GameScene extends Phaser.Scene {
       .setVisible(false)
       .setDepth(31)
       .setScrollFactor(0);
+    this.configureScreenUi(this.pauseTitleText);
 
     this.continueButton = this.add
       .text(480, 300, 'Continue', {
@@ -1539,6 +1671,7 @@ export class GameScene extends Phaser.Scene {
       .setDepth(31)
       .setScrollFactor(0)
       .setInteractive({ useHandCursor: true });
+    this.configureScreenUi(this.continueButton);
 
     this.pauseBackToMenuButton = this.add
       .text(480, 355, 'Back to Start Screen', {
@@ -1553,6 +1686,7 @@ export class GameScene extends Phaser.Scene {
       .setDepth(31)
       .setScrollFactor(0)
       .setInteractive({ useHandCursor: true });
+    this.configureScreenUi(this.pauseBackToMenuButton);
 
     this.quitButton = this.add
       .text(480, 410, 'Quit', {
@@ -1567,6 +1701,7 @@ export class GameScene extends Phaser.Scene {
       .setDepth(31)
       .setScrollFactor(0)
       .setInteractive({ useHandCursor: true });
+    this.configureScreenUi(this.quitButton);
 
     this.continueButton.on('pointerdown', () => this.resumeFromPause());
     this.pauseBackToMenuButton.on('pointerdown', () => {
@@ -1590,6 +1725,7 @@ export class GameScene extends Phaser.Scene {
     this.isPaused = true;
     this.currentDirection = 'idle';
     this.mover.stopAt(this.player.x - this.playerStartX);
+    this.clearQueuedAudioEvents();
     this.pauseBackdrop.setVisible(true);
     this.pauseTitleText.setVisible(true);
     this.continueButton.setVisible(true);
@@ -1637,6 +1773,7 @@ export class GameScene extends Phaser.Scene {
     if (this.isPreviewMode) return;
     this.isGameOver = true;
     this.releaseAllVoices();
+    this.clearQueuedAudioEvents();
     this.elapsedAtEndMs = Math.max(0, performance.now() - this.runStartMs);
     this.updateTimerLabel(performance.now());
     this.endStateTitle = 'GAME OVER';
@@ -1660,6 +1797,7 @@ export class GameScene extends Phaser.Scene {
     if (this.isPreviewMode) return;
     this.isGameOver = true;
     this.releaseAllVoices();
+    this.clearQueuedAudioEvents();
     const now = performance.now();
     const rawCompletedMs = Math.max(0, now - this.runStartMs);
     const scoreBonusMs = this.getEnemyTimeBonusMs();
@@ -1724,7 +1862,7 @@ export class GameScene extends Phaser.Scene {
     this.audioSchedulerLeadMs = this.audioQuality.schedulerLeadMs;
     this.pendingTempoChange = null;
     this.metronome = new Metronome(this.currentBpm, 4);
-    this.mover = new BeatSnapMover(this.metronome, 32, PLAYER_STEP_SUBDIVISIONS);
+    this.mover = new BeatSnapMover(this.metronome, PLAYER_SNAP_STEP_X, PLAYER_STEP_SUBDIVISIONS);
     this.segmentPlatforms = [];
     this.patrolEnemies = [];
     this.flyingEnemies = [];
@@ -1760,6 +1898,7 @@ export class GameScene extends Phaser.Scene {
     this.elevatorPlatforms = [];
     this.shuttlePlatforms = [];
     this.crossPlatforms = [];
+    this.springPlatforms = [];
     this.intensity = 1.0;
     this.currentDirection = 'idle';
     this.ghostPlatformLatchedSolid = false;
@@ -1768,6 +1907,7 @@ export class GameScene extends Phaser.Scene {
     this.playerY = this.groundY;
     this.verticalVelocity = 0;
     this.lastGroundedAtMs = 0;
+    this.lastGroundedOnSpring = false;
     this.lastBeatInBar = null;
     this.lastElevatorOffsetSteps = 0;
     this.lastShuttleOffsetSteps = 0;
@@ -1782,18 +1922,25 @@ export class GameScene extends Phaser.Scene {
     this.debugLastOnCount = 0;
     this.debugLastOffCount = 0;
     this.debugAudioMode = 'legacy';
+    this.debugAudioDeClickStrict = false;
     this.debugLevelAlpha = 1;
     this.debugPlayerAlpha = 1;
     this.debugMoonAlpha = 1;
     this.debugMoonHaloAlpha = 1;
     this.debugDarknessAlpha = 0.82;
+    this.forwardHoldMs = 0;
+    this.avgForwardStepDurationMs = 0;
     this.queuedGridAudioEvents = [];
-    this.audioJitterAvgMs = 0;
-    this.audioJitterMaxMs = 0;
-    this.audioJitterSampleCount = 0;
+    this.queuedAudioEventKeys.clear();
+    this.predictionKeys.clear();
+    this.dispatchedAudioEventKeys.clear();
+    this.audioLatenessAvgMs = 0;
+    this.audioLatenessMaxMs = 0;
+    this.audioLatenessSampleCount = 0;
+    this.audioUnderrunCount = 0;
     this.idleVoiceReleaseAtMs = 0;
     this.lastMusicEventAtMs = 0;
-    const step = 32;
+    const step = WORLD_GRID_STEP;
     const maxPlatformRight = this.currentLevel.platforms.reduce((max, p) => Math.max(max, p.x + p.width / 2), 0);
     const hasAuthoredPlatforms = maxPlatformRight > 0;
     const fromPlatforms = maxPlatformRight + 220;
@@ -1830,22 +1977,126 @@ export class GameScene extends Phaser.Scene {
     this.audioSchedulerTimer = window.setInterval(() => this.flushQueuedGridAudioEvents(), this.audioSchedulerLookaheadMs);
   }
 
+  private clearQueuedAudioEvents(): void {
+    this.queuedGridAudioEvents = [];
+    this.queuedAudioEventKeys.clear();
+    this.predictionKeys.clear();
+  }
+
   private stopAudioScheduler(): void {
     if (typeof window === 'undefined') return;
     if (this.audioSchedulerTimer !== null) {
       window.clearInterval(this.audioSchedulerTimer);
       this.audioSchedulerTimer = null;
     }
-    this.queuedGridAudioEvents = [];
+    this.clearQueuedAudioEvents();
+    this.dispatchedAudioEventKeys.clear();
   }
 
-  private enqueueGridAudioEvent(gridIndex: number, direction: MovementDirection, queuedAtMs: number): void {
+  private rememberForwardStepDuration(stepDurationMs: number): void {
+    if (!Number.isFinite(stepDurationMs) || stepDurationMs <= 0) return;
+    if (this.avgForwardStepDurationMs <= 0) {
+      this.avgForwardStepDurationMs = stepDurationMs;
+      return;
+    }
+    this.avgForwardStepDurationMs = this.avgForwardStepDurationMs * 0.75 + stepDurationMs * 0.25;
+  }
+
+  private getNextForwardArrivalMs(nowMs: number): number {
+    let target = this.metronome.nextSubdivisionAt(nowMs);
+    if (target <= nowMs) target += this.metronome.subdivisionIntervalMs;
+    target += this.metronome.subdivisionIntervalMs * (PLAYER_STEP_SUBDIVISIONS - 1);
+    return target;
+  }
+
+  private queueForwardPredictedEvents(nowMs: number): void {
     if (this.isPreviewMode || this.masterVolume <= 0) return;
-    this.queuedGridAudioEvents.push({
-      gridIndex,
-      direction,
-      queuedAtMs
+    if (this.mover.stepSize < WORLD_GRID_STEP) return;
+    const activeStep = this.mover.currentStep;
+    const activeStepDurationMs =
+      activeStep && activeStep.direction === 'forward' ? activeStep.arrivalTime - activeStep.startTime : null;
+    const speedSignal = deriveForwardSpeedSignal({
+      inputDirection: 'forward',
+      activeStepDirection: activeStep?.direction ?? null,
+      activeStepDurationMs,
+      averageStepDurationMs: this.avgForwardStepDurationMs > 0 ? this.avgForwardStepDurationMs : null
     });
+    if (!speedSignal.coherentForward || speedSignal.lookaheadSteps <= 0) return;
+
+    const fromColumn =
+      activeStep && activeStep.direction === 'forward'
+        ? this.getGridIndexFromX(this.playerStartX + activeStep.fromX)
+        : this.getGridIndexFromX(this.player.x);
+    const firstTargetTimeMs =
+      activeStep && activeStep.direction === 'forward' ? activeStep.arrivalTime : this.getNextForwardArrivalMs(nowMs);
+
+    const planned = planForwardGridEvents({
+      fromColumn,
+      maxColumn: Math.max(0, this.gridColumns - 1),
+      firstTargetTimeMs,
+      stepDurationMs: speedSignal.stepDurationMs,
+      lookaheadSteps: speedSignal.lookaheadSteps
+    });
+
+    for (const plannedEvent of planned) {
+      if (plannedEvent.targetTimeMs + this.audioSchedulerLookaheadMs < nowMs) continue;
+      this.enqueueGridAudioEvent({
+        ...plannedEvent,
+        source: 'prediction'
+      });
+    }
+  }
+
+  private isEventKeyQueuedOrDispatched(eventKey: string): boolean {
+    if (this.queuedAudioEventKeys.has(eventKey)) return true;
+    this.pruneDispatchedAudioEventKeys(performance.now());
+    return this.dispatchedAudioEventKeys.has(eventKey);
+  }
+
+  private pruneDispatchedAudioEventKeys(nowMs: number): void {
+    for (const [eventKey, dispatchedAtMs] of this.dispatchedAudioEventKeys.entries()) {
+      if (nowMs - dispatchedAtMs > AUDIO_EVENT_KEY_TTL_MS) this.dispatchedAudioEventKeys.delete(eventKey);
+    }
+  }
+
+  private rememberDispatchedAudioEventKey(eventKey: string, nowMs: number): void {
+    this.dispatchedAudioEventKeys.set(eventKey, nowMs);
+  }
+
+  private purgeForwardPredictionEvents(): void {
+    if (this.queuedGridAudioEvents.length === 0) return;
+    const keptEvents: QueuedGridAudioEvent[] = [];
+    for (const event of this.queuedGridAudioEvents) {
+      if (event.source === 'prediction' && event.direction === 'forward') {
+        this.queuedAudioEventKeys.delete(event.eventKey);
+        this.predictionKeys.delete(event.eventKey);
+        continue;
+      }
+      keptEvents.push(event);
+    }
+    this.queuedGridAudioEvents = keptEvents;
+  }
+
+  private enqueueGridAudioEvent(event: QueuedGridAudioEvent): boolean {
+    if (this.isPreviewMode || this.masterVolume <= 0) return false;
+    if (!Number.isFinite(event.targetTimeMs)) return false;
+    const gridIndex = Phaser.Math.Clamp(Math.floor(event.gridIndex), 0, Math.max(0, this.gridColumns - 1));
+    const eventKey = event.eventKey || buildGridEventKey(event.direction, gridIndex, event.targetTimeMs);
+    if (this.isEventKeyQueuedOrDispatched(eventKey)) return false;
+
+    const normalized: QueuedGridAudioEvent = {
+      gridIndex,
+      direction: event.direction,
+      targetTimeMs: event.targetTimeMs,
+      source: event.source,
+      eventKey
+    };
+    const insertAt = this.queuedGridAudioEvents.findIndex((queued) => queued.targetTimeMs > normalized.targetTimeMs);
+    if (insertAt < 0) this.queuedGridAudioEvents.push(normalized);
+    else this.queuedGridAudioEvents.splice(insertAt, 0, normalized);
+    this.queuedAudioEventKeys.add(normalized.eventKey);
+    if (normalized.source === 'prediction') this.predictionKeys.add(normalized.eventKey);
+    return true;
   }
 
   private flushQueuedGridAudioEvents(): void {
@@ -1855,16 +2106,21 @@ export class GameScene extends Phaser.Scene {
 
     const nowMs = performance.now();
     const nowCtx = synth.currentTime;
+    this.pruneDispatchedAudioEventKeys(nowMs);
     const dispatchBeforeMs = nowMs + this.audioSchedulerLookaheadMs;
-    while (this.queuedGridAudioEvents.length > 0 && this.queuedGridAudioEvents[0].queuedAtMs <= dispatchBeforeMs) {
+    while (this.queuedGridAudioEvents.length > 0 && this.queuedGridAudioEvents[0].targetTimeMs <= dispatchBeforeMs) {
       const event = this.queuedGridAudioEvents.shift()!;
-      const scheduledAtSec = nowCtx + this.audioSchedulerLeadMs / 1000;
-      const jitterMs = Math.max(0, nowMs - event.queuedAtMs);
-      this.audioJitterSampleCount += 1;
-      this.audioJitterAvgMs =
-        ((this.audioJitterAvgMs * (this.audioJitterSampleCount - 1)) + jitterMs) / this.audioJitterSampleCount;
-      this.audioJitterMaxMs = Math.max(this.audioJitterMaxMs, jitterMs);
-      this.playGridAudioAtIndex(event.gridIndex, event.direction, scheduledAtSec, event.queuedAtMs);
+      this.queuedAudioEventKeys.delete(event.eventKey);
+      this.predictionKeys.delete(event.eventKey);
+      const scheduledAtSec = computeScheduledAtSec(nowCtx, nowMs, event.targetTimeMs, this.audioSchedulerLeadMs);
+      const latenessMs = computeLatenessMs(nowMs, event.targetTimeMs);
+      this.audioLatenessSampleCount += 1;
+      this.audioLatenessAvgMs =
+        ((this.audioLatenessAvgMs * (this.audioLatenessSampleCount - 1)) + latenessMs) / this.audioLatenessSampleCount;
+      this.audioLatenessMaxMs = Math.max(this.audioLatenessMaxMs, latenessMs);
+      if (isAudioUnderrun(latenessMs, AUDIO_UNDERRUN_THRESHOLD_MS)) this.audioUnderrunCount += 1;
+      this.rememberDispatchedAudioEventKey(event.eventKey, nowMs);
+      this.playGridAudioAtIndex(event.gridIndex, event.direction, scheduledAtSec, event.targetTimeMs);
     }
   }
 
@@ -2163,11 +2419,15 @@ export class GameScene extends Phaser.Scene {
         gainParam.cancelScheduledValues(releaseStart);
         gainParam.setValueAtTime(Math.max(0.0001, gainParam.value), releaseStart);
       }
-      const releaseTimeConstant = Math.max(0.008, release * 0.35);
+      const releaseTimeConstant = this.debugAudioDeClickStrict
+        ? Math.max(0.014, release * 0.55)
+        : Math.max(0.008, release * 0.35);
       gainParam.setTargetAtTime(0.0001, releaseStart, releaseTimeConstant);
       for (const osc of voice.oscillators) {
-        // Keep a slightly longer tail so stop happens after the gain has settled.
-        osc.stop(releaseStart + Math.max(0.16, release * 3.5));
+        const tailStop = this.debugAudioDeClickStrict
+          ? releaseStart + Math.max(0.24, release * 5.2)
+          : releaseStart + Math.max(0.16, release * 3.5);
+        osc.stop(tailStop);
       }
     } catch {
       // Ignore errors from already-stopped oscillators.
@@ -2224,6 +2484,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private ensureAudioGraph(synth: AudioContext): void {
+    const saturationAmount = this.getEffectiveSaturationAmount();
     if (!this.masterGain) {
       this.masterGain = synth.createGain();
       this.masterGain.gain.setValueAtTime(Math.max(0.0001, this.masterVolume), synth.currentTime);
@@ -2249,7 +2510,7 @@ export class GameScene extends Phaser.Scene {
     if (!this.saturationNode) {
       this.saturationNode = synth.createWaveShaper();
       this.saturationNode.oversample = '2x';
-      this.lastAppliedSaturationAmount = this.audioQuality.saturationAmount;
+      this.lastAppliedSaturationAmount = saturationAmount;
       this.saturationNode.curve = this.buildSaturationCurve(this.lastAppliedSaturationAmount);
       if (this.musicBusGain) {
         this.musicBusGain.disconnect();
@@ -2268,8 +2529,8 @@ export class GameScene extends Phaser.Scene {
       this.metronomeBusGain.gain.cancelScheduledValues(now);
       this.metronomeBusGain.gain.setTargetAtTime(Math.max(0.0001, this.audioQuality.metronomeGain), now, 0.03);
     }
-    if (this.saturationNode && Math.abs(this.audioQuality.saturationAmount - this.lastAppliedSaturationAmount) > 0.0005) {
-      this.lastAppliedSaturationAmount = this.audioQuality.saturationAmount;
+    if (this.saturationNode && Math.abs(saturationAmount - this.lastAppliedSaturationAmount) > 0.0005) {
+      this.lastAppliedSaturationAmount = saturationAmount;
       this.saturationNode.curve = this.buildSaturationCurve(this.lastAppliedSaturationAmount);
     }
   }
@@ -2288,7 +2549,10 @@ export class GameScene extends Phaser.Scene {
     if (!this.musicBusGain) return;
     const now = synth.currentTime;
     const base = Math.max(0.0001, this.audioQuality.musicGain);
-    const ducked = Math.max(0.0001, base * (1 - this.audioQuality.metronomeDuckAmount));
+    const duckAmount = this.debugAudioDeClickStrict
+      ? this.audioQuality.metronomeDuckAmount * 0.7
+      : this.audioQuality.metronomeDuckAmount;
+    const ducked = Math.max(0.0001, base * (1 - duckAmount));
     const gainParam = this.musicBusGain.gain as AudioParam & { cancelAndHoldAtTime?: (startTime: number) => void };
     if (typeof gainParam.cancelAndHoldAtTime === 'function') {
       gainParam.cancelAndHoldAtTime(now);
@@ -2296,8 +2560,19 @@ export class GameScene extends Phaser.Scene {
       gainParam.cancelScheduledValues(now);
       gainParam.setValueAtTime(Math.max(0.0001, gainParam.value), now);
     }
-    gainParam.setTargetAtTime(ducked, now, 0.008);
-    gainParam.setTargetAtTime(base, now + 0.035, 0.05);
+    if (this.debugAudioDeClickStrict) {
+      gainParam.setTargetAtTime(ducked, now, 0.015);
+      gainParam.setTargetAtTime(base, now + 0.05, 0.08);
+    } else {
+      gainParam.setTargetAtTime(ducked, now, 0.008);
+      gainParam.setTargetAtTime(base, now + 0.035, 0.05);
+    }
+  }
+
+  private getEffectiveSaturationAmount(): number {
+    const base = Math.max(0, this.audioQuality.saturationAmount);
+    if (!this.debugAudioDeClickStrict) return base;
+    return base * 0.15;
   }
 
   private resolveLevelFromInputs(): void {
@@ -2615,7 +2890,7 @@ export class GameScene extends Phaser.Scene {
       const span = Math.max(52, Math.min(140, (laneRight - laneLeft) * 0.5));
       const minX = Math.max(120, x - span * 0.5);
       const maxX = Math.min(this.worldWidth - 120, x + span * 0.5);
-      this.spawnPatrolEnemy(x, this.snapYToGrid(plan.platformTopY - 12), minX, maxX);
+      this.spawnPatrolEnemy(x, this.snapYToGrid(plan.platformTopY - PATROL_ENEMY_HEIGHT / 2), minX, maxX);
     }
   }
 
@@ -2635,8 +2910,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private getInitialPlayerYFromPlatforms(): number {
-    const playerHalfHeight = 38 / 2;
-    const step = this.mover.stepSize;
+    const playerHalfHeight = PLAYER_HEIGHT / 2;
+    const step = WORLD_GRID_STEP;
     const targetX = this.playerStartX;
     const candidates = this.segmentPlatforms
       .map((platform) => platform.shape)
@@ -2656,5 +2931,12 @@ export class GameScene extends Phaser.Scene {
   private scaleSpawnIntervalMs(baseIntervalMs: number, bpm: number): number {
     const scaled = scaleIntervalByTempo(baseIntervalMs, bpm, DEFAULT_REFERENCE_BPM);
     return Math.floor(Phaser.Math.Clamp(scaled, 250, 30000));
+  }
+
+  private configureScreenUi(node: any): void {
+    if (!node) return;
+    const zoom = Math.max(0.001, Number(this.cameras.main?.zoom) || 1);
+    if (typeof node.setScrollFactor === 'function') node.setScrollFactor(0);
+    if (typeof node.setScale === 'function') node.setScale(1 / zoom);
   }
 }

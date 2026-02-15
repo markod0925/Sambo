@@ -45,6 +45,14 @@
       "bpm": 110
     }
   ],
+  "audioQualityMode": "balanced",
+  "audioQuality": {
+    "maxPolyphony": 2,
+    "schedulerLookaheadMs": 8,
+    "schedulerLeadMs": 4,
+    "saturationAmount": 0,
+    "synthStyle": "editorLike"
+  },
   "gridColumns": 128,
   "notes": [
     659.2551138257398,
@@ -209,6 +217,13 @@
       "kind": "segment",
       "x": 374,
       "y": 416,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "segment",
+      "x": 438,
+      "y": 352,
       "width": 64,
       "height": 18
     },

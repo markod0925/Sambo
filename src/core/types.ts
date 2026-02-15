@@ -13,7 +13,9 @@ export type EnergyState = 'low' | 'medium' | 'high';
 export interface Segment {
   durationBeats: number;
   energyState: EnergyState;
-  platformTypes: Array<'static' | 'beat' | 'alternateBeat' | 'ghost' | 'reverseGhost' | 'elevator' | 'shuttle' | 'cross'>;
+  platformTypes: Array<
+    'static' | 'beat' | 'alternateBeat' | 'ghost' | 'reverseGhost' | 'elevator' | 'shuttle' | 'cross' | 'spring'
+  >;
   verticalRange: [number, number];
   rhythmDensity: number;
 }

@@ -423,7 +423,7 @@ export class StartScene extends Phaser.Scene {
     });
 
     const editorLink = this.add
-      .text(480, 500, 'Open Level Editor', {
+      .text(480, 494, 'Open Level Editor', {
         color: COLORS.accentCool,
         fontFamily: FONT_UI,
         fontSize: '20px'
@@ -434,6 +434,20 @@ export class StartScene extends Phaser.Scene {
 
     editorLink.on('pointerdown', () => {
       if (typeof window !== 'undefined') window.location.href = '/editor.html';
+    });
+
+    const midiComposerLink = this.add
+      .text(480, 524, 'Open MIDI Composer', {
+        color: COLORS.accentCool,
+        fontFamily: FONT_UI,
+        fontSize: '18px'
+      })
+      .setOrigin(0.5)
+      .setDepth(6)
+      .setInteractive({ useHandCursor: true });
+
+    midiComposerLink.on('pointerdown', () => {
+      if (typeof window !== 'undefined') window.location.href = '/daw.html';
     });
   }
 

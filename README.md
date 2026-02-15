@@ -64,7 +64,7 @@ Then open:
 - Lets the player select level and start it.
 - Shows per-level best time (if present).
 - Includes a volume slider (saved in localStorage).
-- Includes a direct link to `editor.html`.
+- Includes direct links to `editor.html` and `daw.html` (MIDI Step Composer).
 
 ### CLI test mode (no browser)
 ```bash
@@ -109,6 +109,7 @@ The repository includes a lightweight browser editor for `level_draft.json` file
 ### What you can do in the editor
 - Load a draft JSON (`{ "segments": [...], "midi_file": "track.mid" }`) from your machine.
 - Load a MIDI from project folder `MIDI/` (or from local file) and play/stop it directly in the editor.
+- Open the standalone MIDI Step Composer (`daw.html`) and import the latest DAW pattern with `Load DAW pattern`.
 - Generate the first level draft automatically from the loaded MIDI.
 - Configure runtime output (`bpm`, `gridColumns`, optional `reverseGhost`) and save/copy a runtime level JSON:
   - `{ "bpm": number, "gridColumns": number, "notes": number[], "platforms": [...], "segmentEnemies": [{ "segmentIndex": number, "patrolCount": number, "flyingSpawnIntervalMs": number }], "enemies": { "patrolCount": number, "flyingSpawnIntervalMs": number } }`
@@ -132,6 +133,26 @@ The repository includes a lightweight browser editor for `level_draft.json` file
   - Runtime save uses sampled notes from the loaded MIDI when available; otherwise it generates fallback notes from segment energy.
   - Level-related JSON output is written to `Levels/`.
 
+## MIDI Step Composer usage
+
+The repository includes a standalone DAW-like MIDI step composer at `daw.html`.
+
+### Open the composer
+1. Start the local server:
+   ```bash
+   npm run start
+   ```
+2. Open:
+   - `http://localhost:4173/daw.html`
+
+### What you can do in the composer
+- Insert/remove notes per beat in a piano-roll grid.
+- Configure beat count and a variable-BPM tempo map (tempo changes by beat zone).
+- Play/stop looped preview directly in browser.
+- Load MIDI from project folder `MIDI/` or from local file and quantize it into the step grid.
+- Download a standard `.mid` file generated from the current step pattern.
+- Send the current pattern to the level editor (`Send Pattern to Editor`), then load it with `Load DAW pattern` in `editor.html`.
+
 ### Suggested workflow with audio analysis script
 1. Generate draft data from a WAV file:
    ```bash
@@ -153,6 +174,7 @@ python scripts/audio_to_level.py --input path/to/track.wav --output-dir data --b
 - `src/game/GameScene.ts` - Phaser scene and gameplay loop.
 - `src/core/*` - metronome, movement, intensity, platforms, enemies, generator logic.
 - `editor.html` - level draft editor.
+- `daw.html` - MIDI step composer (beat-note piano roll + MIDI export).
 - `scripts/audio_to_level.py` - WAV analysis + level draft generation.
 - `scripts/serve.mjs` - static local HTTP server used by `npm run start`.
 - `GDD/GDD.md` - high-level design document.
