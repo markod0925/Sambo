@@ -37,7 +37,7 @@ function templateForEnergy(energy) {
     return {
         durationBeats: 8,
         energyState: energy,
-        platformTypes: ['static', 'beat', 'alternateBeat', 'ghost', 'reverseGhost', 'elevator', 'shuttle', 'cross'],
+        platformTypes: ['static', 'beat', 'alternateBeat', 'ghost', 'reverseGhost', 'elevator', 'shuttle', 'cross', 'spring'],
         verticalRange: [1, 3],
         rhythmDensity: 0.8
     };

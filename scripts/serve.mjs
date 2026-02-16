@@ -7,6 +7,7 @@ const port = 4173;
 const host = process.env.HOST || '127.0.0.1';
 const midiDir = path.join(root, 'MIDI');
 const levelsDir = path.join(root, 'Levels');
+const MAX_BODY_BYTES = 25_000_000;
 
 const types = {
   '.html': 'text/html',
@@ -18,18 +19,33 @@ const types = {
 };
 
 function sendJson(res, status, data) {
-  res.writeHead(status, { 'Content-Type': 'application/json' });
+  res.writeHead(status, {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type'
+  });
   res.end(JSON.stringify(data));
 }
 
 function parseBody(req) {
   return new Promise((resolve, reject) => {
     let body = '';
+    let tooLarge = false;
     req.on('data', (chunk) => {
+      if (tooLarge) return;
       body += chunk;
-      if (body.length > 5_000_000) reject(new Error('Payload too large'));
+      if (body.length > MAX_BODY_BYTES) {
+        tooLarge = true;
+        const err = new Error('Payload too large');
+        // @ts-ignore - lightweight status attachment for caller handling.
+        err.statusCode = 413;
+        reject(err);
+      }
     });
-    req.on('end', () => resolve(body));
+    req.on('end', () => {
+      if (!tooLarge) resolve(body);
+    });
     req.on('error', reject);
   });
 }
@@ -76,6 +92,16 @@ http
         return;
       }
 
+      if (req.method === 'OPTIONS' && requestUrl.pathname.startsWith('/api/')) {
+        res.writeHead(204, {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type'
+        });
+        res.end();
+        return;
+      }
+
       if (req.method === 'GET' && requestUrl.pathname === '/api/midi-files') {
         fs.mkdirSync(midiDir, { recursive: true });
         const files = fs.readdirSync(midiDir).filter(isMidiFile).sort((a, b) => a.localeCompare(b));
@@ -92,9 +118,12 @@ http
           try {
             const parsed = JSON.parse(fs.readFileSync(full, 'utf8'));
             if (!parsed || typeof parsed !== 'object') continue;
-            if (!Number.isFinite(Number(parsed.bpm))) continue;
-            if (!Number.isFinite(Number(parsed.gridColumns))) continue;
-            if (!Array.isArray(parsed.notes) || !Array.isArray(parsed.platforms)) continue;
+            if (!parsed.midiPlayback || typeof parsed.midiPlayback !== 'object') continue;
+            if (!Number.isFinite(Number(parsed.midiPlayback.ppq))) continue;
+            if (!Number.isFinite(Number(parsed.midiPlayback.songEndTick))) continue;
+            if (!Array.isArray(parsed.midiPlayback.tempoPoints) || parsed.midiPlayback.tempoPoints.length === 0) continue;
+            if (!Array.isArray(parsed.midiPlayback.notes)) continue;
+            if (!Array.isArray(parsed.platforms)) continue;
             levels.push({ name: file, data: parsed });
           } catch {
             // Ignore invalid level JSON files.
@@ -124,8 +153,17 @@ http
 
       if (req.method === 'POST' && requestUrl.pathname === '/api/save-level') {
         fs.mkdirSync(levelsDir, { recursive: true });
-        const body = await parseBody(req);
-        const payload = JSON.parse(body || '{}');
+        let payload;
+        try {
+          const body = await parseBody(req);
+          payload = JSON.parse(body || '{}');
+        } catch (err) {
+          const statusCode = err && typeof err === 'object' && 'statusCode' in err ? Number(err.statusCode) : 400;
+          sendJson(res, Number.isFinite(statusCode) ? statusCode : 400, {
+            error: err instanceof Error ? err.message : 'Invalid JSON payload'
+          });
+          return;
+        }
         const filename = sanitizeFileName(payload.filename, 'level.json');
         const data = payload.data;
         if (!filename.endsWith('.json')) {

@@ -143,9 +143,12 @@ export class StartScene extends Phaser.Scene {
         const name = typeof row.name === 'string' ? row.name : '';
         const level = (row as { data?: LevelDefinition }).data;
         if (!name || !level) continue;
-        if (!Number.isFinite(Number(level.bpm))) continue;
-        if (!Number.isFinite(Number(level.gridColumns))) continue;
-        if (!Array.isArray(level.notes) || !Array.isArray(level.platforms)) continue;
+        if (!level.midiPlayback || typeof level.midiPlayback !== 'object') continue;
+        if (!Number.isFinite(Number(level.midiPlayback.ppq))) continue;
+        if (!Number.isFinite(Number(level.midiPlayback.songEndTick))) continue;
+        if (!Array.isArray(level.midiPlayback.tempoPoints) || level.midiPlayback.tempoPoints.length === 0) continue;
+        if (!Array.isArray(level.midiPlayback.notes)) continue;
+        if (!Array.isArray(level.platforms)) continue;
         out.push({ name, data: level });
       }
       return out;
@@ -423,7 +426,7 @@ export class StartScene extends Phaser.Scene {
     });
 
     const editorLink = this.add
-      .text(480, 500, 'Open Level Editor', {
+      .text(480, 494, 'Open Level Editor', {
         color: COLORS.accentCool,
         fontFamily: FONT_UI,
         fontSize: '20px'
@@ -434,6 +437,20 @@ export class StartScene extends Phaser.Scene {
 
     editorLink.on('pointerdown', () => {
       if (typeof window !== 'undefined') window.location.href = '/editor.html';
+    });
+
+    const midiComposerLink = this.add
+      .text(480, 524, 'Open MIDI Composer', {
+        color: COLORS.accentCool,
+        fontFamily: FONT_UI,
+        fontSize: '18px'
+      })
+      .setOrigin(0.5)
+      .setDepth(6)
+      .setInteractive({ useHandCursor: true });
+
+    midiComposerLink.on('pointerdown', () => {
+      if (typeof window !== 'undefined') window.location.href = '/daw.html';
     });
   }
 

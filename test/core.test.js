@@ -1,10 +1,32 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { Metronome } from '../dist/src/core/metronome.js';
 import { updateIntensity, defaultIntensityConfig } from '../dist/src/core/intensity.js';
 import { BeatSnapMover } from '../dist/src/core/beatMovement.js';
-import { getTempoScale, scaleIntervalByTempo, scaleSpeedByTempo } from '../dist/src/core/tempo.js';
-import { buildGridMidiMapFromMidi } from '../dist/src/core/midi.js';
+import {
+  getTempoAtColumn,
+  getTempoScale,
+  normalizeTempoMap,
+  scaleIntervalByTempo,
+  scaleSpeedByTempo,
+  stepTempoToward
+} from '../dist/src/core/tempo.js';
+import { resolveAudioQualitySettings } from '../dist/src/core/audioQuality.js';
+import {
+  buildGridMidiMapFromMidi,
+  lowerBoundByEndTick,
+  lowerBoundByStartTick,
+  parseMidiToTickModel
+} from '../dist/src/core/midi.js';
+import {
+  buildGridEventKey,
+  computeLatenessMs,
+  computeScheduledAtSec,
+  deriveForwardSpeedSignal,
+  isAudioUnderrun,
+  planForwardGridEvents
+} from '../dist/src/core/predictivePlayback.js';
 import {
   getCrossOffsetSteps,
   getBeatPlatformState,
@@ -22,6 +44,14 @@ test('metronome subdivision alignment works', () => {
   assert.equal(metro.subdivisionIntervalMs, 125);
   assert.equal(metro.nextSubdivisionAt(1), 125);
   assert.equal(metro.nextSubdivisionAt(249), 250);
+});
+
+test('metronome keeps beat continuity when BPM changes at runtime', () => {
+  const metro = new Metronome(120, 4);
+  metro.setBpm(180, 250);
+  assert.equal(metro.beatIndexAt(250), 0);
+  assert.equal(metro.beatIndexAt(500), 1);
+  assert.ok(Math.abs(metro.nextSubdivisionAt(251) - 333.3333333333333) < 1e-6);
 });
 
 test('intensity increases, decays and clamps at floor', () => {
@@ -79,6 +109,51 @@ test('tempo scaling helpers map speed and interval to BPM', () => {
   assert.equal(scaleIntervalByTempo(1000, 240), 500);
 });
 
+test('tempo map helpers normalize and pick BPM by grid column', () => {
+  const map = normalizeTempoMap([
+    { startColumn: 12, bpm: 90 },
+    { startColumn: 4, bpm: 140 },
+    { startColumn: 4, bpm: 132 }
+  ]);
+  assert.deepEqual(map, [
+    { startColumn: 0, bpm: 120 },
+    { startColumn: 4, bpm: 132 },
+    { startColumn: 12, bpm: 90 }
+  ]);
+  assert.equal(getTempoAtColumn(map, 0).bpm, 120);
+  assert.equal(getTempoAtColumn(map, 9).bpm, 132);
+  assert.equal(getTempoAtColumn(map, 40).bpm, 90);
+});
+
+test('tempo smoothing approaches target BPM at configured rate', () => {
+  const atHalfSecond = stepTempoToward(120, 180, 40, 0.5);
+  assert.equal(atHalfSecond, 140);
+
+  const atOneSecond = stepTempoToward(atHalfSecond, 180, 40, 1);
+  assert.equal(atOneSecond, 180);
+});
+
+test('audio quality resolver merges presets and bounded overrides', () => {
+  const perf = resolveAudioQualitySettings('performance');
+  assert.equal(perf.mode, 'performance');
+  assert.equal(perf.maxPolyphony, 4);
+  assert.equal(perf.synthStyle, 'game');
+
+  const custom = resolveAudioQualitySettings('high', {
+    maxPolyphony: 20,
+    schedulerLookaheadMs: 5,
+    schedulerLeadMs: 100,
+    saturationAmount: 0.8,
+    synthStyle: 'game'
+  });
+  assert.equal(custom.mode, 'high');
+  assert.equal(custom.maxPolyphony, 12);
+  assert.equal(custom.schedulerLookaheadMs, 8);
+  assert.equal(custom.schedulerLeadMs, 40);
+  assert.equal(custom.saturationAmount, 0.4);
+  assert.equal(custom.synthStyle, 'game');
+});
+
 test('grid midi map preserves note on/off timing and ignores drum channel', () => {
   const parsed = {
     durationSec: 2,
@@ -109,6 +184,78 @@ test('grid midi map keeps silence when no playable channels are selected', () =>
   const grid = buildGridMidiMapFromMidi(parsed, 4, { maxChannels: 2, minMidiNote: 48, maxMidiNote: 84 });
   const hasAnyEvent = grid.eventsByColumn.some((column) => column.on.length > 0 || column.off.length > 0);
   assert.equal(hasAnyEvent, false);
+});
+
+test('predictive playback derives forward speed and bounded lookahead from step duration', () => {
+  const medium = deriveForwardSpeedSignal({
+    inputDirection: 'forward',
+    activeStepDirection: 'forward',
+    activeStepDurationMs: 250
+  });
+  assert.equal(medium.coherentForward, true);
+  assert.equal(medium.stepDurationMs, 250);
+  assert.ok(Math.abs(medium.cellsPerSecond - 4) < 1e-9);
+  assert.equal(medium.lookaheadSteps, 2);
+
+  const fast = deriveForwardSpeedSignal({
+    inputDirection: 'forward',
+    activeStepDirection: 'forward',
+    activeStepDurationMs: 100
+  });
+  assert.equal(fast.lookaheadSteps, 3);
+});
+
+test('predictive playback falls back to average duration and disables on non-forward input', () => {
+  const fallback = deriveForwardSpeedSignal({
+    inputDirection: 'forward',
+    activeStepDirection: null,
+    averageStepDurationMs: 500
+  });
+  assert.equal(fallback.coherentForward, true);
+  assert.equal(fallback.stepDurationMs, 500);
+  assert.equal(fallback.lookaheadSteps, 1);
+
+  const idle = deriveForwardSpeedSignal({
+    inputDirection: 'idle',
+    averageStepDurationMs: 250
+  });
+  assert.equal(idle.coherentForward, false);
+  assert.equal(idle.lookaheadSteps, 0);
+
+  const backward = deriveForwardSpeedSignal({
+    inputDirection: 'backward',
+    activeStepDirection: 'backward',
+    activeStepDurationMs: 250
+  });
+  assert.equal(backward.coherentForward, false);
+  assert.equal(backward.lookaheadSteps, 0);
+});
+
+test('predictive planner clamps forward events at level end and builds rounded dedupe keys', () => {
+  const planned = planForwardGridEvents({
+    fromColumn: 27,
+    maxColumn: 28,
+    firstTargetTimeMs: 1000,
+    stepDurationMs: 250,
+    lookaheadSteps: 3
+  });
+  assert.equal(planned.length, 1);
+  assert.equal(planned[0].gridIndex, 28);
+  assert.equal(planned[0].eventKey, buildGridEventKey('forward', 28, 1000));
+  assert.equal(buildGridEventKey('forward', 4, 1234.4), 'forward:4:1234');
+  assert.equal(buildGridEventKey('forward', 4, 1234.6), 'forward:4:1235');
+});
+
+test('scheduler helpers keep target-time ordering and underrun threshold behavior', () => {
+  const nowCtx = 10;
+  const nowMs = 1000;
+  const scheduled = [1015, 1060, 1200].map((targetMs) => computeScheduledAtSec(nowCtx, nowMs, targetMs, 12));
+  assert.ok(scheduled[0] < scheduled[1] && scheduled[1] < scheduled[2]);
+
+  assert.equal(computeLatenessMs(1040, 1010), 30);
+  assert.equal(computeLatenessMs(1000, 1010), 0);
+  assert.equal(isAudioUnderrun(30, 30), false);
+  assert.equal(isAudioUnderrun(31, 30), true);
 });
 
 test('beat and ghost platform state transitions', () => {
@@ -164,7 +311,8 @@ test('energy classification and segment generation follow templates', () => {
     'reverseGhost',
     'elevator',
     'shuttle',
-    'cross'
+    'cross',
+    'spring'
   ]);
 });
 
@@ -208,4 +356,170 @@ test('flying enemy moves left, homes vertically, and deactivates offscreen', () 
 
   flying = updateFlyingEnemy(flying, 160, 2, -20);
   assert.equal(flying.active, false);
+});
+
+function writeUint16(value) {
+  return [(value >> 8) & 0xff, value & 0xff];
+}
+
+function writeUint32(value) {
+  return [(value >>> 24) & 0xff, (value >>> 16) & 0xff, (value >>> 8) & 0xff, value & 0xff];
+}
+
+function encodeVarLen(value) {
+  let v = Math.max(0, Math.floor(value));
+  const bytes = [v & 0x7f];
+  v >>= 7;
+  while (v > 0) {
+    bytes.unshift((v & 0x7f) | 0x80);
+    v >>= 7;
+  }
+  return bytes;
+}
+
+function asciiBytes(text) {
+  return Array.from(text).map((ch) => ch.charCodeAt(0));
+}
+
+function buildMidiBytesForTest({ ppq, tempoPoints, notesByStart, songEndTick }) {
+  const tracks = [];
+  const maxTrackId = notesByStart.reduce((max, note) => Math.max(max, Number(note.trackId) || 0), 0);
+  const noteTracks = Array.from({ length: maxTrackId + 1 }, () => []);
+  const tempoTrack = [];
+
+  for (const tempo of tempoPoints) {
+    const usPerQuarter = Math.max(1, Math.floor(tempo.usPerQuarter));
+    tempoTrack.push({
+      tick: Math.max(0, Math.floor(tempo.tick)),
+      order: 0,
+      bytes: [0xff, 0x51, 0x03, (usPerQuarter >> 16) & 0xff, (usPerQuarter >> 8) & 0xff, usPerQuarter & 0xff]
+    });
+  }
+
+  for (const note of notesByStart) {
+    const trackId = Math.max(0, Math.floor(note.trackId || 0));
+    const channel = Math.max(0, Math.min(15, Math.floor(note.channel || 0)));
+    const pitch = Math.max(0, Math.min(127, Math.floor(note.pitch || 0)));
+    const velocity = Math.max(1, Math.min(127, Math.floor(note.velocity || 100)));
+    const onStatus = 0x90 | channel;
+    const offStatus = 0x80 | channel;
+    noteTracks[trackId].push({ tick: Math.floor(note.startTick), order: 2, bytes: [onStatus, pitch, velocity] });
+    noteTracks[trackId].push({ tick: Math.floor(note.endTick), order: 1, bytes: [offStatus, pitch, 0] });
+  }
+
+  const endTick = Math.max(
+    Math.floor(songEndTick || 0),
+    notesByStart.reduce((max, note) => Math.max(max, Math.floor(note.endTick || 0)), 0),
+    tempoPoints.reduce((max, tempo) => Math.max(max, Math.floor(tempo.tick || 0)), 0)
+  );
+
+  function trackBytes(events) {
+    const sorted = [...events, { tick: endTick, order: 9, bytes: [0xff, 0x2f, 0x00] }].sort(
+      (a, b) => a.tick - b.tick || a.order - b.order
+    );
+    const out = [];
+    let lastTick = 0;
+    for (const event of sorted) {
+      const delta = event.tick - lastTick;
+      lastTick = event.tick;
+      out.push(...encodeVarLen(delta), ...event.bytes);
+    }
+    return out;
+  }
+
+  tracks.push(trackBytes(tempoTrack));
+  for (const events of noteTracks) tracks.push(trackBytes(events));
+
+  const header = [...asciiBytes('MThd'), ...writeUint32(6), ...writeUint16(1), ...writeUint16(tracks.length), ...writeUint16(ppq)];
+  const chunks = [];
+  for (const track of tracks) {
+    chunks.push(...asciiBytes('MTrk'), ...writeUint32(track.length), ...track);
+  }
+
+  return new Uint8Array([...header, ...chunks]);
+}
+
+test('tick-model parser keeps tempo changes and note intervals on Bohemian Rhapsody', () => {
+  const midiPath = new URL('../MIDI/Bohemian Rhapsody.mid', import.meta.url);
+  const bytes = fs.readFileSync(midiPath);
+  const arrayBuffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+  const parsed = parseMidiToTickModel(arrayBuffer);
+
+  assert.ok(parsed.ppq > 0);
+  assert.ok(parsed.tempoPoints.length > 1);
+  assert.ok(parsed.notesByStart.length > 100);
+  assert.equal(parsed.notesByStart.length, parsed.notesByEnd.length);
+  assert.ok(parsed.songEndTick > 0);
+});
+
+test('tick-model parser supports overlap and NoteOn velocity zero as NoteOff', () => {
+  const ppq = 480;
+  const events = [
+    { tick: 0, order: 0, bytes: [0xff, 0x51, 0x03, 0x07, 0xa1, 0x20] }, // 500000 us/qn
+    { tick: 0, order: 1, bytes: [0x90, 60, 100] },
+    { tick: 120, order: 1, bytes: [0x90, 60, 90] },
+    { tick: 240, order: 1, bytes: [0x90, 60, 0] }, // NoteOff via NoteOn vel0
+    { tick: 360, order: 1, bytes: [0x80, 60, 0] },
+    { tick: 360, order: 9, bytes: [0xff, 0x2f, 0x00] }
+  ].sort((a, b) => a.tick - b.tick || a.order - b.order);
+
+  const track = [];
+  let last = 0;
+  for (const event of events) {
+    track.push(...encodeVarLen(event.tick - last), ...event.bytes);
+    last = event.tick;
+  }
+
+  const bytes = new Uint8Array([
+    ...asciiBytes('MThd'),
+    ...writeUint32(6),
+    ...writeUint16(0),
+    ...writeUint16(1),
+    ...writeUint16(ppq),
+    ...asciiBytes('MTrk'),
+    ...writeUint32(track.length),
+    ...track
+  ]);
+
+  const parsed = parseMidiToTickModel(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+  assert.equal(parsed.notesByStart.length, 2);
+  assert.deepEqual(
+    parsed.notesByStart.map((note) => [note.startTick, note.endTick]),
+    [
+      [0, 360],
+      [120, 240]
+    ]
+  );
+});
+
+test('tick-model roundtrip keeps event counts and song length', () => {
+  const midiPath = new URL('../MIDI/Bohemian Rhapsody.mid', import.meta.url);
+  const bytes = fs.readFileSync(midiPath);
+  const original = parseMidiToTickModel(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+  const rebuiltBytes = buildMidiBytesForTest(original);
+  const reparsed = parseMidiToTickModel(rebuiltBytes.buffer.slice(rebuiltBytes.byteOffset, rebuiltBytes.byteOffset + rebuiltBytes.byteLength));
+
+  assert.equal(reparsed.tempoPoints.length, original.tempoPoints.length);
+  assert.equal(reparsed.notesByStart.length, original.notesByStart.length);
+  assert.equal(reparsed.notesByEnd.length, original.notesByEnd.length);
+  assert.equal(reparsed.songEndTick, original.songEndTick);
+});
+
+test('tick range lower bounds support forward and reverse scrub slices', () => {
+  const notesByStart = [
+    { startTick: 0, endTick: 120, pitch: 60, velocity: 100, trackId: 0, channel: 0 },
+    { startTick: 60, endTick: 240, pitch: 64, velocity: 100, trackId: 0, channel: 0 },
+    { startTick: 180, endTick: 360, pitch: 67, velocity: 100, trackId: 0, channel: 0 }
+  ];
+  const notesByEnd = [...notesByStart].sort((a, b) => a.endTick - b.endTick);
+
+  // Forward window: starts in (60, 200] -> start ticks 180 only.
+  const fStart = lowerBoundByStartTick(notesByStart, 61);
+  const fEnd = lowerBoundByStartTick(notesByStart, 201);
+  assert.deepEqual(notesByStart.slice(fStart, fEnd).map((note) => note.startTick), [180]);
+
+  // Reverse window: ends in [120, 300) -> end ticks 120 and 240.
+  const rStart = lowerBoundByEndTick(notesByEnd, 120);
+  const rEnd = lowerBoundByEndTick(notesByEnd, 300);
+  assert.deepEqual(notesByEnd.slice(rStart, rEnd).map((note) => note.endTick), [120, 240]);
 });

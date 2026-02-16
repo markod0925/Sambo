@@ -119,6 +119,20 @@ Use sparingly. Must never overpower warm or cool families.
 
 ---
 
+## 4.4 Spring Boost (Green Layer)
+
+For spring platforms (jump-amplifier surfaces).
+
+| Role         | Color        | Hex       |
+| ------------ | ------------ | --------- |
+| Green Base   | Spring Green | `#2DC653` |
+| Pulse Accent | Jade Pulse   | `#52B788` |
+| Border Glow  | Mint Edge    | `#95D5B2` |
+
+The green layer must read as utility/boost, not hazard.
+
+---
+
 # 5. Platform Visual Language
 
 Each platform type must be distinguishable at 50% opacity and 20% intensity.
@@ -235,6 +249,19 @@ Uses the same mobile-platform palette as Elevator and Shuttle.
 
 ---
 
+## 5.9 Spring Platform
+
+Static utility platform with jump-boost identity.
+
+* Family: Green utility
+* Fill base: `#2DC653`
+* Pulse fill: `#52B788`
+* Border: `#95D5B2`
+* Subtle pulse is allowed, but must stay secondary to gameplay-critical beat/ghost state telegraphs
+* Contrast must remain clear at low intensity and during world alpha clamp
+
+---
+
 # 6. Enemy Visual Identity
 
 Enemies must be readable even at low intensity.
@@ -242,6 +269,7 @@ Enemies must be readable even at low intensity.
 ## Patrol Block Enemy
 
 * Shape: solid square
+* Runtime blockout size: `15x12`
 * Color: muted crimson `#A4161A`
 * Border: darker red `#660708`
 * No glow
@@ -253,6 +281,7 @@ Danger color distinct from warm energy palette.
 ## Hunter Flyer
 
 * Shape: diamond or triangular form
+* Runtime blockout size: `15x10`
 * Core: dark red `#9D0208`
 * Subtle eye/glow: `#FF4D6D`
 * Motion trail: faint streak (low alpha)
@@ -275,6 +304,8 @@ Scale pulse: 2–4%
 Glow pulse: synced exactly to BPM
 Never distort or shake.
 Horizontal anchoring: moon stop position is one platform slot (2 grid cells) to the right of the authored level-end platform extent.
+Moon core and halo keep a guaranteed minimum alpha for readability in very low-intensity states (moon >= 0.30, halo >= 0.12).
+When darkness overlay enters high-opacity range, moon and halo use additional intensity compensation (alpha lift + color brightening toward white) to preserve legibility.
 
 ---
 
@@ -289,7 +320,7 @@ Intensity drives:
 Never drop below:
 
 ```
-intensity floor visibility ≈ 15%
+intensity floor visibility ≈ 5%
 ```
 
 Darkness overlay should:
@@ -297,6 +328,8 @@ Darkness overlay should:
 * Multiply blend
 * Never reach full opacity
 * Preserve silhouette outlines
+* Apply an intensity-driven world alpha clamp to gameplay actors (platforms, enemies, player) so level readability drops coherently with low intensity.
+* Keep alpha baseline direction-agnostic at equal intensity (`idle` and `moving` must not diverge because of direction-only penalties).
 
 ---
 
@@ -319,15 +352,21 @@ Kill counter format:
 
 * Bottom HUD score must render as `kills (-Xs)` with one decimal place (example: `6 (-1.2s)`), matching the runtime time-bonus rule.
 * Timer must stay top-center and screen-anchored (independent from world width/camera scroll).
+* Gameplay camera must follow the player with runtime zoom fixed at `2.0x` and a 20% stronger upward follow offset (`y = -57.6`, previously `-48`).
+* Runtime player blockout size is `12x19`.
+* HUD/overlay screen UI must remain fully readable with camera zoom active (zoom-compensated position + scale for screen-anchored labels/panels).
 
 Debug overlay (runtime):
 
 * Top-right, screen-anchored, right-aligned monospace block.
 * Color: dim pale blue (`#9DB6DE`) to avoid competing with primary HUD labels.
-* Three compact rows:
-  * audio mode and selected MIDI channel count
-  * current grid column, movement direction, and step state
-  * note event counts (`on/off`) and active voice count
+* Six compact rows:
+  * audio mode, selected MIDI channel count, and de-click mode (`normal`/`strict`)
+  * tempo status (current/target/rate/zone)
+  * scheduler status (queue size, predictive queue size, lateness avg/max, underrun count)
+  * current grid column, movement direction, step state, note event counts (`on/off`), and active voice count
+  * alpha telemetry row (`level`, `player`, `moon`, `halo`, `dark`) with 2-decimal precision
+* Audio de-click debug mode can be toggled at runtime with `F9`.
 * Overlay must remain readable but secondary; no glow or animation.
 
 No excessive animations.
@@ -360,7 +399,31 @@ Editor controls should use the same hard-edged UI language used by runtime overl
 * Warm gold for primary/confirm actions
 * Red reserved for destructive actions
 * `Back to Game` is a primary warm action and should be placed at top of the editor control panel
-* Runtime export controls expose editable `BPM runtime` plus read-only `Grid columns (auto)` status text (no editable grid-columns input)
+* `Open MIDI Composer` sits beside top navigation actions and uses the same primary warm treatment
+* Runtime export controls expose editable `Default BPM fallback` plus read-only `Grid columns (auto)` status text (no editable grid-columns input)
+* Segment BPM editing is first-class in the segments table and drives runtime tempo zoning
+* Runtime export panel includes audio-quality authoring controls:
+  * profile selector (`performance`, `balanced`, `high`)
+  * optional numeric overrides (polyphony, scheduler lookahead/lead, saturation)
+  * synth style selector (`game`, `editorLike`, or preset default)
+* Editor playback-quality selector (MIDI parsing/playback) uses the same profile naming (`performance`, `balanced`, `high`) for consistency.
+
+MIDI Step Composer (`/daw.html`) must stay visually aligned with editor/runtime families:
+
+* Same dark panel/workspace split (`#0C1322` + `#05070F`).
+* Piano-roll headers use deep blue panel tone (`#0F182C`) with sticky note/beat labels.
+* Grid base:
+  * natural-note rows: `#0B0F1A`
+  * sharp-note rows: `#121A2B`
+* Active note cells use warm action family (`#F4D35E` fill, `#FFB703` edge) for immediate edit readability.
+* Playhead column highlight uses cool interactive accent (`#4CC9F0`) across header and body.
+* Tempo-map editor block keeps editor panel language:
+  * container uses input surface family (`#121A2B`) with border `#3A4663`
+  * compact row structure (`Start Beat`, `BPM`, `Delete`) stays monospace and square-cornered
+  * tempo-change beat headers in the piano roll are highlighted with warm accent (`#F4D35E`) for scanability.
+* Transport semantics remain consistent:
+  * primary actions (`Play`, `Download MIDI`, navigation) use warm style
+  * destructive/stop actions (`Stop`, `Clear`) use red danger style.
 
 Editor scrollbars must match runtime color families:
 
@@ -374,12 +437,17 @@ Layout editor grid must remain visually aligned with runtime snap rules:
 * Grid spacing: `32px` on both axes
 * Spawn guide line must overlap the snap-aligned anchor column
 * Horizontal navigation uses a dedicated range scrollbar under layout actions (replacing left/right buttons)
+* During MIDI playback, camera auto-scroll keeps the playhead in view (target window inside the canvas, not hard-centered)
 * Platform kind label `static` is shown in the layout canvas for base platforms (runtime kind remains `segment`)
+* Layout canvas shows tempo-zone boundary bars in warm accent (`#FFB703`) with BPM labels
+* While MIDI playback is active, the layout canvas shows a moving vertical playback cursor line in cyan (`#4CC9F0`) with `MIDI` label
+* Top layout info strip shows `Current zone BPM` for the active camera area
 
 Segments table conventions:
 
 * Column headers use Title Case labels (not snake_case)
 * Segment ID is read-only text (non-editable)
+* `Segment BPM` is an editable numeric column (`20-300`) and appears immediately after Segment ID
 * `Duration Beats` is fixed to `2` internally and not shown in table UI
 * `Platform Types (CSV)` column is intentionally wider than numeric columns for readability
 * `Vertical Min` and `Vertical Max` are compact numeric columns with matched width/visual weight
@@ -395,6 +463,11 @@ Minimap energy legend:
 | Low    | `#3A4663` |
 | Medium | `#3A86FF` |
 | High   | `#F4D35E` |
+
+Minimap tempo markers:
+
+* Tempo-change boundaries are rendered as vertical warm lines (`#FFB703`)
+* Marker labels show target BPM near the boundary
 
 ---
 
@@ -441,3 +514,40 @@ It is not:
 * Painterly
 
 It is a diagram of rhythm made playable.
+
+---
+
+# 14. AI Asset Production Rules (ChatGPT Images)
+
+To keep generated static sprites aligned with this VSG, production must follow:
+
+- `GDD/ASSET_PIPELINE.md` for export constraints and acceptance checks.
+- `GDD/ASSET_PROMPTS_CHATGPT.md` for canonical prompt set.
+- `GDD/ASSET_MANIFEST.json` for full required runtime asset list.
+
+Mandatory constraints:
+
+- Keep all assets in minimal geometric language; no texture noise, no realism.
+- Preserve gameplay readability first (collision silhouette > decoration).
+- Respect state color semantics from sections 4 and 5.
+- Keep enemy palette isolated from warm/cool platform families.
+
+These assets are static sprite replacements for current primitive runtime shapes; animation is optional and not required for the baseline visual pack.
+
+---
+
+# 15. MIDI Authoring Screens (DAW + Editor)
+
+Functional update aligned to current UI implementation:
+
+- DAW and editor maintain the existing visual language (dark indigo background, cyan/gold accents).
+- Tempo-change markers in piano-roll headers remain the primary tempo cue.
+- Playhead highlight remains the only persistent playback cursor style in the DAW grid.
+- No new decorative visual systems were introduced for MIDI fidelity updates.
+
+Readability constraints:
+
+- Step-grid remains a helper projection only; visual density must not imply note deletion.
+- Tempo rows must keep numeric controls clear and compact to support frequent BPM edits.
+- MIDI status labels must stay concise and in English (loaded/playing/stopped/error states).
+- Runtime debug text may include one additional diagnostics line for playback speed (`expected/actual beats per second` plus error %); it must stay monochrome and non-promotional, with visibility toggle (`F10`).

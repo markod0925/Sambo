@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "source": "ChatGPT Images",
+  "styleGuide": "GDD/VSG.md",
+  "outputRoot": "Assets/Generated",
+  "assets": [
+    { "id": "player_idle", "file": "asset_player_core_idle.png", "category": "player", "size": [24, 38], "states": ["idle"] },
+    { "id": "player_damage", "file": "asset_player_core_damage.png", "category": "player", "size": [24, 38], "states": ["damage"] },
+
+    { "id": "moon_core_low", "file": "asset_moon_core_low.png", "category": "moon", "size": [84, 84], "states": ["low"] },
+    { "id": "moon_core_warm", "file": "asset_moon_core_warm.png", "category": "moon", "size": [84, 84], "states": ["warm"] },
+    { "id": "moon_core_cool", "file": "asset_moon_core_cool.png", "category": "moon", "size": [84, 84], "states": ["cool"] },
+    { "id": "moon_halo_low", "file": "asset_moon_halo_low.png", "category": "moon", "size": [144, 144], "states": ["low"] },
+    { "id": "moon_halo_warm", "file": "asset_moon_halo_warm.png", "category": "moon", "size": [144, 144], "states": ["warm"] },
+    { "id": "moon_halo_cool", "file": "asset_moon_halo_cool.png", "category": "moon", "size": [144, 144], "states": ["cool"] },
+
+    { "id": "platform_segment_default", "file": "asset_platform_segment_default.png", "category": "platform", "size": [64, 18], "states": ["default"] },
+
+    { "id": "platform_beat_solid", "file": "asset_platform_beat_solid.png", "category": "platform", "size": [64, 18], "states": ["solid"] },
+    { "id": "platform_beat_fadeOut", "file": "asset_platform_beat_fadeOut.png", "category": "platform", "size": [64, 18], "states": ["fadeOut"] },
+    { "id": "platform_beat_gone", "file": "asset_platform_beat_gone.png", "category": "platform", "size": [64, 18], "states": ["gone"] },
+    { "id": "platform_beat_fadeIn", "file": "asset_platform_beat_fadeIn.png", "category": "platform", "size": [64, 18], "states": ["fadeIn"] },
+
+    { "id": "platform_alternateBeat_solid", "file": "asset_platform_alternateBeat_solid.png", "category": "platform", "size": [64, 18], "states": ["solid"] },
+    { "id": "platform_alternateBeat_off", "file": "asset_platform_alternateBeat_off.png", "category": "platform", "size": [64, 18], "states": ["off"] },
+
+    { "id": "platform_ghost_active", "file": "asset_platform_ghost_active.png", "category": "platform", "size": [64, 18], "states": ["active"] },
+    { "id": "platform_ghost_inactive", "file": "asset_platform_ghost_inactive.png", "category": "platform", "size": [64, 18], "states": ["inactive"] },
+
+    { "id": "platform_reverseGhost_forwardSolid", "file": "asset_platform_reverseGhost_forwardSolid.png", "category": "platform", "size": [64, 18], "states": ["forwardSolid"] },
+    { "id": "platform_reverseGhost_backwardWeak", "file": "asset_platform_reverseGhost_backwardWeak.png", "category": "platform", "size": [64, 18], "states": ["backwardWeak"] },
+
+    { "id": "platform_elevator_default", "file": "asset_platform_elevator_default.png", "category": "platform", "size": [64, 18], "states": ["default"] },
+    { "id": "platform_shuttle_default", "file": "asset_platform_shuttle_default.png", "category": "platform", "size": [64, 18], "states": ["default"] },
+    { "id": "platform_cross_default", "file": "asset_platform_cross_default.png", "category": "platform", "size": [64, 18], "states": ["default"] },
+
+    { "id": "enemy_patrol_default", "file": "asset_enemy_patrol_default.png", "category": "enemy", "size": [30, 24], "states": ["default"] },
+    { "id": "enemy_patrol_facingLeft", "file": "asset_enemy_patrol_facingLeft.png", "category": "enemy", "size": [30, 24], "states": ["facingLeft"] },
+    { "id": "enemy_flying_default", "file": "asset_enemy_flying_default.png", "category": "enemy", "size": [30, 20], "states": ["default"] }
+  ]
+}

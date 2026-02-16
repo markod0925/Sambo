@@ -1,0 +1,1621 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sambo - MIDI Step Composer</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --font-game: monospace;
+        --bg: #05070f;
+        --surface: #0c1322;
+        --surface-2: #121a2b;
+        --text: #d7e2ff;
+        --text-dim: #9db6de;
+        --ink: #05070f;
+        --border: #1b2a45;
+        --border-2: #3a4663;
+        --list-bg: #1b2a45;
+        --accent-warm: #f4d35e;
+        --accent-cool: #4cc9f0;
+        --accent-danger: #ff6b6b;
+        --grid-dark: #0b0f1a;
+        --grid-mid: #121a2b;
+      }
+
+      body {
+        margin: 0;
+        font-family: var(--font-game);
+        background: var(--bg);
+        color: var(--text);
+      }
+
+      .layout {
+        min-height: 100vh;
+        display: grid;
+        grid-template-columns: 340px 1fr;
+      }
+
+      .panel {
+        border-right: 1px solid var(--border);
+        background: var(--surface);
+        padding: 16px;
+        box-sizing: border-box;
+        overflow: auto;
+      }
+
+      .panel h1 {
+        margin: 0 0 8px;
+        font-size: 19px;
+      }
+
+      .panel p {
+        margin: 0 0 8px;
+      }
+
+      .panel label {
+        display: block;
+        margin-top: 10px;
+        font-size: 12px;
+        color: var(--text-dim);
+      }
+
+      .panel input,
+      .panel select,
+      .panel button {
+        width: 100%;
+        box-sizing: border-box;
+        margin-top: 6px;
+        padding: 10px;
+        border-radius: 0;
+        border: 1px solid var(--border-2);
+        background: var(--surface-2);
+        color: var(--text);
+        font-family: inherit;
+      }
+
+      .panel button {
+        cursor: pointer;
+        background: var(--list-bg);
+        transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+      }
+
+      .panel button:hover {
+        border-color: var(--accent-cool);
+        background: var(--accent-cool);
+        color: var(--ink);
+      }
+
+      .panel button:focus-visible,
+      .panel input:focus-visible,
+      .panel select:focus-visible,
+      .main button:focus-visible {
+        outline: 2px solid var(--accent-warm);
+        outline-offset: 1px;
+      }
+
+      #playButton,
+      #downloadMidi,
+      #sendToEditor,
+      #openEditor,
+      #backToGame,
+      #openMidiFile,
+      #loadMidiFromFolder {
+        background: var(--accent-warm);
+        color: var(--ink);
+        border-color: #e8bf39;
+      }
+
+      #stopButton,
+      #clearPattern {
+        background: var(--accent-danger);
+        color: var(--ink);
+        border-color: #ff8585;
+      }
+
+      .button-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-top: 8px;
+      }
+
+      .small {
+        font-size: 12px;
+        color: var(--text-dim);
+      }
+
+      #statusText {
+        min-height: 36px;
+        margin-top: 12px;
+      }
+
+      .main {
+        padding: 16px;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .topbar {
+        border: 1px solid var(--border-2);
+        background: rgba(12, 19, 34, 0.95);
+        padding: 10px;
+      }
+
+      .topbar strong {
+        color: var(--accent-cool);
+      }
+
+      .roll-wrap {
+        border: 1px solid var(--border-2);
+        background: rgba(12, 19, 34, 0.96);
+        overflow: auto;
+        flex: 1;
+      }
+
+      table {
+        border-collapse: collapse;
+        min-width: max-content;
+      }
+
+      thead th {
+        position: sticky;
+        top: 0;
+        z-index: 4;
+        background: #0f182c;
+        color: var(--text-dim);
+        border-bottom: 1px solid var(--border);
+      }
+
+      thead th.tempo-change {
+        color: #05070f;
+        background: #f4d35e;
+      }
+
+      tbody th {
+        position: sticky;
+        left: 0;
+        z-index: 3;
+        text-align: right;
+        background: #0f182c;
+        color: var(--text-dim);
+        border-right: 1px solid var(--border);
+      }
+
+      th,
+      td {
+        width: 34px;
+        height: 26px;
+        text-align: center;
+        font-size: 12px;
+        border: 1px solid #182542;
+      }
+
+      .note-header {
+        width: 84px;
+        min-width: 84px;
+      }
+
+      td {
+        background: var(--grid-dark);
+        cursor: pointer;
+      }
+
+      td.sharp {
+        background: var(--grid-mid);
+      }
+
+      td.active {
+        background: #f4d35e;
+        box-shadow: inset 0 0 0 1px #ffb703;
+      }
+
+      td.playhead,
+      th.playhead {
+        box-shadow: inset 0 0 0 2px var(--accent-cool);
+      }
+
+      tbody th.sharp-label {
+        color: #cdefff;
+      }
+
+      .tempo-box {
+        margin-top: 10px;
+        border: 1px solid var(--border-2);
+        background: var(--surface-2);
+        padding: 8px;
+      }
+
+      .tempo-head {
+        display: grid;
+        grid-template-columns: 1fr 1fr auto;
+        gap: 6px;
+        font-size: 11px;
+        color: var(--text-dim);
+        margin-bottom: 4px;
+      }
+
+      .tempo-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr auto;
+        gap: 6px;
+        margin-top: 6px;
+      }
+
+      .tempo-row input {
+        margin-top: 0;
+        padding: 8px;
+      }
+
+      .tempo-row button {
+        margin-top: 0;
+        padding: 8px;
+        width: auto;
+        min-width: 66px;
+      }
+
+      .hidden-file-input {
+        display: none;
+      }
+
+      @media (max-width: 1000px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+
+        .panel {
+          border-right: none;
+          border-bottom: 1px solid var(--border);
+          max-height: 50vh;
+        }
+
+        .main {
+          min-height: 50vh;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="panel">
+        <h1>MIDI Step Composer</h1>
+        <p class="small">Write notes per beat, author tempo changes, load MIDI files, then play, stop, export, or send to the level editor.</p>
+
+        <button id="backToGame">Back to Game</button>
+        <button id="openEditor">Open Level Editor</button>
+
+        <label for="midiFolderSelect">MIDI files available in <code>MIDI/</code></label>
+        <select id="midiFolderSelect">
+          <option value="">(no file)</option>
+        </select>
+        <div class="button-row">
+          <button id="refreshMidiFolder">Refresh MIDI list</button>
+          <button id="loadMidiFromFolder">Load MIDI</button>
+        </div>
+        <input id="midiInput" class="hidden-file-input" type="file" accept=".mid,.midi,audio/midi,audio/x-midi" />
+        <button id="openMidiFile">Load local MIDI</button>
+        <p id="localMidiStatus" class="small">No local MIDI selected</p>
+
+        <label for="patternName">Pattern name</label>
+        <input id="patternName" type="text" value="pattern_01" maxlength="48" />
+
+        <label for="bpmInput">Base BPM (beat 1)</label>
+        <input id="bpmInput" type="number" min="20" max="300" value="120" />
+
+        <label for="beatsInput">Beats</label>
+        <input id="beatsInput" type="number" min="4" max="256" value="32" />
+
+        <label>Tempo map (variable BPM)</label>
+        <section class="tempo-box">
+          <div class="tempo-head">
+            <span>Start Beat</span>
+            <span>BPM</span>
+            <span>Action</span>
+          </div>
+          <div id="tempoRows"></div>
+          <div class="button-row">
+            <button id="addTempoChange">Add Tempo Change</button>
+            <button id="normalizeTempoMap">Normalize</button>
+          </div>
+        </section>
+
+        <div class="button-row">
+          <button id="playButton">Play</button>
+          <button id="stopButton">Stop</button>
+        </div>
+
+        <div class="button-row">
+          <button id="clearPattern">Clear</button>
+          <button id="downloadMidi">Download MIDI</button>
+        </div>
+
+        <button id="sendToEditor">Send Pattern to Editor</button>
+
+        <p id="statusText" class="small">Ready.</p>
+      </aside>
+
+      <main class="main">
+        <section class="topbar">
+          <strong id="playheadLabel">Beat: -- / --</strong>
+          <span id="statsLabel" class="small"></span>
+        </section>
+
+        <section class="roll-wrap">
+          <table id="rollTable" aria-label="MIDI piano roll"></table>
+        </section>
+      </main>
+    </div>
+
+    <script type="module">
+      import {
+        normalizeMidiTickModel,
+        parseMidiToTickModel,
+        secondsToTick,
+        tickToSeconds
+      } from '/dist/src/core/midi.js';
+
+      const DAW_STATE_STORAGE_KEY = 'sambo.daw.composer.v3';
+      const DAW_STATE_STORAGE_LEGACY_KEY = 'sambo.daw.composer.v1';
+      const DAW_TO_EDITOR_STORAGE_KEY = 'sambo.daw.toEditor.v1';
+      const NOTE_MIN = 12; // C0
+      const NOTE_MAX = 96; // C7
+      const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+      const LOOK_AHEAD_MS = 40;
+      const SCHEDULE_AHEAD_SEC = 0.22;
+      const MIN_BPM = 20;
+      const MAX_BPM = 300;
+      const MIN_BEATS = 4;
+      const MAX_BEATS = 1024;
+
+      const rollTable = document.getElementById('rollTable');
+      const tempoRows = document.getElementById('tempoRows');
+      const playheadLabel = document.getElementById('playheadLabel');
+      const statsLabel = document.getElementById('statsLabel');
+      const statusText = document.getElementById('statusText');
+      const localMidiStatus = document.getElementById('localMidiStatus');
+      const patternNameInput = document.getElementById('patternName');
+      const bpmInput = document.getElementById('bpmInput');
+      const beatsInput = document.getElementById('beatsInput');
+      const midiInput = document.getElementById('midiInput');
+      const midiFolderSelect = document.getElementById('midiFolderSelect');
+      const playButton = document.getElementById('playButton');
+      const stopButton = document.getElementById('stopButton');
+
+      const notesDescending = Array.from({ length: NOTE_MAX - NOTE_MIN + 1 }, (_, i) => NOTE_MAX - i);
+
+      const DEFAULT_PPQ = 480;
+      const DEFAULT_SNAP_DIVISOR = 4;
+
+      const state = {
+        name: 'pattern_01',
+        bpm: 120,
+        beats: 32,
+        snapDivisor: DEFAULT_SNAP_DIVISOR,
+        timeline: createDefaultTimeline(32, 120),
+        steps: []
+      };
+
+      const playback = {
+        isPlaying: false,
+        schedulerTimer: null,
+        audioContext: null,
+        masterGain: null,
+        playheadBeat: -1,
+        uiTimers: [],
+        activeVoices: new Set(),
+        playbackNotes: [],
+        playbackDurationSec: 0,
+        playbackStartCtxTime: 0,
+        nextNoteIndex: 0
+      };
+
+      function clampNumber(value, min, max) {
+        const num = Number(value);
+        if (!Number.isFinite(num)) return min;
+        return Math.max(min, Math.min(max, num));
+      }
+
+      function clampBpm(value, fallback = 120) {
+        const candidate = Number.isFinite(Number(value)) ? Number(value) : Number(fallback);
+        return Math.round(clampNumber(candidate, MIN_BPM, MAX_BPM));
+      }
+
+      function sanitizeName(value) {
+        const clean = String(value || '')
+          .trim()
+          .replace(/[^\w.-]/g, '_')
+          .replace(/_+/g, '_')
+          .replace(/^\.+/, '');
+        return clean || 'pattern_01';
+      }
+
+      function midiToFreq(midiNote) {
+        return 440 * Math.pow(2, (midiNote - 69) / 12);
+      }
+
+      function midiLabel(midiNote) {
+        const name = NOTE_NAMES[midiNote % 12];
+        const octave = Math.floor(midiNote / 12) - 1;
+        return `${name}${octave}`;
+      }
+
+      function isSharp(midiNote) {
+        return midiLabel(midiNote).includes('#');
+      }
+
+      function createEmptySteps(beats) {
+        return Array.from({ length: beats }, () => []);
+      }
+
+      function normalizeStep(step) {
+        if (!Array.isArray(step)) return [];
+        const normalized = [];
+        for (const note of step) {
+          const midi = Math.round(Number(note));
+          if (!Number.isFinite(midi)) continue;
+          if (midi < NOTE_MIN || midi > NOTE_MAX) continue;
+          if (!normalized.includes(midi)) normalized.push(midi);
+        }
+        normalized.sort((a, b) => a - b);
+        return normalized;
+      }
+
+      function normalizeTempoMap(raw, fallbackBpm = state.bpm, beats = state.beats) {
+        const safeBeats = clampNumber(Math.round(Number(beats) || MIN_BEATS), MIN_BEATS, MAX_BEATS);
+        const entries = [];
+
+        if (Array.isArray(raw)) {
+          for (const row of raw) {
+            if (!row || typeof row !== 'object') continue;
+            const startBeat = clampNumber(Math.round(Number(row.startBeat) || 0), 0, safeBeats - 1);
+            const bpm = clampBpm(row.bpm, fallbackBpm);
+            entries.push({ startBeat, bpm });
+          }
+        }
+
+        const byStartBeat = new Map();
+        for (const row of entries) {
+          byStartBeat.set(Number(row.startBeat), Number(row.bpm));
+        }
+
+        const sorted = [...byStartBeat.entries()]
+          .map(([startBeat, bpm]) => ({ startBeat: Number(startBeat), bpm: clampBpm(bpm, fallbackBpm) }))
+          .sort((a, b) => a.startBeat - b.startBeat);
+
+        if (sorted.length === 0 || sorted[0].startBeat !== 0) {
+          sorted.unshift({ startBeat: 0, bpm: clampBpm(fallbackBpm, 120) });
+        } else {
+          sorted[0].startBeat = 0;
+        }
+
+        const compact = [];
+        for (const row of sorted) {
+          if (compact.length > 0 && compact[compact.length - 1].bpm === row.bpm) continue;
+          compact.push({ startBeat: row.startBeat, bpm: row.bpm });
+        }
+
+        return compact.length > 0 ? compact : [{ startBeat: 0, bpm: clampBpm(fallbackBpm, 120) }];
+      }
+
+      function createDefaultTimeline(beats = 32, bpm = 120, ppq = DEFAULT_PPQ) {
+        const safePpq = Math.max(1, Math.floor(Number(ppq) || DEFAULT_PPQ));
+        const safeBeats = clampNumber(Math.round(Number(beats) || 32), MIN_BEATS, MAX_BEATS);
+        const safeBpm = clampBpm(bpm, 120);
+        return {
+          ppq: safePpq,
+          tempoPoints: [{ tick: 0, usPerQuarter: Math.round(60000000 / safeBpm) }],
+          notesByStart: [],
+          notesByEnd: [],
+          songEndTick: safeBeats * safePpq
+        };
+      }
+
+      function cloneTimeline(timeline) {
+        return {
+          ppq: Number(timeline.ppq),
+          songEndTick: Number(timeline.songEndTick),
+          tempoPoints: (timeline.tempoPoints || []).map((row) => ({ tick: Number(row.tick), usPerQuarter: Number(row.usPerQuarter) })),
+          notesByStart: (timeline.notesByStart || []).map((note) => ({
+            startTick: Number(note.startTick),
+            endTick: Number(note.endTick),
+            pitch: Number(note.pitch),
+            velocity: Number(note.velocity),
+            trackId: Number(note.trackId),
+            channel: Number(note.channel)
+          })),
+          notesByEnd: (timeline.notesByEnd || []).map((note) => ({
+            startTick: Number(note.startTick),
+            endTick: Number(note.endTick),
+            pitch: Number(note.pitch),
+            velocity: Number(note.velocity),
+            trackId: Number(note.trackId),
+            channel: Number(note.channel)
+          }))
+        };
+      }
+
+      function timelineToTempoRows(timeline) {
+        const safeTimeline = normalizeTimeline(timeline, { fallbackBpm: 120, fallbackBeats: state.beats });
+        return safeTimeline.tempoPoints.map((point) => ({
+          startBeat: Math.max(0, Math.floor(point.tick / safeTimeline.ppq)),
+          bpm: clampBpm(Math.round(60000000 / Math.max(1, point.usPerQuarter)), 120)
+        }));
+      }
+
+      function normalizeTimeline(rawTimeline, options = {}) {
+        const fallbackBpm = clampBpm(options.fallbackBpm, 120);
+        const fallbackBeats = clampNumber(Math.round(Number(options.fallbackBeats) || 32), MIN_BEATS, MAX_BEATS);
+        const fallbackPpq = Math.max(1, Math.floor(Number(rawTimeline?.ppq) || DEFAULT_PPQ));
+        return normalizeMidiTickModel(rawTimeline, {
+          fallbackBpm,
+          fallbackPpq,
+          fallbackSongEndTick: fallbackBeats * fallbackPpq
+        });
+      }
+
+      function requiredBeatsFromTimeline(timeline) {
+        const safeTimeline = normalizeTimeline(timeline, { fallbackBpm: 120, fallbackBeats: state.beats });
+        const beats = Math.ceil(safeTimeline.songEndTick / Math.max(1, safeTimeline.ppq));
+        return clampNumber(beats || MIN_BEATS, MIN_BEATS, MAX_BEATS);
+      }
+
+      function initialBpmFromTimeline(timeline, fallback = 120) {
+        const safeTimeline = normalizeTimeline(timeline, { fallbackBpm: fallback, fallbackBeats: state.beats });
+        const usPerQuarter = Number(safeTimeline.tempoPoints[0]?.usPerQuarter) || Math.round(60000000 / fallback);
+        return clampBpm(Math.round(60000000 / Math.max(1, usPerQuarter)), fallback);
+      }
+
+      function tempoAtTick(tick) {
+        const safeTick = Math.max(0, Number(tick) || 0);
+        const points = state.timeline.tempoPoints;
+        let picked = points[0] || { tick: 0, usPerQuarter: Math.round(60000000 / state.bpm) };
+        for (const point of points) {
+          if (Number(point.tick) > safeTick) break;
+          picked = point;
+        }
+        return picked;
+      }
+
+      function bpmAtBeat(beatIndex) {
+        const beat = clampNumber(Math.floor(Number(beatIndex) || 0), 0, Math.max(0, state.beats - 1));
+        const tick = beat * state.timeline.ppq;
+        const point = tempoAtTick(tick);
+        return clampBpm(Math.round(60000000 / Math.max(1, Number(point.usPerQuarter) || 500000)), state.bpm);
+      }
+
+      function tickToSec(tick) {
+        return tickToSeconds(tick, state.timeline);
+      }
+
+      function secToTick(sec) {
+        return secondsToTick(sec, state.timeline);
+      }
+
+      function buildBeatStartTimesSec() {
+        const starts = new Array(state.beats + 1);
+        for (let beat = 0; beat <= state.beats; beat++) {
+          starts[beat] = tickToSec(beat * state.timeline.ppq);
+        }
+        return starts;
+      }
+
+      function beatDurationSecAt(beatIndex) {
+        const starts = buildBeatStartTimesSec();
+        const beat = clampNumber(Math.floor(Number(beatIndex) || 0), 0, Math.max(0, state.beats - 1));
+        return Math.max(0.001, Number(starts[beat + 1] || 0) - Number(starts[beat] || 0));
+      }
+
+      function totalDurationSec() {
+        return Math.max(0, tickToSec(state.timeline.songEndTick));
+      }
+
+      function totalNotesCount() {
+        return state.timeline.notesByStart.length;
+      }
+
+      function syncStepProjectionFromTimeline() {
+        const ppq = state.timeline.ppq;
+        const projected = createEmptySteps(state.beats);
+        for (const note of state.timeline.notesByStart) {
+          const beat = Math.floor(note.startTick / Math.max(1, ppq));
+          if (beat < 0 || beat >= state.beats) continue;
+          if (note.pitch < NOTE_MIN || note.pitch > NOTE_MAX) continue;
+          if (!projected[beat].includes(note.pitch)) projected[beat].push(note.pitch);
+        }
+        for (const row of projected) row.sort((a, b) => a - b);
+        state.steps = projected;
+      }
+
+      function syncStateFromTimeline(options = {}) {
+        const keepBeats = options.keepBeats !== false;
+        state.timeline = normalizeTimeline(state.timeline, {
+          fallbackBpm: state.bpm,
+          fallbackBeats: state.beats
+        });
+        state.bpm = initialBpmFromTimeline(state.timeline, state.bpm);
+        const timelineBeats = requiredBeatsFromTimeline(state.timeline);
+        state.beats = keepBeats
+          ? Math.max(state.beats, timelineBeats)
+          : timelineBeats;
+        state.beats = clampNumber(state.beats, MIN_BEATS, MAX_BEATS);
+        syncStepProjectionFromTimeline();
+      }
+
+      function updateStats() {
+        statsLabel.textContent = ` | Base BPM: ${state.bpm} | Tempo Points: ${state.timeline.tempoPoints.length} | Beats: ${state.beats} | Duration: ${totalDurationSec().toFixed(2)}s | Notes: ${totalNotesCount()}`;
+      }
+
+      function setStatus(message) {
+        statusText.textContent = message;
+      }
+
+      function setLocalMidiStatus(message) {
+        localMidiStatus.textContent = String(message || 'No local MIDI selected');
+      }
+
+      function persistState() {
+        const payload = {
+          version: 3,
+          source: 'daw',
+          name: state.name,
+          timeline: cloneTimeline(state.timeline),
+          uiView: {
+            beats: state.beats,
+            snapDivisor: state.snapDivisor,
+            mode: 'step'
+          },
+          savedAt: new Date().toISOString()
+        };
+        try {
+          if (typeof window !== 'undefined' && window.localStorage) {
+            window.localStorage.setItem(DAW_STATE_STORAGE_KEY, JSON.stringify(payload));
+          }
+        } catch {
+          // Ignore storage failures.
+        }
+      }
+
+      function loadStateFromStorage() {
+        try {
+          if (typeof window === 'undefined' || !window.localStorage) return;
+          const raw = window.localStorage.getItem(DAW_STATE_STORAGE_KEY) || window.localStorage.getItem(DAW_STATE_STORAGE_LEGACY_KEY);
+          if (!raw) return;
+          const parsed = JSON.parse(raw);
+          if (!parsed || typeof parsed !== 'object') return;
+
+          state.name = sanitizeName(parsed.name);
+          state.snapDivisor = Math.max(1, Math.min(16, Math.floor(Number(parsed?.uiView?.snapDivisor) || DEFAULT_SNAP_DIVISOR)));
+
+          if (Number(parsed.version) >= 3 && parsed.timeline) {
+            state.timeline = normalizeTimeline(parsed.timeline, { fallbackBpm: 120, fallbackBeats: 32 });
+            state.beats = clampNumber(
+              Math.round(Number(parsed?.uiView?.beats) || requiredBeatsFromTimeline(state.timeline)),
+              MIN_BEATS,
+              MAX_BEATS
+            );
+          } else {
+            const beats = clampNumber(Math.round(Number(parsed.beats) || 32), MIN_BEATS, MAX_BEATS);
+            const bpm = clampBpm(parsed.bpm, 120);
+            const tempoMap = normalizeTempoMap(parsed.tempoMap, bpm, beats);
+            const steps = createEmptySteps(beats);
+            for (let i = 0; i < beats; i++) steps[i] = normalizeStep(parsed.steps?.[i]);
+            const notesByStart = [];
+            for (let beat = 0; beat < beats; beat++) {
+              const startTick = beat * DEFAULT_PPQ;
+              for (const pitch of steps[beat]) {
+                notesByStart.push({
+                  startTick,
+                  endTick: startTick + DEFAULT_PPQ,
+                  pitch,
+                  velocity: 100,
+                  trackId: 0,
+                  channel: 0
+                });
+              }
+            }
+            state.timeline = normalizeTimeline(
+              {
+                ppq: DEFAULT_PPQ,
+                songEndTick: beats * DEFAULT_PPQ,
+                tempoPoints: tempoMap.map((row) => ({
+                  tick: row.startBeat * DEFAULT_PPQ,
+                  usPerQuarter: Math.round(60000000 / row.bpm)
+                })),
+                notesByStart
+              },
+              { fallbackBpm: bpm, fallbackBeats: beats }
+            );
+            state.beats = beats;
+          }
+
+          syncStateFromTimeline();
+        } catch {
+          // Ignore parse/storage failures.
+        }
+      }
+
+      function exportPatternPayload() {
+        return {
+          version: 3,
+          source: 'daw',
+          name: sanitizeName(state.name),
+          timeline: cloneTimeline(state.timeline),
+          uiView: {
+            beats: state.beats,
+            snapDivisor: state.snapDivisor,
+            mode: 'step'
+          },
+          savedAt: new Date().toISOString()
+        };
+      }
+      function clearPlayheadVisual() {
+        if (playback.playheadBeat >= 0) {
+          const prev = playback.playheadBeat;
+          const prevHeader = rollTable.querySelector(`th[data-beat-header="${prev}"]`);
+          if (prevHeader) prevHeader.classList.remove('playhead');
+          for (const cell of rollTable.querySelectorAll(`td[data-beat="${prev}"]`)) {
+            cell.classList.remove('playhead');
+          }
+        }
+        playback.playheadBeat = -1;
+        playheadLabel.textContent = `Beat: -- / ${state.beats}`;
+      }
+
+      function setPlayheadVisual(beatIndex) {
+        clearPlayheadVisual();
+        if (!Number.isInteger(beatIndex) || beatIndex < 0 || beatIndex >= state.beats) return;
+        playback.playheadBeat = beatIndex;
+        const header = rollTable.querySelector(`th[data-beat-header="${beatIndex}"]`);
+        if (header) header.classList.add('playhead');
+        for (const cell of rollTable.querySelectorAll(`td[data-beat="${beatIndex}"]`)) {
+          cell.classList.add('playhead');
+        }
+        playheadLabel.textContent = `Beat: ${beatIndex + 1} / ${state.beats} | BPM ${bpmAtBeat(beatIndex)}`;
+      }
+
+      function renderTempoRows() {
+        const tempoRowsData = timelineToTempoRows(state.timeline);
+        state.bpm = initialBpmFromTimeline(state.timeline, state.bpm);
+        bpmInput.value = String(state.bpm);
+
+        const maxStart = Math.max(0, state.beats - 1);
+        tempoRows.innerHTML = '';
+        tempoRowsData.forEach((row, idx) => {
+          const wrap = document.createElement('div');
+          wrap.className = 'tempo-row';
+          wrap.innerHTML = `
+            <input type="number" min="0" max="${maxStart}" step="1" value="${row.startBeat}" data-k="startBeat" data-i="${idx}" ${
+              idx === 0 ? 'disabled' : ''
+            } />
+            <input type="number" min="${MIN_BPM}" max="${MAX_BPM}" step="1" value="${row.bpm}" data-k="bpm" data-i="${idx}" />
+            <button data-k="delete" data-i="${idx}" ${idx === 0 ? 'disabled' : ''}>Delete</button>
+          `;
+          tempoRows.appendChild(wrap);
+        });
+      }
+
+      function renderRoll() {
+        const stepSets = state.steps.map((step) => new Set(step));
+        const tempoStarts = new Set(timelineToTempoRows(state.timeline).map((row) => Number(row.startBeat)));
+
+        const thead = ['<thead><tr><th class="note-header">Note</th>'];
+        for (let beat = 0; beat < state.beats; beat++) {
+          const classes = [];
+          if (tempoStarts.has(beat) && beat !== 0) classes.push('tempo-change');
+          const classText = classes.length > 0 ? ` class="${classes.join(' ')}"` : '';
+          thead.push(`<th${classText} data-beat-header="${beat}">${beat + 1}</th>`);
+        }
+        thead.push('</tr></thead>');
+
+        const tbody = ['<tbody>'];
+        for (const midi of notesDescending) {
+          const label = midiLabel(midi);
+          tbody.push(`<tr><th class="${isSharp(midi) ? 'sharp-label' : ''}">${label}</th>`);
+          for (let beat = 0; beat < state.beats; beat++) {
+            const active = stepSets[beat].has(midi);
+            const classes = [isSharp(midi) ? 'sharp' : '', active ? 'active' : ''].filter(Boolean).join(' ');
+            tbody.push(`<td class="${classes}" data-beat="${beat}" data-note="${midi}"></td>`);
+          }
+          tbody.push('</tr>');
+        }
+        tbody.push('</tbody>');
+
+        rollTable.innerHTML = `${thead.join('')}${tbody.join('')}`;
+        if (playback.playheadBeat >= 0) setPlayheadVisual(playback.playheadBeat);
+        else playheadLabel.textContent = `Beat: -- / ${state.beats}`;
+        updateStats();
+      }
+
+      function renderAll() {
+        renderTempoRows();
+        renderRoll();
+      }
+
+      function toggleCell(beat, midi) {
+        if (!Number.isInteger(beat) || beat < 0 || beat >= state.beats) return;
+        if (!Number.isInteger(midi) || midi < NOTE_MIN || midi > NOTE_MAX) return;
+        const ppq = Math.max(1, state.timeline.ppq);
+        const startTick = beat * ppq;
+        const snapTick = Math.max(1, Math.floor(ppq / Math.max(1, state.snapDivisor)));
+        const notes = [...state.timeline.notesByStart];
+        const existingIndex = notes.findIndex(
+          (note) => note.pitch === midi && Math.abs(note.startTick - startTick) <= Math.max(0, Math.floor(snapTick * 0.5))
+        );
+        if (existingIndex >= 0) {
+          notes.splice(existingIndex, 1);
+        } else {
+          notes.push({
+            startTick,
+            endTick: startTick + snapTick,
+            pitch: midi,
+            velocity: 100,
+            trackId: 0,
+            channel: 0
+          });
+        }
+        state.timeline = normalizeTimeline(
+          {
+            ...state.timeline,
+            notesByStart: notes,
+            songEndTick: Math.max(state.timeline.songEndTick, startTick + snapTick)
+          },
+          { fallbackBpm: state.bpm, fallbackBeats: state.beats }
+        );
+        syncStateFromTimeline();
+        persistState();
+        renderRoll();
+      }
+
+      function ensureAudioContext() {
+        if (!playback.audioContext) {
+          playback.audioContext = new AudioContext();
+        }
+        return playback.audioContext;
+      }
+
+      function scheduleVoice(note, startAt, endAt) {
+        const ctx = ensureAudioContext();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        const velocityNorm = Math.max(0.04, Math.min(1, Number(note?.velocity || 100) / 127));
+        const safeStart = Math.max(ctx.currentTime, Number(startAt) || ctx.currentTime);
+        const safeEnd = Math.max(safeStart + 0.02, Number(endAt) || safeStart + 0.12);
+
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(midiToFreq(Number(note?.pitch) || 60), safeStart);
+
+        gain.gain.setValueAtTime(0.0001, safeStart);
+        gain.gain.linearRampToValueAtTime(velocityNorm * 0.16, safeStart + 0.008);
+        gain.gain.setValueAtTime(velocityNorm * 0.14, Math.max(safeStart + 0.008, safeEnd - 0.018));
+        gain.gain.linearRampToValueAtTime(0.0001, safeEnd);
+
+        osc.connect(gain);
+        gain.connect(playback.masterGain || ctx.destination);
+
+        const voice = { osc, gain };
+        playback.activeVoices.add(voice);
+        osc.onended = () => {
+          playback.activeVoices.delete(voice);
+          try {
+            osc.disconnect();
+            gain.disconnect();
+          } catch {
+            // Ignore disconnect failures.
+          }
+        };
+
+        osc.start(safeStart);
+        osc.stop(safeEnd + 0.025);
+      }
+
+      function stopAllVoices() {
+        const ctx = playback.audioContext;
+        if (!ctx) return;
+        const now = ctx.currentTime;
+        for (const voice of playback.activeVoices) {
+          try {
+            voice.gain.gain.cancelScheduledValues(now);
+            voice.gain.gain.setTargetAtTime(0.0001, now, 0.01);
+            voice.osc.stop(now + 0.04);
+          } catch {
+            // Ignore stop failures.
+          }
+        }
+        playback.activeVoices.clear();
+      }
+
+      function clearUiTimers() {
+        for (const timerId of playback.uiTimers) {
+          clearTimeout(timerId);
+        }
+        playback.uiTimers = [];
+      }
+
+      function buildPlaybackNotesFromTimeline() {
+        const bucketStepSec = 1 / 30;
+        const maxPolyphonyPerBucket = 6;
+        const maxTotalNotes = 5000;
+        const notes = [];
+        for (const note of state.timeline.notesByStart) {
+          const startSec = tickToSec(note.startTick);
+          const endSec = tickToSec(note.endTick);
+          if (!Number.isFinite(startSec) || !Number.isFinite(endSec) || endSec <= startSec) continue;
+          notes.push({
+            pitch: note.pitch,
+            velocity: note.velocity,
+            startSec,
+            endSec
+          });
+        }
+        notes.sort((a, b) => a.startSec - b.startSec || b.velocity - a.velocity);
+
+        const buckets = new Map();
+        for (const note of notes) {
+          const bucket = Math.floor(note.startSec / bucketStepSec);
+          const list = buckets.get(bucket) || [];
+          list.push(note);
+          buckets.set(bucket, list);
+        }
+
+        const reduced = [];
+        const ordered = [...buckets.keys()].sort((a, b) => a - b);
+        for (const bucket of ordered) {
+          const list = buckets.get(bucket) || [];
+          list.sort((a, b) => b.velocity - a.velocity);
+          for (const note of list.slice(0, maxPolyphonyPerBucket)) {
+            reduced.push(note);
+            if (reduced.length >= maxTotalNotes) break;
+          }
+          if (reduced.length >= maxTotalNotes) break;
+        }
+
+        reduced.sort((a, b) => a.startSec - b.startSec || b.velocity - a.velocity);
+        return reduced;
+      }
+
+      function schedulerLoop() {
+        if (!playback.isPlaying) return;
+        const ctx = ensureAudioContext();
+        const now = ctx.currentTime;
+        const playedSec = Math.max(0, now - playback.playbackStartCtxTime);
+        const scheduleUntil = playedSec + SCHEDULE_AHEAD_SEC;
+
+        let i = playback.nextNoteIndex;
+        while (i < playback.playbackNotes.length && playback.playbackNotes[i].startSec <= scheduleUntil) {
+          const note = playback.playbackNotes[i];
+          const startAt = playback.playbackStartCtxTime + note.startSec;
+          const endAt = playback.playbackStartCtxTime + note.endSec;
+          scheduleVoice(note, Math.max(now, startAt), endAt);
+          i += 1;
+        }
+        playback.nextNoteIndex = i;
+
+        const tick = secToTick(playedSec);
+        const beat = Math.floor(tick / Math.max(1, state.timeline.ppq));
+        if (beat !== playback.playheadBeat) setPlayheadVisual(beat);
+
+        if (playedSec >= playback.playbackDurationSec + 0.05 && playback.nextNoteIndex >= playback.playbackNotes.length) {
+          stopPlayback('Stopped.');
+        }
+      }
+
+      async function startPlayback() {
+        if (playback.isPlaying) return;
+        const ctx = ensureAudioContext();
+        if (ctx.state === 'suspended') await ctx.resume();
+
+        playback.playbackNotes = buildPlaybackNotesFromTimeline();
+        if (playback.playbackNotes.length === 0) {
+          setStatus('No notes to play.');
+          return;
+        }
+
+        playback.playbackDurationSec = Math.max(0, tickToSec(state.timeline.songEndTick));
+        playback.playbackStartCtxTime = ctx.currentTime + 0.06;
+        playback.nextNoteIndex = 0;
+        playback.isPlaying = true;
+        playback.masterGain = ctx.createGain();
+        playback.masterGain.gain.setValueAtTime(0.22, playback.playbackStartCtxTime);
+        playback.masterGain.connect(ctx.destination);
+        clearUiTimers();
+        clearPlayheadVisual();
+
+        playback.schedulerTimer = window.setInterval(schedulerLoop, LOOK_AHEAD_MS);
+        setStatus('Playing pattern.');
+        playButton.disabled = true;
+        stopButton.disabled = false;
+      }
+
+      function stopPlayback(reason = 'Stopped.') {
+        if (playback.schedulerTimer) {
+          clearInterval(playback.schedulerTimer);
+          playback.schedulerTimer = null;
+        }
+        playback.isPlaying = false;
+        playback.nextNoteIndex = 0;
+        playback.playbackNotes = [];
+        playback.playbackDurationSec = 0;
+        playback.playbackStartCtxTime = 0;
+        if (playback.masterGain) {
+          try {
+            playback.masterGain.disconnect();
+          } catch {
+            // Ignore disconnect failures.
+          }
+          playback.masterGain = null;
+        }
+        clearUiTimers();
+        stopAllVoices();
+        clearPlayheadVisual();
+        setStatus(reason);
+        playButton.disabled = false;
+        stopButton.disabled = true;
+      }
+
+      function previewNote(midiNote) {
+        try {
+          const ctx = ensureAudioContext();
+          if (ctx.state === 'suspended') {
+            ctx.resume().catch(() => undefined);
+          }
+          scheduleVoice(
+            { pitch: midiNote, velocity: 96 },
+            ctx.currentTime + 0.01,
+            ctx.currentTime + 0.15
+          );
+        } catch {
+          // Ignore audio errors.
+        }
+      }
+
+      function writeUint16(value) {
+        return [(value >> 8) & 0xff, value & 0xff];
+      }
+
+      function writeUint32(value) {
+        return [(value >>> 24) & 0xff, (value >>> 16) & 0xff, (value >>> 8) & 0xff, value & 0xff];
+      }
+
+      function encodeVarLen(value) {
+        let v = Math.max(0, Math.floor(value));
+        const bytes = [v & 0x7f];
+        v >>= 7;
+        while (v > 0) {
+          bytes.unshift((v & 0x7f) | 0x80);
+          v >>= 7;
+        }
+        return bytes;
+      }
+
+      function asciiBytes(text) {
+        return Array.from(text).map((ch) => ch.charCodeAt(0));
+      }
+
+      function buildMidiBytes() {
+        const timeline = normalizeTimeline(state.timeline, { fallbackBpm: state.bpm, fallbackBeats: state.beats });
+        const ticksPerQuarter = timeline.ppq;
+        const events = [];
+
+        for (const point of timeline.tempoPoints) {
+          const tick = Math.max(0, Math.floor(Number(point.tick) || 0));
+          const usPerQuarter = Math.max(1, Math.floor(Number(point.usPerQuarter) || Math.round(60000000 / state.bpm)));
+          events.push({
+            tick,
+            order: 0,
+            bytes: [0xff, 0x51, 0x03, (usPerQuarter >> 16) & 0xff, (usPerQuarter >> 8) & 0xff, usPerQuarter & 0xff]
+          });
+        }
+
+        events.push({ tick: 0, order: 1, bytes: [0xff, 0x58, 0x04, 4, 2, 24, 8] });
+
+        for (const note of timeline.notesByStart) {
+          const pitch = Math.max(0, Math.min(127, Math.floor(Number(note.pitch) || 0)));
+          const velocity = Math.max(1, Math.min(127, Math.floor(Number(note.velocity) || 100)));
+          const channel = Math.max(0, Math.min(15, Math.floor(Number(note.channel) || 0)));
+          const noteOnStatus = 0x90 | channel;
+          const noteOffStatus = 0x80 | channel;
+          events.push({ tick: Math.max(0, Math.floor(note.startTick)), order: 3, bytes: [noteOnStatus, pitch, velocity] });
+          events.push({ tick: Math.max(0, Math.floor(note.endTick)), order: 2, bytes: [noteOffStatus, pitch, 0] });
+        }
+
+        const endTick = Math.max(
+          timeline.songEndTick,
+          timeline.notesByStart.reduce((maxTick, note) => Math.max(maxTick, Number(note.endTick) || 0), 0)
+        );
+        events.push({ tick: Math.max(0, Math.floor(endTick)), order: 9, bytes: [0xff, 0x2f, 0x00] });
+        events.sort((a, b) => a.tick - b.tick || a.order - b.order);
+
+        const trackData = [];
+        let lastTick = 0;
+        for (const event of events) {
+          const delta = event.tick - lastTick;
+          lastTick = event.tick;
+          trackData.push(...encodeVarLen(delta), ...event.bytes);
+        }
+
+        const headerChunk = [
+          ...asciiBytes('MThd'),
+          ...writeUint32(6),
+          ...writeUint16(0),
+          ...writeUint16(1),
+          ...writeUint16(ticksPerQuarter)
+        ];
+
+        const trackChunk = [...asciiBytes('MTrk'), ...writeUint32(trackData.length), ...trackData];
+        return new Uint8Array([...headerChunk, ...trackChunk]);
+      }
+
+      function downloadMidiFile() {
+        const bytes = buildMidiBytes();
+        const blob = new Blob([bytes], { type: 'audio/midi' });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        const fileName = `${sanitizeName(state.name)}.mid`;
+        anchor.href = url;
+        anchor.download = fileName;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(url);
+        setStatus(`MIDI downloaded: ${fileName}`);
+      }
+
+      function sendPatternToEditor() {
+        const payload = exportPatternPayload();
+        try {
+          if (typeof window !== 'undefined' && window.localStorage) {
+            window.localStorage.setItem(DAW_TO_EDITOR_STORAGE_KEY, JSON.stringify(payload));
+          }
+        } catch {
+          setStatus('Unable to write DAW pattern to local storage.');
+          return;
+        }
+        setStatus('Pattern sent to editor storage. Opening editor...');
+        if (typeof window !== 'undefined') window.location.href = '/editor.html?source=daw';
+      }
+
+      function applyUiToState() {
+        const nextName = sanitizeName(patternNameInput.value);
+        const nextBpm = clampBpm(bpmInput.value, state.bpm);
+        const nextBeats = clampNumber(Math.round(Number(beatsInput.value) || state.beats), MIN_BEATS, MAX_BEATS);
+
+        let changed = false;
+        if (state.name !== nextName) {
+          state.name = nextName;
+          changed = true;
+        }
+
+        if (state.bpm !== nextBpm) {
+          const tempoPoints = [...state.timeline.tempoPoints];
+          if (tempoPoints.length === 0) tempoPoints.push({ tick: 0, usPerQuarter: Math.round(60000000 / nextBpm) });
+          tempoPoints[0] = { tick: 0, usPerQuarter: Math.round(60000000 / nextBpm) };
+          state.timeline = normalizeTimeline(
+            {
+              ...state.timeline,
+              tempoPoints
+            },
+            { fallbackBpm: nextBpm, fallbackBeats: state.beats }
+          );
+          state.bpm = nextBpm;
+          changed = true;
+          if (playback.isPlaying) stopPlayback('Playback stopped after BPM change.');
+        }
+
+        if (state.beats !== nextBeats) {
+          state.beats = nextBeats;
+          state.timeline = normalizeTimeline(
+            {
+              ...state.timeline,
+              songEndTick: Math.max(state.timeline.songEndTick, nextBeats * state.timeline.ppq)
+            },
+            { fallbackBpm: state.bpm, fallbackBeats: state.beats }
+          );
+          changed = true;
+          if (playback.isPlaying) stopPlayback('Playback stopped after beat-count change.');
+        }
+
+        patternNameInput.value = state.name;
+        bpmInput.value = String(state.bpm);
+        beatsInput.value = String(state.beats);
+
+        if (changed) {
+          syncStateFromTimeline();
+          persistState();
+          renderAll();
+        }
+      }
+
+      function resetPattern() {
+        state.timeline = normalizeTimeline(
+          {
+            ...state.timeline,
+            notesByStart: [],
+            notesByEnd: []
+          },
+          { fallbackBpm: state.bpm, fallbackBeats: state.beats }
+        );
+        syncStateFromTimeline();
+        persistState();
+        renderRoll();
+        setStatus('Pattern cleared.');
+      }
+
+      function addTempoChange() {
+        const tempoRowsData = timelineToTempoRows(state.timeline);
+        const used = new Set(tempoRowsData.map((row) => Number(row.startBeat)));
+        let candidate = Math.max(1, playback.playheadBeat >= 0 ? playback.playheadBeat : Math.floor(state.beats / 2));
+        candidate = clampNumber(candidate, 1, state.beats - 1);
+
+        if (used.has(candidate)) {
+          let found = -1;
+          for (let beat = 1; beat < state.beats; beat++) {
+            if (!used.has(beat)) {
+              found = beat;
+              break;
+            }
+          }
+          if (found < 0) {
+            setStatus('No free beat is available for a new tempo change.');
+            return;
+          }
+          candidate = found;
+        }
+
+        const bpm = bpmAtBeat(candidate);
+        const normalizedRows = normalizeTempoMap([...tempoRowsData, { startBeat: candidate, bpm }], state.bpm, state.beats);
+        state.timeline = normalizeTimeline(
+          {
+            ...state.timeline,
+            tempoPoints: normalizedRows.map((row) => ({
+              tick: Math.max(0, Math.floor(row.startBeat * state.timeline.ppq)),
+              usPerQuarter: Math.round(60000000 / row.bpm)
+            }))
+          },
+          { fallbackBpm: state.bpm, fallbackBeats: state.beats }
+        );
+        syncStateFromTimeline();
+        if (playback.isPlaying) stopPlayback('Playback stopped after tempo-map change.');
+        persistState();
+        renderAll();
+        setStatus(`Tempo change added at beat ${candidate + 1}.`);
+      }
+
+      function handleTempoRowsInput(ev) {
+        const target = ev.target;
+        if (!target || target.tagName !== 'INPUT') return;
+        const idx = Number(target.dataset.i);
+        const key = String(target.dataset.k || '');
+        const tempoRowsData = timelineToTempoRows(state.timeline);
+        if (!Number.isInteger(idx) || idx < 0 || idx >= tempoRowsData.length) return;
+
+        const nextTempo = [...tempoRowsData];
+        if (key === 'startBeat') {
+          nextTempo[idx] = {
+            ...nextTempo[idx],
+            startBeat: clampNumber(Math.round(Number(target.value) || 0), 0, state.beats - 1)
+          };
+        } else if (key === 'bpm') {
+          nextTempo[idx] = {
+            ...nextTempo[idx],
+            bpm: clampBpm(target.value, state.bpm)
+          };
+        }
+
+        const normalizedRows = normalizeTempoMap(nextTempo, state.bpm, state.beats);
+        state.timeline = normalizeTimeline(
+          {
+            ...state.timeline,
+            tempoPoints: normalizedRows.map((row) => ({
+              tick: Math.max(0, Math.floor(row.startBeat * state.timeline.ppq)),
+              usPerQuarter: Math.round(60000000 / row.bpm)
+            }))
+          },
+          { fallbackBpm: state.bpm, fallbackBeats: state.beats }
+        );
+        syncStateFromTimeline();
+        bpmInput.value = String(state.bpm);
+
+        if (playback.isPlaying) stopPlayback('Playback stopped after tempo-map change.');
+        persistState();
+        renderAll();
+      }
+
+      function handleTempoRowsClick(ev) {
+        const btn = ev.target.closest('button[data-k="delete"]');
+        if (!btn) return;
+        const idx = Number(btn.dataset.i);
+        const tempoRowsData = timelineToTempoRows(state.timeline);
+        if (!Number.isInteger(idx) || idx <= 0 || idx >= tempoRowsData.length) return;
+        const nextTempo = [...tempoRowsData];
+        nextTempo.splice(idx, 1);
+        const normalizedRows = normalizeTempoMap(nextTempo, state.bpm, state.beats);
+        state.timeline = normalizeTimeline(
+          {
+            ...state.timeline,
+            tempoPoints: normalizedRows.map((row) => ({
+              tick: Math.max(0, Math.floor(row.startBeat * state.timeline.ppq)),
+              usPerQuarter: Math.round(60000000 / row.bpm)
+            }))
+          },
+          { fallbackBpm: state.bpm, fallbackBeats: state.beats }
+        );
+        syncStateFromTimeline();
+        if (playback.isPlaying) stopPlayback('Playback stopped after tempo-map change.');
+        persistState();
+        renderAll();
+        setStatus('Tempo change removed.');
+      }
+
+      function parseMidiFile(arrayBuffer) {
+        const rawTickModel = parseMidiToTickModel(arrayBuffer);
+        const initialBpm = Math.round(
+          60000000 / Math.max(1, Number(rawTickModel.tempoPoints[0]?.usPerQuarter) || 500000)
+        );
+        const timeline = normalizeTimeline(rawTickModel, {
+          fallbackBpm: initialBpm,
+          fallbackBeats: state.beats
+        });
+
+        const notes = timeline.notesByStart.map((note) => {
+          const startSec = tickToSeconds(note.startTick, timeline);
+          const endSec = tickToSeconds(note.endTick, timeline);
+          return {
+            startTick: note.startTick,
+            endTick: note.endTick,
+            startBeat: note.startTick / timeline.ppq,
+            endBeat: note.endTick / timeline.ppq,
+            startSec,
+            endSec,
+            midiNote: note.pitch,
+            velocity: note.velocity,
+            velocityNorm: note.velocity / 127,
+            trackId: note.trackId,
+            channel: note.channel
+          };
+        });
+        notes.sort((a, b) => a.startSec - b.startSec || b.velocityNorm - a.velocityNorm);
+
+        const durationSec = tickToSeconds(timeline.songEndTick, timeline);
+        const durationBeats = timeline.songEndTick / Math.max(1, timeline.ppq);
+        const tempoMap = timeline.tempoPoints.map((row) => ({
+          startBeat: row.tick / timeline.ppq,
+          startSec: tickToSeconds(row.tick, timeline),
+          bpm: Math.round(60000000 / row.usPerQuarter)
+        }));
+
+        return {
+          format: 1,
+          ticksPerQuarter: timeline.ppq,
+          notes,
+          tempoMap,
+          durationSec,
+          durationBeats,
+          initialBpm,
+          timeline
+        };
+      }
+
+      function applyParsedMidiToState(fileName, parsed) {
+        const baseName = sanitizeName(String(fileName || 'midi_pattern').replace(/\.(mid|midi)$/i, ''));
+        const parsedPpq = Math.max(1, Math.floor(Number(parsed.ticksPerQuarter) || DEFAULT_PPQ));
+        const parsedBeats = Math.max(1, Math.ceil(Number(parsed.durationBeats) || 0));
+        state.name = baseName;
+        state.timeline = normalizeTimeline(
+          parsed.timeline || {
+            ppq: parsedPpq,
+            songEndTick: Math.max(0, Math.floor(Number(parsed.durationBeats) * parsedPpq)),
+            tempoPoints: Array.isArray(parsed.tempoMap)
+              ? parsed.tempoMap.map((row) => ({
+                  tick: Math.max(0, Math.floor(Number(row.startBeat) * Math.max(1, Math.floor(Number(parsed.ticksPerQuarter) || DEFAULT_PPQ)))),
+                  usPerQuarter: Math.round(60000000 / clampBpm(Number(row.bpm), parsed.initialBpm || 120))
+                }))
+              : [{ tick: 0, usPerQuarter: Math.round(60000000 / clampBpm(parsed.initialBpm, 120)) }],
+            notesByStart: Array.isArray(parsed.notes)
+              ? parsed.notes.map((note) => ({
+                  startTick: Math.max(0, Math.floor(Number(note.startTick) || 0)),
+                  endTick: Math.max(0, Math.floor(Number(note.endTick) || 0)),
+                  pitch: Math.max(0, Math.min(127, Math.floor(Number(note.midiNote) || 0))),
+                  velocity: Math.max(
+                    1,
+                    Math.min(
+                      127,
+                      Math.floor(Number(note.velocity) || Number(note.velocityNorm) * 127 || 100)
+                    )
+                  ),
+                  trackId: Math.max(0, Math.floor(Number(note.trackId) || 0)),
+                  channel: Math.max(0, Math.min(15, Math.floor(Number(note.channel) || 0)))
+                }))
+              : []
+          },
+          { fallbackBpm: parsed.initialBpm || 120, fallbackBeats: parsedBeats }
+        );
+        state.beats = clampNumber(requiredBeatsFromTimeline(state.timeline), MIN_BEATS, MAX_BEATS);
+        syncStateFromTimeline({ keepBeats: false });
+
+        patternNameInput.value = state.name;
+        beatsInput.value = String(state.beats);
+        bpmInput.value = String(state.bpm);
+
+        persistState();
+        renderAll();
+
+        const requiredBeats = requiredBeatsFromTimeline(state.timeline);
+        const clampNote = requiredBeats > state.beats ? ` (view clamped to ${state.beats} beats)` : '';
+        setStatus(
+          `Loaded MIDI ${fileName}: ${state.timeline.notesByStart.length} raw notes, ${state.timeline.tempoPoints.length} tempo points${clampNote}.`
+        );
+      }
+
+      async function refreshMidiFolderList(preferred = '') {
+        const previous = String(preferred || midiFolderSelect.value || '').trim();
+        try {
+          const response = await fetch('/api/midi-files');
+          if (!response.ok) {
+            const detail = await response.text().catch(() => '');
+            throw new Error(`Unable to read MIDI folder (${response.status})${detail ? `: ${detail}` : ''}`);
+          }
+          const payload = await response.json();
+          const files = Array.isArray(payload.files) ? payload.files.filter((name) => String(name || '').trim()) : [];
+
+          midiFolderSelect.innerHTML = '';
+          if (files.length === 0) {
+            const empty = document.createElement('option');
+            empty.value = '';
+            empty.textContent = '(no MIDI files found)';
+            midiFolderSelect.appendChild(empty);
+            return;
+          }
+
+          for (const file of files) {
+            const option = document.createElement('option');
+            option.value = String(file);
+            option.textContent = String(file);
+            midiFolderSelect.appendChild(option);
+          }
+
+          if (previous && files.includes(previous)) midiFolderSelect.value = previous;
+        } catch (err) {
+          midiFolderSelect.innerHTML = '';
+          const errorOption = document.createElement('option');
+          errorOption.value = '';
+          errorOption.textContent = '(MIDI loading error - run npm run start)';
+          midiFolderSelect.appendChild(errorOption);
+          setStatus(err instanceof Error ? err.message : 'Unable to load MIDI file list.');
+        }
+      }
+
+      async function loadMidiFromProjectByName(fileName) {
+        const safeName = String(fileName || '').trim();
+        if (!safeName) throw new Error('Select a MIDI file from the list.');
+
+        let response;
+        try {
+          response = await fetch(`/api/midi-file?name=${encodeURIComponent(safeName)}`);
+        } catch {
+          response = null;
+        }
+
+        if (!response || !response.ok) {
+          response = await fetch(`/MIDI/${encodeURIComponent(safeName)}`);
+        }
+        if (!response.ok) throw new Error('Unable to read MIDI file from folder.');
+
+        const buffer = await response.arrayBuffer();
+        const parsed = parseMidiFile(buffer);
+        applyParsedMidiToState(safeName, parsed);
+        setLocalMidiStatus(`Loaded from MIDI/: ${safeName}`);
+      }
+
+      function bindEvents() {
+        document.getElementById('backToGame').addEventListener('click', () => {
+          if (typeof window !== 'undefined') window.location.href = '/';
+        });
+
+        document.getElementById('openEditor').addEventListener('click', () => {
+          if (typeof window !== 'undefined') window.location.href = '/editor.html';
+        });
+
+        patternNameInput.addEventListener('input', applyUiToState);
+        bpmInput.addEventListener('input', applyUiToState);
+        beatsInput.addEventListener('input', applyUiToState);
+
+        playButton.addEventListener('click', () => {
+          startPlayback().catch((err) => {
+            setStatus(err instanceof Error ? err.message : 'Unable to start playback.');
+          });
+        });
+
+        stopButton.addEventListener('click', () => {
+          stopPlayback('Playback stopped.');
+        });
+
+        document.getElementById('clearPattern').addEventListener('click', () => {
+          resetPattern();
+        });
+
+        document.getElementById('downloadMidi').addEventListener('click', () => {
+          downloadMidiFile();
+        });
+
+        document.getElementById('sendToEditor').addEventListener('click', () => {
+          sendPatternToEditor();
+        });
+
+        document.getElementById('openMidiFile').addEventListener('click', () => {
+          midiInput.click();
+        });
+
+        document.getElementById('refreshMidiFolder').addEventListener('click', () => {
+          refreshMidiFolderList();
+        });
+
+        document.getElementById('loadMidiFromFolder').addEventListener('click', () => {
+          loadMidiFromProjectByName(midiFolderSelect.value).catch((err) => {
+            setStatus(err instanceof Error ? err.message : 'Unable to load MIDI file from folder.');
+          });
+        });
+
+        document.getElementById('addTempoChange').addEventListener('click', () => {
+          addTempoChange();
+        });
+
+        document.getElementById('normalizeTempoMap').addEventListener('click', () => {
+          state.timeline = normalizeTimeline(state.timeline, { fallbackBpm: state.bpm, fallbackBeats: state.beats });
+          syncStateFromTimeline();
+          bpmInput.value = String(state.bpm);
+          if (playback.isPlaying) stopPlayback('Playback stopped after tempo-map normalize.');
+          persistState();
+          renderAll();
+          setStatus('Tempo map normalized.');
+        });
+
+        tempoRows.addEventListener('input', handleTempoRowsInput);
+        tempoRows.addEventListener('click', handleTempoRowsClick);
+
+        midiInput.addEventListener('change', async (ev) => {
+          const file = ev.target.files && ev.target.files[0];
+          if (!file) return;
+          setLocalMidiStatus(file.name);
+          try {
+            const parsed = parseMidiFile(await file.arrayBuffer());
+            applyParsedMidiToState(file.name, parsed);
+          } catch (err) {
+            setStatus(err instanceof Error ? err.message : 'MIDI parsing error.');
+          }
+        });
+
+        rollTable.addEventListener('click', (ev) => {
+          const cell = ev.target.closest('td[data-beat][data-note]');
+          if (!cell) return;
+          const beat = Number(cell.dataset.beat);
+          const midi = Number(cell.dataset.note);
+          toggleCell(beat, midi);
+          previewNote(midi);
+        });
+      }
+
+      function init() {
+        loadStateFromStorage();
+
+        state.beats = clampNumber(state.beats, MIN_BEATS, MAX_BEATS);
+        state.timeline = normalizeTimeline(state.timeline, { fallbackBpm: state.bpm, fallbackBeats: state.beats });
+        syncStateFromTimeline();
+
+        patternNameInput.value = state.name;
+        bpmInput.value = String(state.bpm);
+        beatsInput.value = String(state.beats);
+
+        renderAll();
+        bindEvents();
+        stopButton.disabled = true;
+        clearPlayheadVisual();
+        refreshMidiFolderList();
+      }
+
+      init();
+    </script>
+  </body>
+</html>
