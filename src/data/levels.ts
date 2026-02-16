@@ -1,4 +1,4 @@
-import { EXAMPLE_LEVEL, type LevelDefinition } from './exampleLevel.js';
+import { EXAMPLE_LEVEL, buildMidiPlaybackFromMidiNotes, type LevelDefinition } from './exampleLevel.js';
 
 function midiToHz(midi: number): number {
   return 440 * Math.pow(2, (midi - 69) / 12);
@@ -11,6 +11,8 @@ const levelTwoNotes = [
 ];
 
 const LEVEL_TWO: LevelDefinition = {
+  midiPlayback: buildMidiPlaybackFromMidiNotes(levelTwoNotes, 132),
+  // Legacy optional fields (kept temporarily).
   tempoMap: [{ startColumn: 0, bpm: 132 }],
   gridColumns: 29,
   notes: levelTwoNotes.map(midiToHz),

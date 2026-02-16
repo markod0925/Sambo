@@ -7,16 +7,16 @@ import { defaultIntensityConfig } from '../dist/src/core/intensity.js';
 import { applyDamage, resolveEnemyCollision, updateFlyingEnemy, updatePatrolEnemy } from '../dist/src/core/enemies.js';
 
 const HELP_TEXT = [
-  'Comandi:',
-  '  d | right | forward      Muovi avanti (step quantizzato al beat)',
-  '  a | left | backward      Muovi indietro (step quantizzato al beat)',
-  '  jump | j | up            Salta',
-  '  wait | w                 Nessun input, avanza il tempo',
-  '  tick <ms> [azioni...]    Tick personalizzato (es: tick 250 d jump)',
-  '  status                   Mostra stato senza avanzare il tempo',
-  '  restart                  Reset partita',
-  '  help                     Mostra questo help',
-  '  quit | exit              Esci'
+  'Commands:',
+  '  d | right | forward      Move forward (beat-quantized step)',
+  '  a | left | backward      Move backward (beat-quantized step)',
+  '  jump | j | up            Jump',
+  '  wait | w                 No input, advance time',
+  '  tick <ms> [actions...]   Custom tick (example: tick 250 d jump)',
+  '  status                   Show state without advancing time',
+  '  restart                  Reset run',
+  '  help                     Show this help',
+  '  quit | exit              Quit'
 ].join('\n');
 
 const BPM = 120;
@@ -129,15 +129,15 @@ function formatSnapshot(lastArrived, events) {
   ];
 
   if (lastArrived) {
-    lines.push(`Arrivo su subdivision: ${lastArrived}`);
+    lines.push(`Arrived on subdivision: ${lastArrived}`);
   }
 
   if (events.length > 0) {
-    lines.push(`Eventi: ${events.join(' | ')}`);
+    lines.push(`Events: ${events.join(' | ')}`);
   }
 
   if (isGameOver) {
-    lines.push('GAME OVER: usa `restart` per ripartire.');
+    lines.push('GAME OVER: use `restart` to try again.');
   }
 
   return lines.join('\n');
@@ -383,7 +383,7 @@ function parseActions(tokens) {
       continue;
     }
 
-    return { error: `Comando non riconosciuto: ${token}` };
+    return { error: `Unknown command token: ${token}` };
   }
 
   return { direction, jump };
@@ -396,7 +396,7 @@ async function run() {
 
   output.write('Sambo CLI Test Mode\n');
   output.write(`BPM=${BPM}, subdivision=${SUBDIVISION}, step=${STEP_SIZE}px\n`);
-  output.write('Simulazione gameplay core senza rendering Phaser/browser.\n\n');
+  output.write('Core gameplay simulation without Phaser/browser rendering.\n\n');
   output.write(`${HELP_TEXT}\n\n`);
   output.write(`${formatSnapshot(null, [])}\n\n`);
 
@@ -420,7 +420,7 @@ async function run() {
 
       if (command === 'restart') {
         resetGameplayState();
-        output.write(`Partita resettata.\n${formatSnapshot(null, ['restart'])}\n\n`);
+        output.write(`Run reset.\n${formatSnapshot(null, ['restart'])}\n\n`);
         continue;
       }
 
@@ -431,7 +431,7 @@ async function run() {
         const rawMs = tokens[1];
         const parsedMs = Number(rawMs);
         if (!Number.isFinite(parsedMs) || parsedMs <= 0) {
-          output.write('tick richiede un numero positivo di millisecondi (es: tick 250 d jump).\n\n');
+          output.write('tick requires a positive number of milliseconds (example: tick 250 d jump).\n\n');
           continue;
         }
         deltaMs = parsedMs;
@@ -439,13 +439,13 @@ async function run() {
       }
 
       if (isGameOver) {
-        output.write('Partita terminata. Usa `restart` o `status`.\n\n');
+        output.write('Run is over. Use `restart` or `status`.\n\n');
         continue;
       }
 
       const parsedActions = parseActions(actionTokens);
       if (parsedActions.error) {
-        output.write(`${parsedActions.error}. Usa \`help\` per la lista comandi.\n\n`);
+        output.write(`${parsedActions.error}. Use \`help\` for the command list.\n\n`);
         continue;
       }
 
@@ -463,7 +463,7 @@ async function run() {
     rl.close();
   }
 
-  output.write('Uscita dalla modalità CLI.\n');
+  output.write('Exited CLI mode.\n');
 }
 
 run().catch((error) => {

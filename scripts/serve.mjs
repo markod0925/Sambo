@@ -118,9 +118,12 @@ http
           try {
             const parsed = JSON.parse(fs.readFileSync(full, 'utf8'));
             if (!parsed || typeof parsed !== 'object') continue;
-            if (!Array.isArray(parsed.tempoMap) || parsed.tempoMap.length === 0) continue;
-            if (!Number.isFinite(Number(parsed.gridColumns))) continue;
-            if (!Array.isArray(parsed.notes) || !Array.isArray(parsed.platforms)) continue;
+            if (!parsed.midiPlayback || typeof parsed.midiPlayback !== 'object') continue;
+            if (!Number.isFinite(Number(parsed.midiPlayback.ppq))) continue;
+            if (!Number.isFinite(Number(parsed.midiPlayback.songEndTick))) continue;
+            if (!Array.isArray(parsed.midiPlayback.tempoPoints) || parsed.midiPlayback.tempoPoints.length === 0) continue;
+            if (!Array.isArray(parsed.midiPlayback.notes)) continue;
+            if (!Array.isArray(parsed.platforms)) continue;
             levels.push({ name: file, data: parsed });
           } catch {
             // Ignore invalid level JSON files.

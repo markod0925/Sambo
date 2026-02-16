@@ -448,5 +448,347 @@
       "flying_spawn_interval_ms": 0
     }
   ],
-  "midi_file": "test_10s_tempo_changes.mid"
+  "midi_file": "test_10s_tempo_changes.mid",
+  "midiPlayback": {
+    "ppq": 480,
+    "songEndTick": 9600,
+    "tempoPoints": [
+      {
+        "tick": 0,
+        "usPerQuarter": 500000
+      },
+      {
+        "tick": 3840,
+        "usPerQuarter": 400000
+      },
+      {
+        "tick": 7440,
+        "usPerQuarter": 666667
+      }
+    ],
+    "notes": [
+      {
+        "startTick": 0,
+        "endTick": 180,
+        "pitch": 60,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 240,
+        "endTick": 420,
+        "pitch": 64,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 480,
+        "endTick": 660,
+        "pitch": 67,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 720,
+        "endTick": 900,
+        "pitch": 72,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 960,
+        "endTick": 1140,
+        "pitch": 71,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 1200,
+        "endTick": 1380,
+        "pitch": 67,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 1440,
+        "endTick": 1620,
+        "pitch": 64,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 1680,
+        "endTick": 1860,
+        "pitch": 62,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 1920,
+        "endTick": 2100,
+        "pitch": 65,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 2160,
+        "endTick": 2340,
+        "pitch": 69,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 2400,
+        "endTick": 2580,
+        "pitch": 72,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 2640,
+        "endTick": 2820,
+        "pitch": 74,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 2880,
+        "endTick": 3060,
+        "pitch": 72,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 3120,
+        "endTick": 3300,
+        "pitch": 69,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 3360,
+        "endTick": 3540,
+        "pitch": 65,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 3600,
+        "endTick": 3780,
+        "pitch": 62,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 3840,
+        "endTick": 4020,
+        "pitch": 60,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 4080,
+        "endTick": 4260,
+        "pitch": 64,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 4320,
+        "endTick": 4500,
+        "pitch": 67,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 4560,
+        "endTick": 4740,
+        "pitch": 72,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 4800,
+        "endTick": 4980,
+        "pitch": 71,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 5040,
+        "endTick": 5220,
+        "pitch": 67,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 5280,
+        "endTick": 5460,
+        "pitch": 64,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 5520,
+        "endTick": 5700,
+        "pitch": 62,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 5760,
+        "endTick": 5940,
+        "pitch": 65,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 6000,
+        "endTick": 6180,
+        "pitch": 69,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 6240,
+        "endTick": 6420,
+        "pitch": 72,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 6480,
+        "endTick": 6660,
+        "pitch": 74,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 6720,
+        "endTick": 6900,
+        "pitch": 72,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 6960,
+        "endTick": 7140,
+        "pitch": 69,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 7200,
+        "endTick": 7380,
+        "pitch": 65,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 7440,
+        "endTick": 7620,
+        "pitch": 62,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 7680,
+        "endTick": 7860,
+        "pitch": 60,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 7920,
+        "endTick": 8100,
+        "pitch": 64,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 8160,
+        "endTick": 8340,
+        "pitch": 67,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 8400,
+        "endTick": 8580,
+        "pitch": 72,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 8640,
+        "endTick": 8820,
+        "pitch": 71,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 8880,
+        "endTick": 9060,
+        "pitch": 67,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 9120,
+        "endTick": 9300,
+        "pitch": 64,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 9360,
+        "endTick": 9540,
+        "pitch": 62,
+        "velocity": 92,
+        "trackId": 0,
+        "channel": 0
+      }
+    ],
+    "x0": 150,
+    "x1": 1078
+  }
 }

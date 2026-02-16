@@ -93,7 +93,7 @@ Player movement is **quantized and magnetized to the beat grid**.
   * completes the step **on beat-aligned timing** based on runtime tuning
     (current prototype tuning: **1 grid step every 4 subdivisions = 1 beat**)
 * Small speed corrections are applied invisibly.
-* Runtime movement snap on X is finer than authoring grid (`16px` traversal snap over `32px` logical tempo/grid columns).
+* Runtime movement snap on X is finer than authoring grid (`19.2px` traversal snap over `32px` logical tempo/grid columns; +20% faster than the previous `16px` step).
 
 ### BPM-Proportional Traversal and Enemy Motion
 
@@ -126,6 +126,7 @@ This keeps pressure and readability coherent with the musical tempo of each zone
 Current prototype runtime tuning (Feb 2026):
 
 * player movement cadence: 1 step/beat (`4` subdivisions per step)
+* player horizontal step distance: `19.2px` (+20% traversal speed vs `16px` at the same cadence)
 * patrol enemy base speed: `45`
 * flying enemy base horizontal speed: `90`
 * flying enemy base homing rate: `45`
@@ -582,7 +583,7 @@ Procedural variation occurs **within authored constraints**.
 ### Global Look & UI Theme
 
 * Runtime resolution: **960x540**
-* Gameplay camera follows the player with **2.0x zoom** and a slight upward follow offset.
+* Gameplay camera follows the player with **2.0x zoom** and a 20% stronger upward follow offset (`y = -57.6`, previously `-48`).
 * Runtime blockout scale tuning:
   * player body: `12x19`
   * patrol enemy body: `15x12`
@@ -619,6 +620,7 @@ Procedural variation occurs **within authored constraints**.
   * timer (top-center, screen-anchored)
   * kill score with cumulative time discount display (`kills (-Xs)`, one decimal)
   * debug overlay alpha telemetry for level/world clamp, player, moon core, moon halo, and darkness overlay alpha
+  * all HUD labels/panels remain screen-anchored under camera zoom (zoom-compensated position + scale)
 * Implemented state overlays:
   * pause menu (`ESC`)
   * game over panel
@@ -915,3 +917,36 @@ Scope:
 - Follow `GDD/VSG.md` color/state semantics exactly.
 
 Animation is intentionally out of scope for this baseline pack; state readability is achieved through sprite variant swapping.
+
+---
+
+## **12. MIDI Fidelity Pipeline (Implemented)**
+
+The MIDI authoring/runtime pipeline now uses a **raw tick-based model** as canonical source of truth.
+
+Implemented rules:
+
+- Canonical data model:
+  - `midiPlayback.ppq`
+  - `midiPlayback.tempoPoints[]` (`tick`, `usPerQuarter`)
+  - `midiPlayback.notes[]` (`startTick`, `endTick`, `pitch`, `velocity`, `trackId`, `channel`)
+  - `midiPlayback.songEndTick`
+- DAW import keeps original note/tempo events without destructive beat quantization.
+- DAW->Editor handoff now transfers raw timeline payload (v3) instead of beat buckets.
+- Runtime level export from editor always includes `midiPlayback`.
+- Game runtime playback state is now tick-scrub driven (movement -> playhead tick), with:
+  - incremental forward/reverse updates for small deltas
+  - rebuild path for large jumps/teleports
+  - per-voice overlap counting on `track:channel:pitch` keys to prevent stuck notes.
+- Runtime playhead mapping now auto-calibrates to player movement speed (beats traversed by continuous forward movement) so playback tempo in-game matches authoring tempo without manual `x1` tuning.
+- Sustained notes are no longer force-killed when the player becomes idle in MIDI mode; active notes can ring out and release on their natural `NoteOff` path instead of global idle panic.
+- Runtime debug overlay now exposes playback speed diagnostics (`expected beats/s`, `actual beats/s`, `% error`) with `F10` show/hide toggle for live calibration checks.
+- Parser/normalizer alignment is now shared across all three systems:
+  - game runtime (`GameScene`)
+  - level editor (`editor.html`)
+  - MIDI composer (`daw.html`)
+  through the single core module `src/core/midi.ts` (compiled in `dist/src/core/midi.js`).
+- Runtime default `balanced` audio profile now uses editor-like synthesis envelopes/timbre (`synthStyle: editorLike`) to reduce perceived mismatch versus editor playback.
+- Level migration script added: `scripts/migrate_midi_playback_schema.mjs`.
+
+Legacy fields (`tempoMap`, `gridColumns`, `notes`) are still emitted during transition for compatibility, but `midiPlayback` is the authoritative format.

@@ -43,7 +43,7 @@ const PRESETS: Record<AudioQualityMode, Omit<AudioQualitySettings, 'mode'>> = {
     musicGain: 0.98,
     metronomeGain: 1.0,
     metronomeDuckAmount: 0.12,
-    synthStyle: 'game'
+    synthStyle: 'editorLike'
   },
   high: {
     maxPolyphony: 8,

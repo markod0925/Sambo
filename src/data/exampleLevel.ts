@@ -1,3 +1,5 @@
+import type { NoteInterval, TempoPoint } from '../core/midi.js';
+
 export interface PlatformSpec {
   kind: 'segment' | 'beat' | 'alternateBeat' | 'ghost' | 'reverseGhost' | 'elevator' | 'shuttle' | 'cross' | 'spring';
   x: number;
@@ -11,8 +13,17 @@ export interface TempoZone {
   bpm: number;
 }
 
+export interface MidiPlaybackDefinition {
+  ppq: number;
+  songEndTick: number;
+  tempoPoints: TempoPoint[];
+  notes: NoteInterval[];
+  x0?: number;
+  x1?: number;
+}
+
 export interface LevelDefinition {
-  tempoMap: TempoZone[];
+  midiPlayback: MidiPlaybackDefinition;
   tempoSmoothingBpmPerSecond?: number;
   audioQualityMode?: 'performance' | 'balanced' | 'high';
   audioQuality?: {
@@ -25,9 +36,6 @@ export interface LevelDefinition {
     metronomeDuckAmount?: number;
     synthStyle?: 'game' | 'editorLike';
   };
-  gridColumns: number;
-  notes: number[];
-  midi_file?: string;
   platforms: PlatformSpec[];
   segmentEnemies?: Array<{
     segmentIndex: number;
@@ -39,6 +47,45 @@ export interface LevelDefinition {
     patrolCount: number;
     flyingSpawnIntervalMs: number;
   };
+  // Transitional legacy fields kept for one release only.
+  tempoMap: TempoZone[];
+  gridColumns: number;
+  notes: number[];
+  midi_file?: string;
+}
+
+function midiToHz(midi: number): number {
+  return 440 * Math.pow(2, (midi - 69) / 12);
+}
+
+function clampMidi(value: number): number {
+  return Math.max(0, Math.min(127, Math.round(Number(value) || 0)));
+}
+
+export function buildMidiPlaybackFromMidiNotes(midiNotes: number[], bpm = 120, ppq = 480): MidiPlaybackDefinition {
+  const safePpq = Math.max(1, Math.floor(Number(ppq) || 480));
+  const safeBpm = Math.max(1, Number(bpm) || 120);
+  const usPerQuarter = Math.round(60_000_000 / safeBpm);
+  const notes: NoteInterval[] = [];
+
+  for (let i = 0; i < midiNotes.length; i++) {
+    const startTick = i * safePpq;
+    notes.push({
+      startTick,
+      endTick: startTick + safePpq,
+      pitch: clampMidi(midiNotes[i]),
+      velocity: 100,
+      trackId: 0,
+      channel: 0
+    });
+  }
+
+  return {
+    ppq: safePpq,
+    songEndTick: Math.max(0, midiNotes.length * safePpq),
+    tempoPoints: [{ tick: 0, usPerQuarter }],
+    notes
+  };
 }
 
 // 29-note catchy melody in C major (grid-aligned playback sequence).
@@ -48,14 +95,12 @@ const noteMidi = [
   69, 67, 64, 65, 67, 69, 67, 64, 60
 ];
 
-function midiToHz(midi: number): number {
-  return 440 * Math.pow(2, (midi - 69) / 12);
-}
-
 export const EXAMPLE_LEVEL: LevelDefinition = {
-  tempoMap: [{ startColumn: 0, bpm: 120 }],
+  midiPlayback: buildMidiPlaybackFromMidiNotes(noteMidi, 120),
   tempoSmoothingBpmPerSecond: 90,
   audioQualityMode: 'balanced',
+  // Legacy optional fields (kept temporarily).
+  tempoMap: [{ startColumn: 0, bpm: 120 }],
   gridColumns: 29,
   notes: noteMidi.map(midiToHz),
   platforms: [

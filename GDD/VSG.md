@@ -352,9 +352,9 @@ Kill counter format:
 
 * Bottom HUD score must render as `kills (-Xs)` with one decimal place (example: `6 (-1.2s)`), matching the runtime time-bonus rule.
 * Timer must stay top-center and screen-anchored (independent from world width/camera scroll).
-* Gameplay camera must follow the player with runtime zoom fixed at `2.0x` and a slight upward follow offset.
+* Gameplay camera must follow the player with runtime zoom fixed at `2.0x` and a 20% stronger upward follow offset (`y = -57.6`, previously `-48`).
 * Runtime player blockout size is `12x19`.
-* HUD/overlay screen UI must remain fully readable with camera zoom active (zoom-compensated scale for screen-anchored labels/panels).
+* HUD/overlay screen UI must remain fully readable with camera zoom active (zoom-compensated position + scale for screen-anchored labels/panels).
 
 Debug overlay (runtime):
 
@@ -533,3 +533,21 @@ Mandatory constraints:
 - Keep enemy palette isolated from warm/cool platform families.
 
 These assets are static sprite replacements for current primitive runtime shapes; animation is optional and not required for the baseline visual pack.
+
+---
+
+# 15. MIDI Authoring Screens (DAW + Editor)
+
+Functional update aligned to current UI implementation:
+
+- DAW and editor maintain the existing visual language (dark indigo background, cyan/gold accents).
+- Tempo-change markers in piano-roll headers remain the primary tempo cue.
+- Playhead highlight remains the only persistent playback cursor style in the DAW grid.
+- No new decorative visual systems were introduced for MIDI fidelity updates.
+
+Readability constraints:
+
+- Step-grid remains a helper projection only; visual density must not imply note deletion.
+- Tempo rows must keep numeric controls clear and compact to support frequent BPM edits.
+- MIDI status labels must stay concise and in English (loaded/playing/stopped/error states).
+- Runtime debug text may include one additional diagnostics line for playback speed (`expected/actual beats per second` plus error %); it must stay monochrome and non-promotional, with visibility toggle (`F10`).

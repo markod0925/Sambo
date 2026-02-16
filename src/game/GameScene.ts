@@ -1,11 +1,14 @@
 import { BeatSnapMover } from '../core/beatMovement.js';
 import { Metronome } from '../core/metronome.js';
 import {
-  buildGridMidiMapFromMidi,
-  buildGridNotesFromMidi,
-  parseMidiFile,
-  type GridMidiMap,
-  type GridMidiNoteEvent
+  lowerBoundByEndTick,
+  lowerBoundByStartTick,
+  normalizeMidiTickModel,
+  parseMidiToTickModel,
+  tickToSeconds,
+  type GridMidiNoteEvent,
+  type NoteInterval,
+  type ParsedMidiTickModel
 } from '../core/midi.js';
 import {
   getBeatPlatformState,
@@ -54,7 +57,8 @@ const BASE_PATROL_SPEED = 45;
 const BASE_FLYING_SPEED_X = 90;
 const BASE_FLYING_HOMING_RATE = 45;
 const PLAYER_STEP_SUBDIVISIONS = 4;
-const PLAYER_SNAP_STEP_X = 16;
+const PLAYER_SPEED_MULTIPLIER = 2.2;
+const PLAYER_SNAP_STEP_X = 16 * PLAYER_SPEED_MULTIPLIER;
 const WORLD_GRID_STEP = 32;
 const PLAYER_WIDTH = 12;
 const PLAYER_HEIGHT = 19;
@@ -63,6 +67,7 @@ const PATROL_ENEMY_HEIGHT = 12;
 const FLYING_ENEMY_WIDTH = 15;
 const FLYING_ENEMY_HEIGHT = 10;
 const PLAYER_CAMERA_ZOOM = 2;
+const PLAYER_CAMERA_FOLLOW_OFFSET_Y = 50;
 const VOICE_RETRIGGER_WINDOW_MS = 90;
 const MIN_VOICE_HOLD_SEC = 0.03;
 const FORWARD_IDLE_GRACE_MS = 300;
@@ -279,7 +284,17 @@ export class GameScene extends Phaser.Scene {
   private tempoSmoothingBpmPerSecond = DEFAULT_TEMPO_SMOOTHING_BPM_PER_SECOND;
   private pendingTempoChange: { atMs: number; bpm: number; zoneIndex: number } | null = null;
   private levelMidiCacheKey: string | null = null;
-  private gridMidiMap: GridMidiMap | null = null;
+  private midiTickModel: ParsedMidiTickModel | null = null;
+  private activeVoiceCounts = new Map<string, number>();
+  private pendingNaturalNoteOffTimers = new Map<string, Set<ReturnType<typeof setTimeout>>>();
+  private playheadTick = 0;
+  private previousPlayheadTick = 0;
+  private playheadX0 = 150;
+  private playheadX1 = 1054;
+  private tickPerUnit = 1;
+  private scrubThresholdTick = 240;
+  private scrubWasPaused = false;
+  private midiSelectedChannelCount = 0;
   private activeVoices = new Map<string, ActiveSynthVoice>();
   private masterGain: GainNode | null = null;
   private musicBusGain: GainNode | null = null;
@@ -300,6 +315,10 @@ export class GameScene extends Phaser.Scene {
   private debugLastOffCount = 0;
   private debugAudioMode: 'midi' | 'legacy' = 'legacy';
   private debugAudioDeClickStrict = false;
+  private debugShowPlaybackSpeedMetrics = true;
+  private debugExpectedBeatsPerSec = 0;
+  private debugActualBeatsPerSec = 0;
+  private debugPlaybackSpeedErrorPct = 0;
   private debugLevelAlpha = 1;
   private debugPlayerAlpha = 1;
   private debugMoonAlpha = 1;
@@ -460,7 +479,7 @@ export class GameScene extends Phaser.Scene {
 
     this.player = this.add.rectangle(150, this.playerY, PLAYER_WIDTH, PLAYER_HEIGHT, COLORS.player, 1).setDepth(DEPTH_PLAYER);
     this.cameras.main.setZoom(PLAYER_CAMERA_ZOOM);
-    this.cameras.main.startFollow(this.player, false, 0.12, 0.12, 0, -48);
+    this.cameras.main.startFollow(this.player, false, 0.12, 0.12, 0, PLAYER_CAMERA_FOLLOW_OFFSET_Y);
     this.initializeGridBounds();
     this.moonHalo = this.add.circle(this.moonMaxWorldX, 90, 72, COLORS.moonLow, 0.12).setDepth(DEPTH_MOON - 1);
     this.moon = this.add.circle(this.moonMaxWorldX, 90, 42, COLORS.moonLow, 0.32).setDepth(DEPTH_MOON);
@@ -519,7 +538,7 @@ export class GameScene extends Phaser.Scene {
     this.configureScreenUi(this.scoreText);
 
     this.cursors = this.input.keyboard.createCursorKeys();
-    this.keys = this.input.keyboard.addKeys('W,A,S,D,SPACE,UP,LEFT,RIGHT,ESC,F9');
+    this.keys = this.input.keyboard.addKeys('W,A,S,D,SPACE,UP,LEFT,RIGHT,ESC,F9,F10');
     const openingSpawnInterval =
       this.flyingSpawnIntervalMs > 0 ? this.scaleSpawnIntervalMs(this.flyingSpawnIntervalMs, this.currentBpm) : 1800;
     this.nextFlyingSpawnMs = performance.now() + Math.max(900, openingSpawnInterval * 0.5);
@@ -540,6 +559,9 @@ export class GameScene extends Phaser.Scene {
   update(_time: number, delta: number): void {
     if (Phaser.Input.Keyboard.JustDown(this.keys.F9)) {
       this.debugAudioDeClickStrict = !this.debugAudioDeClickStrict;
+    }
+    if (Phaser.Input.Keyboard.JustDown(this.keys.F10)) {
+      this.debugShowPlaybackSpeedMetrics = !this.debugShowPlaybackSpeedMetrics;
     }
     if (!this.isPreviewMode && !this.isGameOver) {
       const escPressed = Phaser.Input.Keyboard.JustDown(this.keys.ESC);
@@ -593,6 +615,7 @@ export class GameScene extends Phaser.Scene {
 
     this.player.x = clampedX;
     const movedX = this.player.x - previousPlayerX;
+    this.updatePlaybackSpeedDebugMetrics(deltaSeconds, movedX);
     if (movedX > this.movementEpsilon) this.currentDirection = 'forward';
     else if (movedX < -this.movementEpsilon) this.currentDirection = 'backward';
     else if (this.mover.currentStep) this.currentDirection = this.mover.currentStep.direction;
@@ -606,37 +629,42 @@ export class GameScene extends Phaser.Scene {
       const longEnoughIdle = now >= this.idleVoiceReleaseAtMs;
       if (longEnoughIdle) {
         this.purgeForwardPredictionEvents();
-        if (this.activeVoices.size > 0 && now - this.lastMusicEventAtMs >= 80) this.releaseAllVoices();
+        if (!this.midiTickModel && this.activeVoices.size > 0 && now - this.lastMusicEventAtMs >= 80) this.releaseAllVoices();
       }
     } else {
       this.idleVoiceReleaseAtMs = 0;
     }
-    if (movement.arrived) {
-      const previousGridIndex = this.getGridIndexFromX(previousPlayerX);
-      const gridIndex = this.getGridIndexFromX(this.player.x);
-      if (gridIndex !== previousGridIndex) {
-        const targetTimeMs =
-          movement.direction === 'forward' && stepBeforeMovement?.direction === 'forward'
-            ? stepBeforeMovement.arrivalTime
-            : now;
-        const eventKey = buildGridEventKey(movement.direction, gridIndex, targetTimeMs);
-        this.enqueueGridAudioEvent({
-          gridIndex,
-          direction: movement.direction,
-          targetTimeMs,
-          source: 'arrival',
-          eventKey
-        });
-        if (movement.direction === 'forward' && stepBeforeMovement?.direction === 'forward') {
-          this.rememberForwardStepDuration(stepBeforeMovement.arrivalTime - stepBeforeMovement.startTime);
+    if (this.midiTickModel) {
+      this.clearQueuedAudioEvents();
+      this.updateMidiTickPlayback();
+    } else {
+      if (movement.arrived) {
+        const previousGridIndex = this.getGridIndexFromX(previousPlayerX);
+        const gridIndex = this.getGridIndexFromX(this.player.x);
+        if (gridIndex !== previousGridIndex) {
+          const targetTimeMs =
+            movement.direction === 'forward' && stepBeforeMovement?.direction === 'forward'
+              ? stepBeforeMovement.arrivalTime
+              : now;
+          const eventKey = buildGridEventKey(movement.direction, gridIndex, targetTimeMs);
+          this.enqueueGridAudioEvent({
+            gridIndex,
+            direction: movement.direction,
+            targetTimeMs,
+            source: 'arrival',
+            eventKey
+          });
+          if (movement.direction === 'forward' && stepBeforeMovement?.direction === 'forward') {
+            this.rememberForwardStepDuration(stepBeforeMovement.arrivalTime - stepBeforeMovement.startTime);
+          }
         }
       }
-    }
 
-    if (intent.direction === 'backward') {
-      this.purgeForwardPredictionEvents();
-    } else if (intent.direction === 'forward') {
-      this.queueForwardPredictedEvents(now);
+      if (intent.direction === 'backward') {
+        this.purgeForwardPredictionEvents();
+      } else if (intent.direction === 'forward') {
+        this.queueForwardPredictedEvents(now);
+      }
     }
 
     if (movedX < -this.movementEpsilon) this.ghostPlatformLatchedSolid = true;
@@ -974,20 +1002,42 @@ export class GameScene extends Phaser.Scene {
 
   private updateDebugOverlay(): void {
     if (!this.debugText) return;
-    const modeLabel = this.debugAudioMode === 'midi' ? 'MIDI' : 'Legacy';
-    const channels = this.gridMidiMap?.selectedChannels.length ?? 0;
+    const modeLabel = this.debugAudioMode === 'midi' ? 'MIDI Tick' : 'Legacy';
+    const channels = this.midiSelectedChannelCount;
     const voices = this.activeVoices.size;
     const stepState = this.mover.currentStep ? 'moving' : 'idle';
+    const speedMetrics = this.debugShowPlaybackSpeedMetrics
+      ? `Playback Speed: expected=${this.debugExpectedBeatsPerSec.toFixed(3)} beats/s actual=${this.debugActualBeatsPerSec.toFixed(3)} beats/s err=${this.debugPlaybackSpeedErrorPct.toFixed(1)}% (F10 hide)`
+      : 'Playback Speed: hidden (F10 show)';
     this.debugText.setText(
       [
         `Debug Audio: ${modeLabel} | profile=${this.audioQuality.mode} | channels=${channels} | deClick=${this.debugAudioDeClickStrict ? 'strict' : 'normal'} (F9)`,
         `Tempo: bpm=${this.currentBpm.toFixed(1)} target=${this.targetBpm.toFixed(1)} rate=${this.tempoSmoothingBpmPerSecond}/s zone=${this.currentTempoZoneIndex}${this.pendingTempoChange ? ' (pending)' : ''}`,
+        speedMetrics,
         `Scheduler: q=${this.queuedGridAudioEvents.length} predQ=${this.predictionKeys.size} late=${this.audioLatenessAvgMs.toFixed(1)}ms max=${this.audioLatenessMaxMs.toFixed(1)}ms underrun=${this.audioUnderrunCount}`,
-        `Grid: col=${this.debugLastGridColumn} dir=${this.debugLastDirection} step=${stepState}`,
+        `Grid: col=${this.debugLastGridColumn} dir=${this.debugLastDirection} step=${stepState} tick=${Math.round(this.playheadTick)}`,
         `Events: on=${this.debugLastOnCount} off=${this.debugLastOffCount} voices=${voices}`,
         `Alpha: level=${this.debugLevelAlpha.toFixed(2)} player=${this.debugPlayerAlpha.toFixed(2)} moon=${this.debugMoonAlpha.toFixed(2)} halo=${this.debugMoonHaloAlpha.toFixed(2)} dark=${this.debugDarknessAlpha.toFixed(2)}`
       ].join('\n')
     );
+  }
+
+  private updatePlaybackSpeedDebugMetrics(deltaSeconds: number, movedX: number): void {
+    if (!this.midiTickModel || deltaSeconds <= 0) {
+      this.debugExpectedBeatsPerSec = 0;
+      this.debugActualBeatsPerSec = 0;
+      this.debugPlaybackSpeedErrorPct = 0;
+      return;
+    }
+    const ppq = Math.max(1, this.midiTickModel.ppq);
+    const tickNow = this.getTickFromWorldX(this.player.x);
+    const expectedBeatsPerSec = this.getBpmAtTick(tickNow) / 60;
+    const actualBeatsPerSec = Math.abs((movedX * this.tickPerUnit) / ppq) / deltaSeconds;
+    const smoothed = Phaser.Math.Linear(this.debugActualBeatsPerSec, actualBeatsPerSec, 0.22);
+    this.debugExpectedBeatsPerSec = expectedBeatsPerSec;
+    this.debugActualBeatsPerSec = smoothed;
+    const denom = Math.max(0.0001, expectedBeatsPerSec);
+    this.debugPlaybackSpeedErrorPct = (Math.abs(smoothed - expectedBeatsPerSec) / denom) * 100;
   }
 
   private applyBeatPlatformVisual(state: ReturnType<typeof getBeatPlatformState>, nowMs: number): void {
@@ -1166,6 +1216,90 @@ export class GameScene extends Phaser.Scene {
     return Phaser.Math.Clamp(relative, 0, this.gridColumns - 1);
   }
 
+  private resolveGridColumnsFromLevel(): number {
+    const explicit = Number(this.currentLevel.gridColumns);
+    if (Number.isFinite(explicit) && explicit > 0) {
+      return Phaser.Math.Clamp(Math.floor(explicit), 1, 4096);
+    }
+    const maxPlatformRight = this.currentLevel.platforms.reduce((max, platform) => Math.max(max, platform.x + platform.width / 2), 0);
+    if (maxPlatformRight > this.playerStartX) {
+      const inferred = Math.round((maxPlatformRight - this.playerStartX) / WORLD_GRID_STEP) + 1;
+      return Phaser.Math.Clamp(inferred, 1, 4096);
+    }
+    return 29;
+  }
+
+  private coerceLevelMidiPlayback(raw: LevelDefinition['midiPlayback']): ParsedMidiTickModel {
+    return normalizeMidiTickModel(raw, {
+      fallbackBpm: DEFAULT_REFERENCE_BPM,
+      fallbackPpq: 480
+    });
+  }
+
+  private configurePlayheadMapping(): void {
+    if (!this.midiTickModel) return;
+    const midiPlayback = this.currentLevel.midiPlayback;
+    const fallbackX0 = this.playerStartX;
+    const fallbackX1 = this.playerStartX + WORLD_GRID_STEP * Math.max(1, this.gridColumns - 1);
+    const x0Candidate = Number(midiPlayback?.x0);
+    const x1Candidate = Number(midiPlayback?.x1);
+    const x0 = Number.isFinite(x0Candidate) ? x0Candidate : fallbackX0;
+    const x1 = Number.isFinite(x1Candidate) && x1Candidate > x0 ? x1Candidate : Math.max(x0 + 1, fallbackX1);
+    this.playheadX0 = x0;
+    this.playheadX1 = x1;
+    const spanFromLevel = Math.max(1, this.playheadX1 - this.playheadX0);
+    const ppq = Math.max(1, this.midiTickModel.ppq);
+    const songEndTick = Math.max(0, this.midiTickModel.songEndTick);
+    const unitsPerBeat = Math.max(
+      1,
+      this.mover.stepSize * (this.metronome.subdivision / Math.max(1, PLAYER_STEP_SUBDIVISIONS))
+    );
+    const calibratedTickPerUnit = ppq / unitsPerBeat;
+    const levelTickPerUnit = songEndTick > 0 ? songEndTick / spanFromLevel : calibratedTickPerUnit;
+    const mismatchRatio = calibratedTickPerUnit > 0 ? Math.abs(levelTickPerUnit - calibratedTickPerUnit) / calibratedTickPerUnit : 0;
+    if (songEndTick > 0 && mismatchRatio > 0.05) {
+      this.tickPerUnit = calibratedTickPerUnit;
+      const calibratedSpan = songEndTick / this.tickPerUnit;
+      this.playheadX1 = this.playheadX0 + Math.max(1, calibratedSpan);
+    } else {
+      this.tickPerUnit = songEndTick > 0 ? levelTickPerUnit : calibratedTickPerUnit;
+    }
+    this.playheadTick = Phaser.Math.Clamp(this.playheadTick, 0, this.midiTickModel.songEndTick);
+    this.previousPlayheadTick = Phaser.Math.Clamp(this.previousPlayheadTick, 0, this.midiTickModel.songEndTick);
+    const channels = new Set<number>();
+    for (const note of this.midiTickModel.notesByStart) channels.add(note.channel);
+    this.midiSelectedChannelCount = channels.size;
+  }
+
+  private getTempoPointIndexAtTick(tick: number): number {
+    if (!this.midiTickModel || this.midiTickModel.tempoPoints.length === 0) return 0;
+    const safeTick = Math.max(0, Math.floor(tick));
+    let picked = 0;
+    for (let i = 0; i < this.midiTickModel.tempoPoints.length; i++) {
+      if (this.midiTickModel.tempoPoints[i].tick > safeTick) break;
+      picked = i;
+    }
+    return picked;
+  }
+
+  private getTickFromWorldX(worldX: number): number {
+    if (!this.midiTickModel) return 0;
+    const speedMultiplier = 1;
+    const relative = Phaser.Math.Clamp(worldX - this.playheadX0, 0, this.playheadX1 - this.playheadX0);
+    const mapped = relative * this.tickPerUnit * speedMultiplier;
+    return Phaser.Math.Clamp(mapped, 0, this.midiTickModel.songEndTick);
+  }
+
+  private getBpmAtTick(tick: number): number {
+    if (!this.midiTickModel || this.midiTickModel.tempoPoints.length === 0) {
+      return this.tempoMap[0]?.bpm ?? DEFAULT_REFERENCE_BPM;
+    }
+    const tempoIndex = this.getTempoPointIndexAtTick(tick);
+    const usPerQuarter = this.midiTickModel.tempoPoints[tempoIndex]?.usPerQuarter ?? 500_000;
+    const bpm = Math.round(60_000_000 / Math.max(1, usPerQuarter));
+    return Phaser.Math.Clamp(bpm, 20, 300);
+  }
+
   private getTempoZoneIndexForColumn(column: number): number {
     const safeColumn = Math.max(0, Math.floor(Number(column) || 0));
     let picked = 0;
@@ -1181,6 +1315,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   private getBpmForWorldX(worldX: number): number {
+    if (this.midiTickModel) {
+      const tick = this.getTickFromWorldX(worldX);
+      return this.getBpmAtTick(tick);
+    }
     const step = WORLD_GRID_STEP;
     const relative = Math.round((worldX - this.minPlayerX) / step);
     const column = Phaser.Math.Clamp(relative, 0, Math.max(0, this.gridColumns - 1));
@@ -1188,9 +1326,12 @@ export class GameScene extends Phaser.Scene {
   }
 
   private updateTempoFromPlayerPosition(nowMs: number, deltaSeconds: number): void {
-    const currentColumn = this.getGridIndexFromX(this.player.x);
-    const zoneIndex = this.getTempoZoneIndexForColumn(currentColumn);
-    const desiredBpm = this.tempoMap[zoneIndex]?.bpm ?? this.currentBpm;
+    const tempoTick = this.midiTickModel ? this.getTickFromWorldX(this.player.x) : 0;
+    if (this.midiTickModel) this.playheadTick = tempoTick;
+    const zoneIndex = this.midiTickModel
+      ? this.getTempoPointIndexAtTick(tempoTick)
+      : this.getTempoZoneIndexForColumn(this.getGridIndexFromX(this.player.x));
+    const desiredBpm = this.midiTickModel ? this.getBpmAtTick(tempoTick) : this.tempoMap[zoneIndex]?.bpm ?? this.currentBpm;
 
     if (zoneIndex !== this.currentTempoZoneIndex || desiredBpm !== this.targetBpm) {
       const pendingMatches =
@@ -1222,6 +1363,202 @@ export class GameScene extends Phaser.Scene {
       this.currentBpm = nextBpm;
       this.metronome.setBpm(this.currentBpm, nowMs);
     }
+  }
+
+  private midiPitchToFrequency(midiPitch: number): number {
+    return 440 * Math.pow(2, (midiPitch - 69) / 12);
+  }
+
+  private noteIntervalKey(note: NoteInterval): string {
+    return `${note.trackId}:${note.channel}:${note.pitch}`;
+  }
+
+  private noteIntervalToVoiceEvent(note: NoteInterval): GridMidiNoteEvent {
+    return {
+      noteId: this.noteIntervalKey(note),
+      frequency: this.midiPitchToFrequency(note.pitch),
+      velocity: Phaser.Math.Clamp(note.velocity / 127, 0.05, 1)
+    };
+  }
+
+  private panicAllNotesOff(): void {
+    this.releaseAllVoices(true);
+    this.activeVoiceCounts.clear();
+    this.clearAllNaturalNoteOffTimers();
+  }
+
+  private clearAllNaturalNoteOffTimers(): void {
+    for (const timers of this.pendingNaturalNoteOffTimers.values()) {
+      for (const timerId of timers) globalThis.clearTimeout(timerId);
+    }
+    this.pendingNaturalNoteOffTimers.clear();
+  }
+
+  private clearNaturalNoteOffTimersForKey(key: string): void {
+    const timers = this.pendingNaturalNoteOffTimers.get(key);
+    if (!timers) return;
+    for (const timerId of timers) globalThis.clearTimeout(timerId);
+    this.pendingNaturalNoteOffTimers.delete(key);
+  }
+
+  private scheduleNaturalNoteOff(note: NoteInterval, referenceTick: number): void {
+    if (!this.midiTickModel) return;
+    if (this.currentDirection === 'backward') return;
+    const key = this.noteIntervalKey(note);
+    const safeRefTick = Phaser.Math.Clamp(Math.floor(referenceTick), 0, this.midiTickModel.songEndTick);
+    const endSec = tickToSeconds(note.endTick, this.midiTickModel);
+    const nowSec = tickToSeconds(safeRefTick, this.midiTickModel);
+    const waitMs = Math.max(12, Math.round(Math.max(0, endSec - nowSec) * 1000));
+    const timerId = globalThis.setTimeout(() => {
+      const active = this.pendingNaturalNoteOffTimers.get(key);
+      if (active) {
+        active.delete(timerId);
+        if (active.size === 0) this.pendingNaturalNoteOffTimers.delete(key);
+      }
+      this.applyNoteOff(note, 'natural');
+    }, waitMs);
+    const timers = this.pendingNaturalNoteOffTimers.get(key) ?? new Set<ReturnType<typeof setTimeout>>();
+    timers.add(timerId);
+    this.pendingNaturalNoteOffTimers.set(key, timers);
+  }
+
+  private applyNoteOn(note: NoteInterval): void {
+    const key = this.noteIntervalKey(note);
+    const nextCount = (this.activeVoiceCounts.get(key) ?? 0) + 1;
+    this.activeVoiceCounts.set(key, nextCount);
+    if (nextCount === 1) {
+      this.startVoice(this.noteIntervalToVoiceEvent(note), this.currentDirection === 'backward' ? 'backward' : 'forward');
+    }
+    this.scheduleNaturalNoteOff(note, this.playheadTick);
+  }
+
+  private applyNoteOff(note: NoteInterval, source: 'scrub' | 'natural' = 'scrub'): void {
+    const key = this.noteIntervalKey(note);
+    const count = this.activeVoiceCounts.get(key) ?? 0;
+    if (count <= 0) {
+      if (source === 'scrub') {
+        console.warn('MIDI scrub count underflow detected.', { key, count });
+      }
+      this.activeVoiceCounts.set(key, 0);
+      return;
+    }
+    const next = count - 1;
+    if (next <= 0) {
+      this.activeVoiceCounts.delete(key);
+      this.clearNaturalNoteOffTimersForKey(key);
+      this.releaseVoice(key, 0.06);
+    } else {
+      this.activeVoiceCounts.set(key, next);
+    }
+  }
+
+  private rebuildVoicesAtTick(tickNow: number): { onCount: number; offCount: number } {
+    if (!this.midiTickModel) return { onCount: 0, offCount: 0 };
+    const offCount = this.activeVoiceCounts.size;
+    this.panicAllNotesOff();
+
+    const safeTick = Phaser.Math.Clamp(Math.floor(tickNow), 0, this.midiTickModel.songEndTick);
+    let onCount = 0;
+    for (const note of this.midiTickModel.notesByStart) {
+      if (note.startTick > safeTick) break;
+      if (note.endTick <= safeTick) continue;
+      this.applyNoteOn(note);
+      onCount += 1;
+    }
+    return { onCount, offCount };
+  }
+
+  private applyIncrementalForward(prevTick: number, nowTick: number): { onCount: number; offCount: number } {
+    if (!this.midiTickModel) return { onCount: 0, offCount: 0 };
+    const notesByStart = this.midiTickModel.notesByStart;
+    const notesByEnd = this.midiTickModel.notesByEnd;
+    const startFrom = lowerBoundByStartTick(notesByStart, Math.floor(prevTick) + 1);
+    const startTo = lowerBoundByStartTick(notesByStart, Math.floor(nowTick) + 1);
+    const endFrom = lowerBoundByEndTick(notesByEnd, Math.floor(prevTick) + 1);
+    const endTo = lowerBoundByEndTick(notesByEnd, Math.floor(nowTick) + 1);
+
+    let onCount = 0;
+    let offCount = 0;
+    for (let i = startFrom; i < startTo; i++) {
+      this.applyNoteOn(notesByStart[i]);
+      onCount += 1;
+    }
+    for (let i = endFrom; i < endTo; i++) {
+      this.applyNoteOff(notesByEnd[i]);
+      offCount += 1;
+    }
+    return { onCount, offCount };
+  }
+
+  private applyIncrementalReverse(prevTick: number, nowTick: number): { onCount: number; offCount: number } {
+    if (!this.midiTickModel) return { onCount: 0, offCount: 0 };
+    const notesByStart = this.midiTickModel.notesByStart;
+    const notesByEnd = this.midiTickModel.notesByEnd;
+    const endFrom = lowerBoundByEndTick(notesByEnd, Math.floor(nowTick));
+    const endTo = lowerBoundByEndTick(notesByEnd, Math.floor(prevTick));
+    const startFrom = lowerBoundByStartTick(notesByStart, Math.floor(nowTick));
+    const startTo = lowerBoundByStartTick(notesByStart, Math.floor(prevTick));
+
+    let onCount = 0;
+    let offCount = 0;
+    for (let i = endFrom; i < endTo; i++) {
+      this.applyNoteOn(notesByEnd[i]);
+      onCount += 1;
+    }
+    for (let i = startFrom; i < startTo; i++) {
+      this.applyNoteOff(notesByStart[i]);
+      offCount += 1;
+    }
+    return { onCount, offCount };
+  }
+
+  private updateMidiTickPlayback(): void {
+    if (!this.midiTickModel || this.isPreviewMode || this.masterVolume <= 0) return;
+    const tickNow = this.getTickFromWorldX(this.player.x);
+    this.playheadTick = tickNow;
+
+    const isMovementIdle = this.currentDirection === 'idle' && !this.mover.currentStep;
+    if (isMovementIdle) {
+      this.scrubWasPaused = false;
+      this.previousPlayheadTick = tickNow;
+      this.debugLastOnCount = 0;
+      this.debugLastOffCount = 0;
+      return;
+    }
+
+    if (this.scrubWasPaused) {
+      const rebuilt = this.rebuildVoicesAtTick(tickNow);
+      this.debugLastOnCount = rebuilt.onCount;
+      this.debugLastOffCount = rebuilt.offCount;
+      if (rebuilt.onCount > 0 || rebuilt.offCount > 0) this.lastMusicEventAtMs = performance.now();
+      this.scrubWasPaused = false;
+      this.previousPlayheadTick = tickNow;
+      this.debugAudioMode = 'midi';
+      return;
+    }
+
+    const deltaTick = tickNow - this.previousPlayheadTick;
+    if (Math.abs(deltaTick) < 0.001) {
+      this.debugLastOnCount = 0;
+      this.debugLastOffCount = 0;
+      return;
+    }
+
+    const prevTick = this.previousPlayheadTick;
+    let stats = { onCount: 0, offCount: 0 };
+    if (Math.abs(deltaTick) > this.scrubThresholdTick) {
+      stats = this.rebuildVoicesAtTick(tickNow);
+    } else if (deltaTick > 0) {
+      stats = this.applyIncrementalForward(prevTick, tickNow);
+    } else {
+      stats = this.applyIncrementalReverse(prevTick, tickNow);
+    }
+
+    this.previousPlayheadTick = tickNow;
+    this.debugLastOnCount = stats.onCount;
+    this.debugLastOffCount = stats.offCount;
+    if (stats.onCount > 0 || stats.offCount > 0) this.lastMusicEventAtMs = performance.now();
+    this.debugAudioMode = 'midi';
   }
 
   private updateIntensityFromMovement(deltaSeconds: number, movedX: number): void {
@@ -1756,16 +2093,21 @@ export class GameScene extends Phaser.Scene {
   }
 
   private validateLevelDefinition(): void {
-    if (this.currentLevel.notes.length !== this.currentLevel.gridColumns) {
-      throw new Error(
-        `Invalid level definition: notes(${this.currentLevel.notes.length}) must equal gridColumns(${this.currentLevel.gridColumns}).`
-      );
+    const midiPlayback = this.currentLevel.midiPlayback;
+    if (!midiPlayback || typeof midiPlayback !== 'object') {
+      throw new Error('Invalid level definition: midiPlayback is required.');
     }
-    if (!Array.isArray(this.currentLevel.tempoMap) || this.currentLevel.tempoMap.length === 0) {
-      throw new Error('Invalid level definition: tempoMap must contain at least one zone.');
+    if (!Number.isFinite(Number(midiPlayback.ppq)) || Number(midiPlayback.ppq) <= 0) {
+      throw new Error('Invalid level definition: midiPlayback.ppq must be > 0.');
     }
-    if (this.currentLevel.tempoMap[0].startColumn !== 0) {
-      throw new Error('Invalid level definition: tempoMap first zone must start at column 0.');
+    if (!Number.isFinite(Number(midiPlayback.songEndTick)) || Number(midiPlayback.songEndTick) < 0) {
+      throw new Error('Invalid level definition: midiPlayback.songEndTick must be >= 0.');
+    }
+    if (!Array.isArray(midiPlayback.tempoPoints) || midiPlayback.tempoPoints.length === 0) {
+      throw new Error('Invalid level definition: midiPlayback.tempoPoints must contain at least one point.');
+    }
+    if (!Array.isArray(midiPlayback.notes)) {
+      throw new Error('Invalid level definition: midiPlayback.notes must be an array.');
     }
   }
 
@@ -1848,10 +2190,17 @@ export class GameScene extends Phaser.Scene {
 
   private resetGameplayState(): void {
     this.releaseAllVoices(true);
-    this.tempoMap = normalizeTempoMap(this.currentLevel.tempoMap, DEFAULT_REFERENCE_BPM);
+    this.activeVoiceCounts.clear();
+    this.midiTickModel = this.coerceLevelMidiPlayback(this.currentLevel.midiPlayback);
+    const fallbackBpm = this.getBpmAtTick(0);
+    this.tempoMap = normalizeTempoMap(this.currentLevel.tempoMap ?? [{ startColumn: 0, bpm: fallbackBpm }], fallbackBpm);
     this.currentTempoZoneIndex = 0;
-    this.currentBpm = this.tempoMap[0]?.bpm ?? DEFAULT_REFERENCE_BPM;
+    this.currentBpm = fallbackBpm;
     this.targetBpm = this.currentBpm;
+    this.playheadTick = 0;
+    this.previousPlayheadTick = 0;
+    this.scrubWasPaused = false;
+    this.scrubThresholdTick = this.midiTickModel ? Math.max(1, Math.floor(this.midiTickModel.ppq / 2)) : 240;
     this.tempoSmoothingBpmPerSecond = Math.max(
       1,
       Number(this.currentLevel.tempoSmoothingBpmPerSecond) || DEFAULT_TEMPO_SMOOTHING_BPM_PER_SECOND
@@ -1903,7 +2252,7 @@ export class GameScene extends Phaser.Scene {
     this.currentDirection = 'idle';
     this.ghostPlatformLatchedSolid = false;
     this.reverseGhostPlatformLatchedSolid = true;
-    this.gridColumns = this.currentLevel.gridColumns;
+    this.gridColumns = this.resolveGridColumnsFromLevel();
     this.playerY = this.groundY;
     this.verticalVelocity = 0;
     this.lastGroundedAtMs = 0;
@@ -1923,6 +2272,10 @@ export class GameScene extends Phaser.Scene {
     this.debugLastOffCount = 0;
     this.debugAudioMode = 'legacy';
     this.debugAudioDeClickStrict = false;
+    this.debugShowPlaybackSpeedMetrics = true;
+    this.debugExpectedBeatsPerSec = 0;
+    this.debugActualBeatsPerSec = 0;
+    this.debugPlaybackSpeedErrorPct = 0;
     this.debugLevelAlpha = 1;
     this.debugPlayerAlpha = 1;
     this.debugMoonAlpha = 1;
@@ -1944,10 +2297,11 @@ export class GameScene extends Phaser.Scene {
     const maxPlatformRight = this.currentLevel.platforms.reduce((max, p) => Math.max(max, p.x + p.width / 2), 0);
     const hasAuthoredPlatforms = maxPlatformRight > 0;
     const fromPlatforms = maxPlatformRight + 220;
-    const fromGridFallback = this.playerStartX + step * Math.max(0, this.currentLevel.gridColumns - 1) + 220;
+    const fromGridFallback = this.playerStartX + step * Math.max(0, this.gridColumns - 1) + 220;
     this.worldWidth = Math.max(960, Math.ceil(hasAuthoredPlatforms ? fromPlatforms : fromGridFallback));
     const moonForwardOffset = this.getPlatformGridStepX();
     this.moonMaxWorldX = Math.max(820, Math.ceil(maxPlatformRight + 140 + moonForwardOffset));
+    this.configurePlayheadMapping();
   }
 
   private updateTimerLabel(nowMs: number): void {
@@ -2157,34 +2511,14 @@ export class GameScene extends Phaser.Scene {
     if (this.isPreviewMode || this.masterVolume <= 0) return;
 
     const nowMs = typeof eventTimeMs === 'number' && Number.isFinite(eventTimeMs) ? eventTimeMs : performance.now();
-    const columnIndex = Phaser.Math.Clamp(Math.floor(gridIndex), 0, Math.max(0, this.currentLevel.gridColumns - 1));
+    const columnIndex = Phaser.Math.Clamp(Math.floor(gridIndex), 0, Math.max(0, this.gridColumns - 1));
     this.debugLastGridColumn = columnIndex;
     this.debugLastDirection = direction;
-    const midiMap = this.gridMidiMap;
-    if (!midiMap || !midiMap.eventsByColumn[columnIndex]) {
-      this.debugAudioMode = 'legacy';
-      this.debugLastOnCount = 1;
-      this.debugLastOffCount = 0;
-      this.lastMusicEventAtMs = nowMs;
-      this.playLegacyNoteAtGridIndex(columnIndex, direction, scheduledAtSec);
-      return;
-    }
-
-    this.debugAudioMode = 'midi';
-    const columnEvents = midiMap.eventsByColumn[columnIndex];
-    this.debugLastOnCount = columnEvents.on.length;
-    this.debugLastOffCount = columnEvents.off.length;
-    if (columnEvents.on.length > 0 || columnEvents.off.length > 0) this.lastMusicEventAtMs = nowMs;
-    if (direction === 'backward') {
-      // Backward traversal uses short rewind transients only: drain sustained voices
-      // first to avoid long held notes while the player keeps moving backward.
-      this.releaseAllVoices(false);
-      for (const event of columnEvents.off) this.playBackwardTransient(event, scheduledAtSec);
-      return;
-    }
-
-    for (const event of columnEvents.off) this.releaseVoice(event.noteId, 0.08, scheduledAtSec);
-    for (const event of columnEvents.on) this.startVoice(event, 'forward', scheduledAtSec);
+    this.debugAudioMode = 'legacy';
+    this.debugLastOnCount = 1;
+    this.debugLastOffCount = 0;
+    this.lastMusicEventAtMs = nowMs;
+    this.playLegacyNoteAtGridIndex(columnIndex, direction, scheduledAtSec);
   }
 
   private playLegacyNoteAtGridIndex(gridIndex: number, direction: MovementDirection, scheduledAtSec?: number): void {
@@ -2194,7 +2528,7 @@ export class GameScene extends Phaser.Scene {
     const osc = synth.createOscillator();
     const gain = synth.createGain();
     const filter = synth.createBiquadFilter();
-    const freq = this.currentLevel.notes[gridIndex] ?? 220;
+    const freq = this.currentLevel.notes?.[gridIndex] ?? 220;
 
     osc.type = editorLike ? 'triangle' : 'sawtooth';
     osc.frequency.value = freq;
@@ -2455,6 +2789,10 @@ export class GameScene extends Phaser.Scene {
     for (const noteId of [...this.activeVoices.keys()]) {
       this.releaseVoice(noteId, release, undefined, !immediate);
     }
+    if (immediate) {
+      this.activeVoiceCounts.clear();
+      this.clearAllNaturalNoteOffTimers();
+    }
   }
 
   private ensureSynthReady(): AudioContext | null {
@@ -2575,6 +2913,50 @@ export class GameScene extends Phaser.Scene {
     return base * 0.15;
   }
 
+  private frequencyToMidi(frequency: number): number {
+    const safeFrequency = Number(frequency);
+    if (!Number.isFinite(safeFrequency) || safeFrequency <= 0) return 60;
+    const midi = Math.round(69 + 12 * Math.log2(safeFrequency / 440));
+    return Phaser.Math.Clamp(midi, 0, 127);
+  }
+
+  private buildLegacyMidiPlaybackFromLevel(level: Partial<LevelDefinition>): LevelDefinition['midiPlayback'] {
+    const ppq = 480;
+    const gridColumns = Math.max(1, Math.floor(Number(level.gridColumns) || level.notes?.length || 29));
+    const notesHz = Array.isArray(level.notes) ? level.notes : [];
+    const notes: NoteInterval[] = [];
+    for (let i = 0; i < gridColumns; i++) {
+      const freq = Number(notesHz[i] ?? notesHz[notesHz.length - 1] ?? 261.625565);
+      const pitch = this.frequencyToMidi(freq);
+      const startTick = i * ppq;
+      notes.push({
+        startTick,
+        endTick: startTick + ppq,
+        pitch,
+        velocity: 100,
+        trackId: 0,
+        channel: 0
+      });
+    }
+
+    const rawTempo = Array.isArray(level.tempoMap) ? level.tempoMap : [{ startColumn: 0, bpm: DEFAULT_REFERENCE_BPM }];
+    const tempoPoints = normalizeTempoMap(rawTempo, DEFAULT_REFERENCE_BPM).map((row) => ({
+      tick: Math.max(0, Math.floor(row.startColumn * ppq)),
+      usPerQuarter: Math.max(1, Math.round(60_000_000 / row.bpm))
+    }));
+
+    const x0 = this.playerStartX;
+    const x1 = this.playerStartX + WORLD_GRID_STEP * Math.max(1, gridColumns - 1);
+    return {
+      ppq,
+      songEndTick: gridColumns * ppq,
+      tempoPoints,
+      notes,
+      x0,
+      x1
+    };
+  }
+
   private resolveLevelFromInputs(): void {
     const data = (this.scene.settings.data || {}) as {
       levelIndex?: number;
@@ -2606,11 +2988,32 @@ export class GameScene extends Phaser.Scene {
 
     const safeIndex = Math.max(1, Math.min(this.availableLevels.length, Math.floor(parsedIndex)));
     const resolvedLevel = this.availableLevels[safeIndex - 1] ?? getLevelByOneBasedIndex(safeIndex);
-    this.gridMidiMap = null;
+    const legacyFallbackMidi = this.buildLegacyMidiPlaybackFromLevel(resolvedLevel);
+    const normalizedTickModel = this.coerceLevelMidiPlayback(resolvedLevel.midiPlayback ?? legacyFallbackMidi);
+    const sourceMidiPlayback = resolvedLevel.midiPlayback ?? legacyFallbackMidi;
+    const normalizedMidiPlayback: LevelDefinition['midiPlayback'] = {
+      ppq: normalizedTickModel.ppq,
+      songEndTick: normalizedTickModel.songEndTick,
+      tempoPoints: normalizedTickModel.tempoPoints.map((point) => ({ ...point })),
+      notes: normalizedTickModel.notesByStart.map((note) => ({ ...note })),
+      ...(Number.isFinite(Number(sourceMidiPlayback.x0)) ? { x0: Number(sourceMidiPlayback.x0) } : {}),
+      ...(Number.isFinite(Number(sourceMidiPlayback.x1)) ? { x1: Number(sourceMidiPlayback.x1) } : {})
+    };
+    const legacyTempoMap = normalizeTempoMap(
+      resolvedLevel.tempoMap ?? [
+        {
+          startColumn: 0,
+          bpm: Math.round(60_000_000 / (normalizedTickModel.tempoPoints[0]?.usPerQuarter || 500_000))
+        }
+      ],
+      DEFAULT_REFERENCE_BPM
+    ).map((entry) => ({ ...entry }));
+    const legacyNotes = Array.isArray(resolvedLevel.notes) ? [...resolvedLevel.notes] : [];
     this.currentLevel = {
       ...resolvedLevel,
-      tempoMap: normalizeTempoMap(resolvedLevel.tempoMap, DEFAULT_REFERENCE_BPM).map((entry) => ({ ...entry })),
-      notes: [...(resolvedLevel.notes || [])],
+      midiPlayback: normalizedMidiPlayback,
+      tempoMap: legacyTempoMap,
+      notes: legacyNotes,
       platforms: [...(resolvedLevel.platforms || [])],
       segmentEnemies: Array.isArray(resolvedLevel.segmentEnemies)
         ? resolvedLevel.segmentEnemies.map((entry) => ({ ...entry }))
@@ -2643,11 +3046,17 @@ export class GameScene extends Phaser.Scene {
     if (!arrayBuffer) return;
 
     try {
-      const parsed = parseMidiFile(arrayBuffer);
-      this.gridMidiMap = buildGridMidiMapFromMidi(parsed, this.currentLevel.gridColumns, this.getMidiGridBuildOptions());
-      const midiNotes = buildGridNotesFromMidi(parsed, this.currentLevel.gridColumns);
-      if (midiNotes.length !== this.currentLevel.gridColumns) return;
-      this.currentLevel.notes = midiNotes;
+      const tickModel = parseMidiToTickModel(arrayBuffer);
+      const fallbackX0 = this.playerStartX;
+      const fallbackX1 = fallbackX0 + WORLD_GRID_STEP * Math.max(1, this.resolveGridColumnsFromLevel() - 1);
+      this.currentLevel.midiPlayback = {
+        ppq: tickModel.ppq,
+        songEndTick: tickModel.songEndTick,
+        tempoPoints: tickModel.tempoPoints.map((point) => ({ ...point })),
+        notes: tickModel.notesByStart.map((note) => ({ ...note })),
+        x0: Number.isFinite(Number(this.currentLevel.midiPlayback?.x0)) ? Number(this.currentLevel.midiPlayback.x0) : fallbackX0,
+        x1: Number.isFinite(Number(this.currentLevel.midiPlayback?.x1)) ? Number(this.currentLevel.midiPlayback.x1) : fallbackX1
+      };
     } catch (err) {
       console.warn('Unable to parse runtime MIDI file for level playback.', err);
     }
@@ -2659,16 +3068,6 @@ export class GameScene extends Phaser.Scene {
       return raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength);
     }
     return null;
-  }
-
-  private getMidiGridBuildOptions(): { maxChannels: number; minMidiNote: number; maxMidiNote: number } {
-    if (this.audioQuality.mode === 'performance') {
-      return { maxChannels: 3, minMidiNote: 42, maxMidiNote: 92 };
-    }
-    if (this.audioQuality.mode === 'high') {
-      return { maxChannels: 8, minMidiNote: 32, maxMidiNote: 108 };
-    }
-    return { maxChannels: 5, minMidiNote: 36, maxMidiNote: 100 };
   }
 
   private goToNextLevel(): void {
@@ -2937,6 +3336,30 @@ export class GameScene extends Phaser.Scene {
     if (!node) return;
     const zoom = Math.max(0.001, Number(this.cameras.main?.zoom) || 1);
     if (typeof node.setScrollFactor === 'function') node.setScrollFactor(0);
-    if (typeof node.setScale === 'function') node.setScale(1 / zoom);
+    const anyNode = node as any;
+    if (!anyNode.__screenUiBase) {
+      anyNode.__screenUiBase = {
+        x: Number.isFinite(node.x) ? node.x : 0,
+        y: Number.isFinite(node.y) ? node.y : 0,
+        scaleX: Number.isFinite(node.scaleX) ? node.scaleX : 1,
+        scaleY: Number.isFinite(node.scaleY) ? node.scaleY : 1
+      };
+    }
+
+    const cameraWidth = Number(this.cameras.main?.width) || this.scale.width || 0;
+    const cameraHeight = Number(this.cameras.main?.height) || this.scale.height || 0;
+    const centerX = cameraWidth * 0.5;
+    const centerY = cameraHeight * 0.5;
+
+    if (Number.isFinite(anyNode.__screenUiBase.x)) {
+      node.x = (anyNode.__screenUiBase.x - centerX) / zoom + centerX;
+    }
+    if (Number.isFinite(anyNode.__screenUiBase.y)) {
+      node.y = (anyNode.__screenUiBase.y - centerY) / zoom + centerY;
+    }
+
+    if (typeof node.setScale === 'function') {
+      node.setScale(anyNode.__screenUiBase.scaleX / zoom, anyNode.__screenUiBase.scaleY / zoom);
+    }
   }
 }

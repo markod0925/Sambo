@@ -312,7 +312,13 @@
       </div>
     </div>
 
-    <script>
+    <script type="module">
+      import {
+        normalizeMidiTickModel,
+        parseMidiToTickModel,
+        tickToSeconds
+      } from '/dist/src/core/midi.js';
+
       const rowsEl = document.getElementById('rows');
       const summaryEl = document.getElementById('summary');
       const fileInput = document.getElementById('fileInput');
@@ -343,6 +349,7 @@
       let model = { segments: [], midi_file: null };
       const GAME_PLAYER_START_X = 150;
       const GRID_STEP = 32;
+      const GAME_PLAYER_UNITS_PER_BEAT = 16;
       const PLATFORM_WIDTH = GRID_STEP * 2;
       const PLATFORM_BLOCK_HEIGHT = 18;
       const LAYOUT_WORLD_TOP = 80;
@@ -386,6 +393,7 @@
       };
       let midiPlayback = {
         fileName: null,
+        timeline: null,
         notes: [],
         tempoMap: [],
         playbackNotes: [],
@@ -774,6 +782,7 @@
       function resetMidiState() {
         stopMidiPlayback();
         midiPlayback.fileName = null;
+        midiPlayback.timeline = null;
         midiPlayback.notes = [];
         midiPlayback.tempoMap = [];
         midiPlayback.playbackNotes = [];
@@ -789,196 +798,95 @@
         return 440 * Math.pow(2, (midi - 69) / 12);
       }
 
-      function readVarLen(view, offset) {
-        let value = 0;
-        let bytes = 0;
-        while (bytes < 4) {
-          const current = view.getUint8(offset + bytes);
-          value = (value << 7) | (current & 0x7f);
-          bytes += 1;
-          if ((current & 0x80) === 0) break;
-        }
-        return { value, size: bytes };
+      function frequencyToMidi(freq) {
+        const safe = Number(freq);
+        if (!Number.isFinite(safe) || safe <= 0) return 60;
+        const midi = Math.round(69 + 12 * Math.log2(safe / 440));
+        return clampNumber(midi, 0, 127);
+      }
+
+      function normalizeMidiTimeline(rawTimeline, options = {}) {
+        const fallbackBpm = clampBpm(Number(options.fallbackBpm) || 120);
+        const fallbackBeats = clampNumber(Math.floor(Number(options.fallbackBeats) || 32), 1, 4096);
+        const fallbackPpq = Math.max(1, Math.floor(Number(options.fallbackPpq) || Number(rawTimeline?.ppq) || 480));
+        return normalizeMidiTickModel(rawTimeline, {
+          fallbackBpm,
+          fallbackPpq,
+          fallbackSongEndTick: fallbackBeats * fallbackPpq
+        });
+      }
+
+      function tickToSecFromTimeline(targetTick, timeline) {
+        return tickToSeconds(targetTick, timeline);
+      }
+
+      function timelineToParsedMidi(rawTimeline) {
+        const timeline = normalizeMidiTimeline(rawTimeline, { fallbackBpm: 120, fallbackBeats: 32 });
+        const notes = timeline.notesByStart.map((note) => ({
+          startTick: note.startTick,
+          endTick: note.endTick,
+          startSec: tickToSecFromTimeline(note.startTick, timeline),
+          endSec: tickToSecFromTimeline(note.endTick, timeline),
+          midiNote: note.pitch,
+          velocity: note.velocity / 127,
+          velocityRaw: note.velocity,
+          trackId: note.trackId,
+          channel: note.channel
+        }));
+        notes.sort((a, b) => a.startSec - b.startSec || b.velocity - a.velocity);
+        const durationSec = tickToSecFromTimeline(timeline.songEndTick, timeline);
+        const tempoMap = timeline.tempoPoints.map((point) => ({
+          startBeat: point.tick / timeline.ppq,
+          startSec: tickToSecFromTimeline(point.tick, timeline),
+          bpm: Math.round(60000000 / point.usPerQuarter)
+        }));
+        const initialBpm = tempoMap.length > 0 ? tempoMap[0].bpm : 120;
+        return {
+          ticksPerQuarter: timeline.ppq,
+          notes,
+          tempoMap,
+          durationSec,
+          initialBpm,
+          timeline
+        };
       }
 
       function parseMidiFile(arrayBuffer) {
-        const view = new DataView(arrayBuffer);
-        let offset = 0;
-
-        function readAscii(length) {
-          let out = '';
-          for (let i = 0; i < length; i++) out += String.fromCharCode(view.getUint8(offset + i));
-          offset += length;
-          return out;
-        }
-
-        function readUint32() {
-          const v = view.getUint32(offset);
-          offset += 4;
-          return v;
-        }
-
-        function readUint16() {
-          const v = view.getUint16(offset);
-          offset += 2;
-          return v;
-        }
-
-        const chunkId = readAscii(4);
-        if (chunkId !== 'MThd') throw new Error('Invalid MIDI header');
-        const headerLength = readUint32();
-        if (headerLength < 6) throw new Error('Incomplete MIDI header');
-
-        const format = readUint16();
-        const ntrks = readUint16();
-        const division = readUint16();
-        offset += Math.max(0, headerLength - 6);
-
-        if ((division & 0x8000) !== 0) {
-          throw new Error('SMPTE time division is not supported');
-        }
-        const ticksPerQuarter = division;
-        if (ticksPerQuarter <= 0) throw new Error('Invalid ticks per quarter');
-
-        const tempoEvents = [{ tick: 0, usPerQuarter: 500000 }];
-        const noteEvents = [];
-
-        for (let trackIndex = 0; trackIndex < ntrks; trackIndex++) {
-          const trackId = readAscii(4);
-          if (trackId !== 'MTrk') throw new Error(`Invalid MIDI track chunk #${trackIndex}`);
-          const trackLength = readUint32();
-          const trackEnd = offset + trackLength;
-          let tick = 0;
-          let runningStatus = 0;
-
-          while (offset < trackEnd) {
-            const delta = readVarLen(view, offset);
-            tick += delta.value;
-            offset += delta.size;
-
-            let status = view.getUint8(offset);
-            if (status < 0x80) {
-              if (!runningStatus) throw new Error('Invalid MIDI running status');
-              status = runningStatus;
-            } else {
-              offset += 1;
-              runningStatus = status;
-            }
-
-            if (status === 0xff) {
-              const metaType = view.getUint8(offset);
-              offset += 1;
-              const lenInfo = readVarLen(view, offset);
-              offset += lenInfo.size;
-              if (metaType === 0x51 && lenInfo.value === 3) {
-                const usPerQuarter =
-                  (view.getUint8(offset) << 16) |
-                  (view.getUint8(offset + 1) << 8) |
-                  view.getUint8(offset + 2);
-                tempoEvents.push({ tick, usPerQuarter });
-              }
-              offset += lenInfo.value;
-              continue;
-            }
-
-            if (status === 0xf0 || status === 0xf7) {
-              const lenInfo = readVarLen(view, offset);
-              offset += lenInfo.size + lenInfo.value;
-              continue;
-            }
-
-            const eventType = status & 0xf0;
-            const channel = status & 0x0f;
-            const data1 = view.getUint8(offset);
-            offset += 1;
-
-            if (eventType === 0xc0 || eventType === 0xd0) {
-              continue;
-            }
-
-            const data2 = view.getUint8(offset);
-            offset += 1;
-
-            if (eventType === 0x90) {
-              if (data2 > 0) {
-                noteEvents.push({ tick, type: 'on', note: data1, velocity: data2, channel });
-              } else {
-                noteEvents.push({ tick, type: 'off', note: data1, velocity: data2, channel });
-              }
-            } else if (eventType === 0x80) {
-              noteEvents.push({ tick, type: 'off', note: data1, velocity: data2, channel });
-            }
-          }
-
-          if (offset !== trackEnd) offset = trackEnd;
-        }
-
-        tempoEvents.sort((a, b) => a.tick - b.tick);
-        const mergedTempo = [];
-        for (const event of tempoEvents) {
-          const prev = mergedTempo[mergedTempo.length - 1];
-          if (!prev || prev.tick !== event.tick) mergedTempo.push(event);
-          else prev.usPerQuarter = event.usPerQuarter;
-        }
-
-        const tempoTimeline = [];
-        let currentSec = 0;
-        for (let i = 0; i < mergedTempo.length; i++) {
-          const event = mergedTempo[i];
-          if (i > 0) {
-            const prev = mergedTempo[i - 1];
-            const deltaTicks = event.tick - prev.tick;
-            currentSec += (deltaTicks * prev.usPerQuarter) / ticksPerQuarter / 1000000;
-          }
-          tempoTimeline.push({ tick: event.tick, startSec: currentSec, usPerQuarter: event.usPerQuarter });
-        }
-
-        function tickToSec(targetTick) {
-          let seg = tempoTimeline[0];
-          for (let i = 1; i < tempoTimeline.length; i++) {
-            if (tempoTimeline[i].tick > targetTick) break;
-            seg = tempoTimeline[i];
-          }
-          return seg.startSec + ((targetTick - seg.tick) * seg.usPerQuarter) / ticksPerQuarter / 1000000;
-        }
-
-        noteEvents.sort((a, b) => a.tick - b.tick || (a.type === 'off' ? 1 : -1));
-        const active = new Map();
-        const notes = [];
-        for (const ev of noteEvents) {
-          const key = `${ev.channel}:${ev.note}`;
-          if (ev.type === 'on') {
-            const list = active.get(key) || [];
-            list.push(ev);
-            active.set(key, list);
-            continue;
-          }
-          const list = active.get(key);
-          if (!list || list.length === 0) continue;
-          const start = list.pop();
-          if (list.length === 0) active.delete(key);
-          const startSec = tickToSec(start.tick);
-          const endSec = tickToSec(ev.tick);
-          if (endSec <= startSec) continue;
-          notes.push({
-            startSec,
-            endSec,
-            midiNote: start.note,
-            velocity: start.velocity / 127
-          });
-        }
-
-        notes.sort((a, b) => a.startSec - b.startSec);
-        const durationSec = notes.reduce((max, n) => Math.max(max, n.endSec), 0);
-
-        const primaryTempo = mergedTempo[0]?.usPerQuarter || 500000;
-        const initialBpm = 60000000 / primaryTempo;
-        const tempoMap = tempoTimeline.map((event) => ({
-          startBeat: event.tick / ticksPerQuarter,
-          startSec: event.startSec,
-          bpm: Math.round(60000000 / event.usPerQuarter)
+        const rawTickModel = parseMidiToTickModel(arrayBuffer);
+        const initialBpm = Math.round(
+          60000000 / Math.max(1, Number(rawTickModel.tempoPoints[0]?.usPerQuarter) || 500000)
+        );
+        const timeline = normalizeMidiTimeline(rawTickModel, {
+          fallbackBpm: initialBpm,
+          fallbackPpq: rawTickModel.ppq
+        });
+        const notes = timeline.notesByStart.map((note) => ({
+          startTick: note.startTick,
+          endTick: note.endTick,
+          startSec: tickToSeconds(note.startTick, timeline),
+          endSec: tickToSeconds(note.endTick, timeline),
+          midiNote: note.pitch,
+          velocity: note.velocity / 127,
+          velocityRaw: note.velocity,
+          trackId: note.trackId,
+          channel: note.channel
         }));
-        return { format, ticksPerQuarter, notes, durationSec, initialBpm, tempoMap };
+        notes.sort((a, b) => a.startSec - b.startSec || b.velocity - a.velocity);
+        const durationSec = tickToSeconds(timeline.songEndTick, timeline);
+        const tempoMap = timeline.tempoPoints.map((point) => ({
+          startBeat: point.tick / timeline.ppq,
+          startSec: tickToSeconds(point.tick, timeline),
+          bpm: Math.round(60000000 / point.usPerQuarter)
+        }));
+        return {
+          format: 1,
+          ticksPerQuarter: timeline.ppq,
+          notes,
+          durationSec,
+          initialBpm,
+          tempoMap,
+          timeline
+        };
       }
 
       function applyParsedMidiState(fileName, parsed, options = {}) {
@@ -988,13 +896,37 @@
         const resetLayoutFromSegments = options.resetLayoutFromSegments !== false;
         const persistMidiFile = options.persistMidiFile !== false;
         const statusName = typeof options.statusName === 'string' && options.statusName.trim() ? options.statusName.trim() : fileName;
+        const timeline = normalizeMidiTimeline(
+          parsed.timeline || {
+            ppq: parsed.ticksPerQuarter,
+            tempoPoints: Array.isArray(parsed.tempoMap)
+              ? parsed.tempoMap.map((row) => ({
+                  tick: Math.max(0, Math.floor(Number(row.startBeat) * Math.max(1, Number(parsed.ticksPerQuarter) || 480))),
+                  usPerQuarter: Math.round(60000000 / clampBpm(Number(row.bpm), parsed.initialBpm || 120))
+                }))
+              : [{ tick: 0, usPerQuarter: Math.round(60000000 / clampBpm(parsed.initialBpm, 120)) }],
+            notesByStart: Array.isArray(parsed.notes)
+              ? parsed.notes.map((note) => ({
+                  startTick: Math.max(0, Math.floor(Number(note.startTick) || 0)),
+                  endTick: Math.max(0, Math.floor(Number(note.endTick) || 0)),
+                  pitch: Math.max(0, Math.min(127, Math.floor(Number(note.midiNote) || 0))),
+                  velocity: Math.max(1, Math.min(127, Math.floor(Number(note.velocityRaw) || Number(note.velocity) * 127 || 100))),
+                  trackId: Math.max(0, Math.floor(Number(note.trackId) || 0)),
+                  channel: Math.max(0, Math.min(15, Math.floor(Number(note.channel) || 0)))
+                }))
+              : []
+          },
+          { fallbackBpm: parsed.initialBpm || 120, fallbackPpq: parsed.ticksPerQuarter || 480 }
+        );
+        const normalizedParsed = timelineToParsedMidi(timeline);
         midiPlayback.fileName = fileName || null;
-        midiPlayback.notes = Array.isArray(parsed.notes) ? parsed.notes : [];
-        midiPlayback.tempoMap = Array.isArray(parsed.tempoMap) ? parsed.tempoMap : [];
+        midiPlayback.timeline = timeline;
+        midiPlayback.notes = Array.isArray(normalizedParsed.notes) ? normalizedParsed.notes : [];
+        midiPlayback.tempoMap = Array.isArray(normalizedParsed.tempoMap) ? normalizedParsed.tempoMap : [];
         qualityModeSelect.value = 'balanced';
         midiPlayback.playbackNotes = buildPlaybackNotes(midiPlayback.notes);
-        midiPlayback.durationSec = Math.max(0, Number(parsed.durationSec) || 0);
-        midiPlayback.initialBpm = Number.isFinite(Number(parsed.initialBpm)) ? Number(parsed.initialBpm) : null;
+        midiPlayback.durationSec = Math.max(0, Number(normalizedParsed.durationSec) || 0);
+        midiPlayback.initialBpm = Number.isFinite(Number(normalizedParsed.initialBpm)) ? Number(normalizedParsed.initialBpm) : null;
         model.midi_file = persistMidiFile && fileName ? fileName : null;
         if (updateBaseName) {
           if (typeof options.baseName === 'string' && options.baseName.trim()) levelBaseNameInput.value = sanitizeBaseName(options.baseName);
@@ -1030,116 +962,54 @@
         if (!rawPayload || typeof rawPayload !== 'object') {
           throw new Error('Invalid DAW pattern payload');
         }
-        const rawSteps = Array.isArray(rawPayload.steps) ? rawPayload.steps : [];
-        const beats = clampNumber(Math.floor(Number(rawPayload.beats) || rawSteps.length || 32), 4, 128);
         const fallbackBpm = Number(runtimeBpmInput.value) || 120;
         const name = sanitizeBaseName(rawPayload.name || 'daw_pattern');
-        const steps = [];
-        for (let i = 0; i < beats; i++) {
-          const rawStep = Array.isArray(rawSteps[i]) ? rawSteps[i] : [];
-          const notes = [];
-          for (const candidate of rawStep) {
-            const midi = Math.floor(Number(candidate));
-            if (!Number.isFinite(midi) || midi < 0 || midi > 127) continue;
-            if (!notes.includes(midi)) notes.push(midi);
-          }
-          notes.sort((a, b) => a - b);
-          steps.push(notes);
+        if (rawPayload.timeline && typeof rawPayload.timeline === 'object') {
+          const timeline = normalizeMidiTimeline(rawPayload.timeline, { fallbackBpm, fallbackBeats: 32 });
+          return { name, timeline };
         }
 
+        // Legacy DAW payload fallback (quantized step grid).
+        const rawSteps = Array.isArray(rawPayload.steps) ? rawPayload.steps : [];
+        const beats = clampNumber(Math.floor(Number(rawPayload.beats) || rawSteps.length || 32), 4, 128);
         const rawTempoRows = Array.isArray(rawPayload.tempoMap)
           ? rawPayload.tempoMap
           : [{ startBeat: 0, bpm: clampBpm(Number(rawPayload.bpm), fallbackBpm) }];
-        const byStartBeat = new Map();
-        for (const row of rawTempoRows) {
-          if (!row || typeof row !== 'object') continue;
-          const startBeat = clampNumber(Math.round(Number(row.startBeat) || 0), 0, beats - 1);
-          const bpm = clampBpm(Number(row.bpm), fallbackBpm);
-          byStartBeat.set(startBeat, bpm);
-        }
-
-        let tempoMap = [...byStartBeat.entries()]
-          .map(([startBeat, bpm]) => ({ startBeat: Number(startBeat), bpm: Number(bpm) }))
-          .sort((a, b) => a.startBeat - b.startBeat);
-
-        if (tempoMap.length === 0 || tempoMap[0].startBeat !== 0) {
-          tempoMap.unshift({ startBeat: 0, bpm: clampBpm(Number(rawPayload.bpm), fallbackBpm) });
-        } else {
-          tempoMap[0].startBeat = 0;
-        }
-
-        const compactTempo = [];
-        for (const row of tempoMap) {
-          if (compactTempo.length > 0 && compactTempo[compactTempo.length - 1].bpm === row.bpm) continue;
-          compactTempo.push({ startBeat: row.startBeat, bpm: row.bpm });
-        }
-
-        const bpm = compactTempo[0]?.bpm || clampBpm(Number(rawPayload.bpm), fallbackBpm);
-        return { name, bpm, beats, steps, tempoMap: compactTempo };
-      }
-
-      function dawPatternToParsedMidi(pattern) {
-        const beats = clampNumber(Math.floor(Number(pattern.beats) || pattern.steps?.length || 1), 1, 512);
-        const fallbackBpm = Number(runtimeBpmInput.value) || 120;
-        const tempoMap = Array.isArray(pattern.tempoMap) && pattern.tempoMap.length > 0
-          ? pattern.tempoMap
-              .map((row) => ({
-                startBeat: clampNumber(Math.round(Number(row.startBeat) || 0), 0, beats - 1),
-                bpm: clampBpm(Number(row.bpm), fallbackBpm)
-              }))
-              .sort((a, b) => a.startBeat - b.startBeat)
-          : [{ startBeat: 0, bpm: clampBpm(Number(pattern.bpm), fallbackBpm) }];
-        if (tempoMap[0].startBeat !== 0) tempoMap.unshift({ startBeat: 0, bpm: tempoMap[0].bpm });
-        else tempoMap[0].startBeat = 0;
-
-        function bpmAtBeat(beatIndex) {
-          const beat = clampNumber(Math.floor(Number(beatIndex) || 0), 0, beats - 1);
-          let picked = tempoMap[0];
-          for (const row of tempoMap) {
-            if (Number(row.startBeat) > beat) break;
-            picked = row;
-          }
-          return clampBpm(Number(picked.bpm), fallbackBpm);
-        }
-
-        const beatStartSec = new Array(beats + 1);
-        let cursorSec = 0;
+        const normalizedTempoRows = normalizeTempoMap(rawTempoRows, fallbackBpm, beats);
+        const ppq = 480;
+        const notesByStart = [];
         for (let beat = 0; beat < beats; beat++) {
-          beatStartSec[beat] = cursorSec;
-          cursorSec += 60 / Math.max(1, bpmAtBeat(beat));
-        }
-        beatStartSec[beats] = cursorSec;
-
-        const notes = [];
-
-        for (let beat = 0; beat < beats; beat++) {
-          const step = Array.isArray(pattern.steps?.[beat]) ? pattern.steps[beat] : [];
-          for (const midi of step) {
-            const midiNote = Math.floor(Number(midi));
-            if (!Number.isFinite(midiNote) || midiNote < 0 || midiNote > 127) continue;
-            notes.push({
-              startSec: beatStartSec[beat],
-              endSec: beatStartSec[beat + 1],
-              midiNote,
-              velocity: 0.85
+          const rawStep = Array.isArray(rawSteps[beat]) ? rawSteps[beat] : [];
+          for (const candidate of rawStep) {
+            const midi = Math.floor(Number(candidate));
+            if (!Number.isFinite(midi) || midi < 0 || midi > 127) continue;
+            notesByStart.push({
+              startTick: beat * ppq,
+              endTick: beat * ppq + ppq,
+              pitch: midi,
+              velocity: 108,
+              trackId: 0,
+              channel: 0
             });
           }
         }
+        const timeline = normalizeMidiTimeline(
+          {
+            ppq,
+            songEndTick: beats * ppq,
+            tempoPoints: normalizedTempoRows.map((row) => ({
+              tick: row.startBeat * ppq,
+              usPerQuarter: Math.round(60000000 / row.bpm)
+            })),
+            notesByStart
+          },
+          { fallbackBpm, fallbackBeats: beats }
+        );
+        return { name, timeline };
+      }
 
-        notes.sort((a, b) => a.startSec - b.startSec || b.velocity - a.velocity);
-        const normalizedTempoMap = tempoMap.map((row) => ({
-          startBeat: Number(row.startBeat),
-          startSec: Number(beatStartSec[row.startBeat] || 0),
-          bpm: clampBpm(Number(row.bpm), fallbackBpm)
-        }));
-        const durationSec = Math.max(Number(beatStartSec[beats] || 0), 0.01);
-        const initialBpm = clampBpm(Number(normalizedTempoMap[0]?.bpm), fallbackBpm);
-        return {
-          notes,
-          durationSec,
-          initialBpm,
-          tempoMap: normalizedTempoMap
-        };
+      function dawPatternToParsedMidi(pattern) {
+        return timelineToParsedMidi(pattern.timeline);
       }
 
       function loadDawPatternFromStorage(options = {}) {
@@ -1166,7 +1036,8 @@
           baseName: pattern.name,
           statusName: `DAW ${pattern.name}`
         });
-        setLocalMidiStatus(`Loaded DAW pattern (${pattern.beats} beats)`);
+        const beats = Math.max(1, Math.ceil(pattern.timeline.songEndTick / Math.max(1, pattern.timeline.ppq)));
+        setLocalMidiStatus(`Loaded DAW pattern (${beats} beats)`);
         return pattern;
       }
 
@@ -1580,6 +1451,7 @@
 
         stopMidiPlayback();
         midiPlayback.fileName = null;
+        midiPlayback.timeline = null;
         midiPlayback.notes = [];
         midiPlayback.tempoMap = [];
         midiPlayback.playbackNotes = [];
@@ -1619,6 +1491,9 @@
         }
 
         const linkedMidiName = typeof nextModel.midi_file === 'string' ? nextModel.midi_file.trim() : '';
+        const embeddedTimeline = rawLevel?.midiPlayback && typeof rawLevel.midiPlayback === 'object'
+          ? normalizeMidiTimeline(rawLevel.midiPlayback, { fallbackBpm: Number(runtimeBpmInput.value) || 120, fallbackBeats: 32 })
+          : null;
         if (linkedMidiName) {
           try {
             await loadMidiFromProjectByName(linkedMidiName, {
@@ -1629,9 +1504,34 @@
             setLevelBaseNameFromLevelFile(sourceName);
             setLocalMidiStatus(`Auto-loaded from MIDI/: ${linkedMidiName}`);
           } catch {
+            if (embeddedTimeline && embeddedTimeline.notesByStart.length > 0) {
+              applyParsedMidiState('embedded_midi.mid', timelineToParsedMidi(embeddedTimeline), {
+                rebuildDraft: false,
+                updateRuntimeFromMidi: false,
+                updateBaseName: false,
+                persistMidiFile: false,
+                statusName: 'embedded midiPlayback'
+              });
+              setLocalMidiStatus('Loaded embedded midiPlayback');
+              render();
+              return;
+            }
             setMidiStatus(`linked MIDI file ${linkedMidiName} not found in MIDI/ (runtime uses saved notes)`);
             render();
           }
+          return;
+        }
+
+        if (embeddedTimeline && embeddedTimeline.notesByStart.length > 0) {
+          applyParsedMidiState('embedded_midi.mid', timelineToParsedMidi(embeddedTimeline), {
+            rebuildDraft: false,
+            updateRuntimeFromMidi: false,
+            updateBaseName: false,
+            persistMidiFile: false,
+            statusName: 'embedded midiPlayback'
+          });
+          setLocalMidiStatus('Loaded embedded midiPlayback');
+          render();
           return;
         }
 
@@ -1783,6 +1683,58 @@
         return result;
       }
 
+      function buildRuntimeMidiPlayback(gridColumns, notes, tempoMap, fallbackBpm) {
+        const x0 = GAME_PLAYER_START_X;
+        if (midiPlayback.timeline) {
+          const normalized = normalizeMidiTimeline(midiPlayback.timeline, { fallbackBpm, fallbackBeats: gridColumns });
+          const songBeats = normalized.songEndTick / Math.max(1, normalized.ppq);
+          const x1 = x0 + Math.max(1, songBeats * GAME_PLAYER_UNITS_PER_BEAT);
+          return {
+            ppq: normalized.ppq,
+            songEndTick: normalized.songEndTick,
+            tempoPoints: normalized.tempoPoints.map((row) => ({ tick: row.tick, usPerQuarter: row.usPerQuarter })),
+            notes: normalized.notesByStart.map((note) => ({
+              startTick: note.startTick,
+              endTick: note.endTick,
+              pitch: note.pitch,
+              velocity: note.velocity,
+              trackId: note.trackId,
+              channel: note.channel
+            })),
+            x0,
+            x1
+          };
+        }
+
+        const ppq = 480;
+        const normalizedTempoRows = normalizeTempoMap(tempoMap, fallbackBpm);
+        const x1 = x0 + Math.max(1, gridColumns * GAME_PLAYER_UNITS_PER_BEAT);
+        const tempoPoints = normalizedTempoRows.map((row) => ({
+          tick: Math.max(0, Math.floor(Number(row.startColumn) * ppq)),
+          usPerQuarter: Math.round(60000000 / clampBpm(Number(row.bpm), fallbackBpm))
+        }));
+        const intervalNotes = [];
+        for (let i = 0; i < gridColumns; i++) {
+          const startTick = i * ppq;
+          intervalNotes.push({
+            startTick,
+            endTick: startTick + ppq,
+            pitch: frequencyToMidi(notes[i]),
+            velocity: 100,
+            trackId: 0,
+            channel: 0
+          });
+        }
+        return {
+          ppq,
+          songEndTick: gridColumns * ppq,
+          tempoPoints,
+          notes: intervalNotes,
+          x0,
+          x1
+        };
+      }
+
       function buildRuntimeModel() {
         const fallbackBpm = clampBpm(Number(runtimeBpmInput.value) || 120);
         const generatedPlatforms = buildRuntimePlatforms();
@@ -1793,6 +1745,7 @@
         setRuntimeGridColumns(gridColumns);
         const notes = buildRuntimeNotes(gridColumns);
         const tempoMap = buildTempoMapFromSegments(gridColumns);
+        const midiPlaybackModel = buildRuntimeMidiPlayback(gridColumns, notes, tempoMap, fallbackBpm);
         const runtimeAudioQualityMode = ['performance', 'balanced', 'high'].includes(String(runtimeAudioQualityModeInput.value))
           ? String(runtimeAudioQualityModeInput.value)
           : 'balanced';
@@ -1836,6 +1789,7 @@
         const midiFile =
           typeof model.midi_file === 'string' && model.midi_file.trim() ? model.midi_file.trim() : undefined;
         return {
+          midiPlayback: midiPlaybackModel,
           tempoMap,
           audioQualityMode: runtimeAudioQualityMode,
           ...(Object.keys(runtimeAudioQualityFiltered).length > 0 ? { audioQuality: runtimeAudioQualityFiltered } : {}),

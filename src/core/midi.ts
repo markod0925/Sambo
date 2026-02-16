@@ -1,9 +1,47 @@
+export interface TempoPoint {
+  tick: number;
+  usPerQuarter: number;
+}
+
+export interface NoteInterval {
+  startTick: number;
+  endTick: number;
+  pitch: number;
+  velocity: number;
+  trackId: number;
+  channel: number;
+}
+
+export interface ParsedMidiTickModel {
+  ppq: number;
+  tempoPoints: TempoPoint[];
+  notesByStart: NoteInterval[];
+  notesByEnd: NoteInterval[];
+  songEndTick: number;
+}
+
+export interface RawTickModelLike {
+  ppq?: number;
+  tempoPoints?: Array<Partial<TempoPoint> | null | undefined>;
+  notesByStart?: Array<Partial<NoteInterval> | null | undefined>;
+  notesByEnd?: Array<Partial<NoteInterval> | null | undefined>;
+  notes?: Array<Partial<NoteInterval> | null | undefined>;
+  songEndTick?: number;
+}
+
+export interface NormalizeTickModelOptions {
+  fallbackBpm?: number;
+  fallbackPpq?: number;
+  fallbackSongEndTick?: number;
+}
+
 export interface MidiNoteEvent {
   startSec: number;
   endSec: number;
   midiNote: number;
   velocity: number;
   channel: number;
+  trackId: number;
 }
 
 export interface ParsedMidi {
@@ -11,6 +49,7 @@ export interface ParsedMidi {
   durationSec: number;
   initialBpm: number;
   tempoMap: Array<{ startBeat: number; bpm: number }>;
+  tickModel: ParsedMidiTickModel;
 }
 
 export interface GridMidiNoteEvent {
@@ -34,6 +73,20 @@ interface VarLenResult {
   size: number;
 }
 
+interface TempoSegment {
+  startTick: number;
+  endTick: number;
+  usPerQuarter: number;
+  secPerTick: number;
+  startSec: number;
+}
+
+const DEFAULT_US_PER_QUARTER = 500_000;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
 function readVarLen(view: DataView, offset: number): VarLenResult {
   let value = 0;
   let size = 0;
@@ -50,7 +103,178 @@ function midiToFrequency(midi: number): number {
   return 440 * Math.pow(2, (midi - 69) / 12);
 }
 
-export function parseMidiFile(arrayBuffer: ArrayBufferLike): ParsedMidi {
+function normalizeTempoPoints(rawTempo: TempoPoint[]): TempoPoint[] {
+  const withDefault = rawTempo.length > 0 ? rawTempo : [{ tick: 0, usPerQuarter: DEFAULT_US_PER_QUARTER }];
+  const sorted = [...withDefault]
+    .map((point) => ({
+      tick: Math.max(0, Math.floor(Number(point.tick) || 0)),
+      usPerQuarter: Math.max(1, Math.floor(Number(point.usPerQuarter) || DEFAULT_US_PER_QUARTER))
+    }))
+    .sort((a, b) => a.tick - b.tick);
+
+  const merged: TempoPoint[] = [];
+  for (const point of sorted) {
+    const previous = merged[merged.length - 1];
+    if (previous && previous.tick === point.tick) {
+      previous.usPerQuarter = point.usPerQuarter;
+    } else {
+      merged.push({ ...point });
+    }
+  }
+
+  if (merged.length === 0 || merged[0].tick !== 0) {
+    merged.unshift({ tick: 0, usPerQuarter: DEFAULT_US_PER_QUARTER });
+  }
+  return merged;
+}
+
+function buildTempoSegments(tempoPoints: TempoPoint[], ppq: number): TempoSegment[] {
+  const safePpq = Math.max(1, Math.floor(ppq));
+  const safeTempo = normalizeTempoPoints(tempoPoints);
+  const segments: TempoSegment[] = [];
+  let cursorSec = 0;
+
+  for (let i = 0; i < safeTempo.length; i++) {
+    const current = safeTempo[i];
+    const nextTick = i + 1 < safeTempo.length ? safeTempo[i + 1].tick : Number.POSITIVE_INFINITY;
+    const secPerTick = (current.usPerQuarter / 1_000_000) / safePpq;
+    segments.push({
+      startTick: current.tick,
+      endTick: nextTick,
+      usPerQuarter: current.usPerQuarter,
+      secPerTick,
+      startSec: cursorSec
+    });
+
+    if (Number.isFinite(nextTick)) {
+      cursorSec += Math.max(0, nextTick - current.tick) * secPerTick;
+    }
+  }
+
+  return segments;
+}
+
+function lowerBoundByTickGetter(items: NoteInterval[], tick: number, getTick: (note: NoteInterval) => number): number {
+  let lo = 0;
+  let hi = items.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (getTick(items[mid]) < tick) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+function upperBoundByTickGetter(items: NoteInterval[], tick: number, getTick: (note: NoteInterval) => number): number {
+  let lo = 0;
+  let hi = items.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (getTick(items[mid]) <= tick) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+export function lowerBoundByStartTick(notesByStart: NoteInterval[], tick: number): number {
+  return lowerBoundByTickGetter(notesByStart, tick, (note) => note.startTick);
+}
+
+export function upperBoundByStartTick(notesByStart: NoteInterval[], tick: number): number {
+  return upperBoundByTickGetter(notesByStart, tick, (note) => note.startTick);
+}
+
+export function lowerBoundByEndTick(notesByEnd: NoteInterval[], tick: number): number {
+  return lowerBoundByTickGetter(notesByEnd, tick, (note) => note.endTick);
+}
+
+export function upperBoundByEndTick(notesByEnd: NoteInterval[], tick: number): number {
+  return upperBoundByTickGetter(notesByEnd, tick, (note) => note.endTick);
+}
+
+export function normalizeMidiTickModel(
+  raw: RawTickModelLike | null | undefined,
+  options: NormalizeTickModelOptions = {}
+): ParsedMidiTickModel {
+  const fallbackBpm = clamp(Math.round(Number(options.fallbackBpm) || 120), 20, 300);
+  const fallbackUsPerQuarter = Math.round(60_000_000 / fallbackBpm);
+  const ppq = Math.max(1, Math.floor(Number(raw?.ppq) || Number(options.fallbackPpq) || 480));
+
+  const tempoRaw = Array.isArray(raw?.tempoPoints) ? raw.tempoPoints : [];
+  const tempoPoints = normalizeTempoPoints(
+    tempoRaw.length > 0
+      ? tempoRaw.map((point) => ({
+          tick: Math.max(0, Math.floor(Number(point?.tick) || 0)),
+          usPerQuarter: Math.max(1, Math.floor(Number(point?.usPerQuarter) || fallbackUsPerQuarter))
+        }))
+      : [{ tick: 0, usPerQuarter: fallbackUsPerQuarter }]
+  );
+
+  const notesSource =
+    Array.isArray(raw?.notesByStart) && raw.notesByStart.length > 0
+      ? raw.notesByStart
+      : Array.isArray(raw?.notes) && raw.notes.length > 0
+        ? raw.notes
+        : Array.isArray(raw?.notesByEnd)
+          ? raw.notesByEnd
+          : [];
+
+  const notes: NoteInterval[] = [];
+  for (const item of notesSource) {
+    const startTick = Math.max(0, Math.floor(Number(item?.startTick) || 0));
+    const endTick = Math.max(0, Math.floor(Number(item?.endTick) || 0));
+    if (endTick <= startTick) continue;
+    notes.push({
+      startTick,
+      endTick,
+      pitch: clamp(Math.floor(Number(item?.pitch) || 0), 0, 127),
+      velocity: clamp(Math.floor(Number(item?.velocity) || 100), 1, 127),
+      trackId: Math.max(0, Math.floor(Number(item?.trackId) || 0)),
+      channel: clamp(Math.floor(Number(item?.channel) || 0), 0, 15)
+    });
+  }
+
+  const notesByStart = [...notes].sort(
+    (a, b) =>
+      a.startTick - b.startTick ||
+      a.endTick - b.endTick ||
+      a.trackId - b.trackId ||
+      a.channel - b.channel ||
+      a.pitch - b.pitch
+  );
+
+  const notesByEnd = [...notes].sort(
+    (a, b) =>
+      a.endTick - b.endTick ||
+      a.startTick - b.startTick ||
+      a.trackId - b.trackId ||
+      a.channel - b.channel ||
+      a.pitch - b.pitch
+  );
+
+  let songEndTick = Math.max(
+    0,
+    Math.floor(
+      Number.isFinite(Number(raw?.songEndTick))
+        ? Number(raw?.songEndTick)
+        : Number.isFinite(Number(options.fallbackSongEndTick))
+          ? Number(options.fallbackSongEndTick)
+          : 0
+    )
+  );
+  for (const point of tempoPoints) songEndTick = Math.max(songEndTick, point.tick);
+  for (const note of notesByStart) songEndTick = Math.max(songEndTick, note.endTick);
+
+  return {
+    ppq,
+    tempoPoints,
+    notesByStart,
+    notesByEnd,
+    songEndTick
+  };
+}
+
+export function parseMidiToTickModel(arrayBuffer: ArrayBufferLike): ParsedMidiTickModel {
   const view = new DataView(arrayBuffer);
   let offset = 0;
 
@@ -62,19 +286,20 @@ export function parseMidiFile(arrayBuffer: ArrayBufferLike): ParsedMidi {
   }
 
   function readUint32(): number {
-    const v = view.getUint32(offset);
+    const value = view.getUint32(offset);
     offset += 4;
-    return v;
+    return value;
   }
 
   function readUint16(): number {
-    const v = view.getUint16(offset);
+    const value = view.getUint16(offset);
     offset += 2;
-    return v;
+    return value;
   }
 
   const chunkId = readAscii(4);
   if (chunkId !== 'MThd') throw new Error('Invalid MIDI header');
+
   const headerLength = readUint32();
   if (headerLength < 6) throw new Error('Incomplete MIDI header');
 
@@ -84,20 +309,24 @@ export function parseMidiFile(arrayBuffer: ArrayBufferLike): ParsedMidi {
   offset += Math.max(0, headerLength - 6);
 
   if ((division & 0x8000) !== 0) throw new Error('SMPTE time division is not supported');
-  const ticksPerQuarter = division;
-  if (ticksPerQuarter <= 0) throw new Error('Invalid ticks per quarter');
 
-  const tempoEvents = [{ tick: 0, usPerQuarter: 500000 }];
-  const noteStarts = new Map<string, { tick: number; velocity: number }>();
-  const notesWithTicks: Array<{ startTick: number; endTick: number; midiNote: number; velocity: number; channel: number }> = [];
+  const ppq = division;
+  if (ppq <= 0) throw new Error('Invalid ticks per quarter');
+
+  const tempoPointsRaw: TempoPoint[] = [{ tick: 0, usPerQuarter: DEFAULT_US_PER_QUARTER }];
+  const notesRaw: NoteInterval[] = [];
+  let songEndTick = 0;
 
   for (let trackIndex = 0; trackIndex < trackCount; trackIndex++) {
     const trackId = readAscii(4);
     if (trackId !== 'MTrk') throw new Error(`Invalid MIDI track chunk #${trackIndex}`);
+
     const trackLength = readUint32();
     const trackEnd = offset + trackLength;
     let tick = 0;
     let runningStatus = 0;
+
+    const openStacks = new Map<string, Array<{ startTick: number; velocity: number }>>();
 
     while (offset < trackEnd) {
       const delta = readVarLen(view, offset);
@@ -110,7 +339,8 @@ export function parseMidiFile(arrayBuffer: ArrayBufferLike): ParsedMidi {
         status = runningStatus;
       } else {
         offset += 1;
-        runningStatus = status;
+        if (status < 0xf0) runningStatus = status;
+        else runningStatus = 0;
       }
 
       if (status === 0xff) {
@@ -121,7 +351,7 @@ export function parseMidiFile(arrayBuffer: ArrayBufferLike): ParsedMidi {
         if (metaType === 0x51 && lenInfo.value === 3) {
           const usPerQuarter =
             (view.getUint8(offset) << 16) | (view.getUint8(offset + 1) << 8) | view.getUint8(offset + 2);
-          tempoEvents.push({ tick, usPerQuarter });
+          if (usPerQuarter > 0) tempoPointsRaw.push({ tick, usPerQuarter });
         }
         offset += lenInfo.value;
         continue;
@@ -145,76 +375,136 @@ export function parseMidiFile(arrayBuffer: ArrayBufferLike): ParsedMidi {
       const data2 = view.getUint8(offset);
       offset += 1;
 
-      if (eventType === 0x90 || eventType === 0x80) {
-        const isNoteOn = eventType === 0x90 && data2 > 0;
-        const key = `${channel}:${data1}`;
-        if (isNoteOn) {
-          noteStarts.set(key, { tick, velocity: data2 / 127 });
-        } else {
-          const start = noteStarts.get(key);
-          if (start && tick > start.tick) {
-            notesWithTicks.push({
-              startTick: start.tick,
-              endTick: tick,
-              midiNote: data1,
-              velocity: start.velocity,
-              channel
-            });
-          }
-          noteStarts.delete(key);
-        }
+      if (eventType !== 0x80 && eventType !== 0x90) {
+        continue;
+      }
+
+      const isNoteOn = eventType === 0x90 && data2 > 0;
+      const key = `${trackIndex}:${channel}:${data1}`;
+
+      if (isNoteOn) {
+        const stack = openStacks.get(key) ?? [];
+        stack.push({ startTick: tick, velocity: data2 });
+        openStacks.set(key, stack);
+      } else {
+        const stack = openStacks.get(key);
+        if (!stack || stack.length === 0) continue;
+        const start = stack.pop()!;
+        if (stack.length === 0) openStacks.delete(key);
+        if (tick <= start.startTick) continue;
+        notesRaw.push({
+          startTick: start.startTick,
+          endTick: tick,
+          pitch: data1,
+          velocity: start.velocity,
+          trackId: trackIndex,
+          channel
+        });
       }
     }
 
+    // Gracefully close unclosed NoteOn events at track end to avoid data loss.
+    for (const [key, stack] of openStacks.entries()) {
+      const parts = key.split(':');
+      const trackIdFromKey = Number(parts[0]);
+      const channelFromKey = Number(parts[1]);
+      const pitchFromKey = Number(parts[2]);
+      while (stack.length > 0) {
+        const start = stack.pop()!;
+        if (tick <= start.startTick) continue;
+        notesRaw.push({
+          startTick: start.startTick,
+          endTick: tick,
+          pitch: pitchFromKey,
+          velocity: start.velocity,
+          trackId: Number.isFinite(trackIdFromKey) ? trackIdFromKey : trackIndex,
+          channel: Number.isFinite(channelFromKey) ? channelFromKey : 0
+        });
+      }
+    }
+
+    songEndTick = Math.max(songEndTick, tick);
     offset = trackEnd;
   }
 
-  tempoEvents.sort((a, b) => a.tick - b.tick);
-  const mergedTempo: Array<{ tick: number; usPerQuarter: number }> = [];
-  for (const event of tempoEvents) {
-    const prev = mergedTempo[mergedTempo.length - 1];
-    if (!prev || prev.tick !== event.tick) mergedTempo.push({ ...event });
-    else prev.usPerQuarter = event.usPerQuarter;
+  for (const note of notesRaw) songEndTick = Math.max(songEndTick, note.endTick);
+  for (const tempo of tempoPointsRaw) songEndTick = Math.max(songEndTick, tempo.tick);
+
+  return normalizeMidiTickModel(
+    {
+      ppq,
+      tempoPoints: tempoPointsRaw,
+      notes: notesRaw,
+      songEndTick
+    },
+    { fallbackPpq: ppq, fallbackSongEndTick: songEndTick }
+  );
+}
+
+export function tickToSeconds(targetTick: number, tickModel: Pick<ParsedMidiTickModel, 'ppq' | 'tempoPoints'>): number {
+  const safeTick = Math.max(0, Number.isFinite(targetTick) ? targetTick : 0);
+  const tempoSegments = buildTempoSegments(tickModel.tempoPoints, tickModel.ppq);
+  if (tempoSegments.length === 0) return 0;
+
+  for (const segment of tempoSegments) {
+    if (safeTick < segment.endTick) {
+      return segment.startSec + (safeTick - segment.startTick) * segment.secPerTick;
+    }
   }
-  const tempoMap = mergedTempo.map((event) => ({
-    startBeat: event.tick / ticksPerQuarter,
-    bpm: Math.round(60000000 / event.usPerQuarter)
+
+  const tail = tempoSegments[tempoSegments.length - 1];
+  return tail.startSec + (safeTick - tail.startTick) * tail.secPerTick;
+}
+
+export function secondsToTick(targetSec: number, tickModel: Pick<ParsedMidiTickModel, 'ppq' | 'tempoPoints'>): number {
+  const safeSec = Math.max(0, Number.isFinite(targetSec) ? targetSec : 0);
+  const tempoSegments = buildTempoSegments(tickModel.tempoPoints, tickModel.ppq);
+  if (tempoSegments.length === 0) return 0;
+
+  for (let i = 0; i < tempoSegments.length; i++) {
+    const segment = tempoSegments[i];
+    const next = tempoSegments[i + 1];
+    const endSec = next ? next.startSec : Number.POSITIVE_INFINITY;
+    if (safeSec < endSec) {
+      const deltaTick = (safeSec - segment.startSec) / segment.secPerTick;
+      return Math.max(segment.startTick, Math.round(segment.startTick + deltaTick));
+    }
+  }
+
+  const tail = tempoSegments[tempoSegments.length - 1];
+  const deltaTick = (safeSec - tail.startSec) / tail.secPerTick;
+  return Math.max(tail.startTick, Math.round(tail.startTick + deltaTick));
+}
+
+export function parseMidiFile(arrayBuffer: ArrayBufferLike): ParsedMidi {
+  const tickModel = parseMidiToTickModel(arrayBuffer);
+  const notes: MidiNoteEvent[] = tickModel.notesByStart
+    .map((raw) => ({
+      startSec: tickToSeconds(raw.startTick, tickModel),
+      endSec: tickToSeconds(raw.endTick, tickModel),
+      midiNote: raw.pitch,
+      velocity: raw.velocity / 127,
+      channel: raw.channel,
+      trackId: raw.trackId
+    }))
+    .filter((note) => Number.isFinite(note.startSec) && Number.isFinite(note.endSec) && note.endSec > note.startSec)
+    .sort((a, b) => a.startSec - b.startSec || a.midiNote - b.midiNote || a.channel - b.channel || a.trackId - b.trackId);
+
+  const durationSec = tickToSeconds(tickModel.songEndTick, tickModel);
+  const firstTempo = tickModel.tempoPoints[0]?.usPerQuarter ?? DEFAULT_US_PER_QUARTER;
+  const initialBpm = Math.round(60_000_000 / firstTempo);
+  const tempoMap = tickModel.tempoPoints.map((point) => ({
+    startBeat: point.tick / tickModel.ppq,
+    bpm: Math.round(60_000_000 / point.usPerQuarter)
   }));
 
-  function tickToSeconds(targetTick: number): number {
-    let sec = 0;
-    let prevTick = 0;
-    let tempoIndex = 0;
-    let currentUsPerQuarter = mergedTempo[0].usPerQuarter;
-
-    while (tempoIndex + 1 < mergedTempo.length && mergedTempo[tempoIndex + 1].tick <= targetTick) {
-      const next = mergedTempo[tempoIndex + 1];
-      const deltaTicks = next.tick - prevTick;
-      sec += (deltaTicks * currentUsPerQuarter) / (ticksPerQuarter * 1_000_000);
-      prevTick = next.tick;
-      currentUsPerQuarter = next.usPerQuarter;
-      tempoIndex += 1;
-    }
-
-    const remaining = targetTick - prevTick;
-    sec += (remaining * currentUsPerQuarter) / (ticksPerQuarter * 1_000_000);
-    return sec;
-  }
-
-  const notes: MidiNoteEvent[] = notesWithTicks
-    .map((raw) => ({
-      startSec: tickToSeconds(raw.startTick),
-      endSec: tickToSeconds(raw.endTick),
-      midiNote: raw.midiNote,
-      velocity: raw.velocity,
-      channel: raw.channel
-    }))
-    .filter((n) => Number.isFinite(n.startSec) && Number.isFinite(n.endSec) && n.endSec > n.startSec)
-    .sort((a, b) => a.startSec - b.startSec);
-
-  const durationSec = notes.reduce((maxSec, n) => Math.max(maxSec, n.endSec), 0);
-  const initialBpm = Math.round(60000000 / mergedTempo[0].usPerQuarter);
-  return { notes, durationSec, initialBpm, tempoMap };
+  return {
+    notes,
+    durationSec,
+    initialBpm,
+    tempoMap,
+    tickModel
+  };
 }
 
 export function buildGridNotesFromMidi(parsed: ParsedMidi, gridColumns: number): number[] {
