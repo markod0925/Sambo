@@ -3,6 +3,17 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { Metronome } from '../dist/src/core/metronome.js';
 import { updateIntensity, defaultIntensityConfig } from '../dist/src/core/intensity.js';
+import {
+  HARMONIC_BAND_COUNT,
+  HARMONIC_INTENSITY_SMOOTH_TAU_SECONDS,
+  HARMONIC_PC_SMOOTH_TAU_SECONDS,
+  clearPitchClassBins,
+  clampUnit,
+  computeExponentialSmoothingAlpha,
+  fillPitchClassBinsFromPitchCounts,
+  smoothPitchClassBinsInPlace,
+  smoothScalarExponential
+} from '../dist/src/core/harmonicBands.js';
 import { BeatSnapMover } from '../dist/src/core/beatMovement.js';
 import {
   getTempoAtColumn,
@@ -17,7 +28,9 @@ import {
   buildGridMidiMapFromMidi,
   lowerBoundByEndTick,
   lowerBoundByStartTick,
-  parseMidiToTickModel
+  parseMidiToTickModel,
+  upperBoundByEndTick,
+  upperBoundByStartTick
 } from '../dist/src/core/midi.js';
 import {
   buildGridEventKey,
@@ -63,6 +76,53 @@ test('intensity increases, decays and clamps at floor', () => {
 
   const back = updateIntensity(0.8, 'backward', 1, 1, defaultIntensityConfig);
   assert.equal(back, 0.5);
+});
+
+test('harmonic helpers clamp and smooth deterministically', () => {
+  assert.equal(HARMONIC_BAND_COUNT, 12);
+  assert.equal(clampUnit(-1), 0);
+  assert.equal(clampUnit(2), 1);
+  assert.equal(clampUnit(0.4), 0.4);
+
+  const alphaZero = computeExponentialSmoothingAlpha(0, HARMONIC_PC_SMOOTH_TAU_SECONDS);
+  assert.equal(alphaZero, 0);
+  const alphaPositive = computeExponentialSmoothingAlpha(0.016, HARMONIC_PC_SMOOTH_TAU_SECONDS);
+  assert.ok(alphaPositive > 0 && alphaPositive < 1);
+
+  const smoothed = smoothScalarExponential(0.2, 0.8, 0.016, HARMONIC_INTENSITY_SMOOTH_TAU_SECONDS);
+  assert.ok(smoothed > 0.2 && smoothed < 0.8);
+});
+
+test('harmonic pitch-class bins normalize by max bin and keep silence stable', () => {
+  const bins = new Float32Array(HARMONIC_BAND_COUNT);
+  fillPitchClassBinsFromPitchCounts(new Map(), bins);
+  assert.deepEqual(Array.from(bins), new Array(HARMONIC_BAND_COUNT).fill(0));
+
+  const counts = new Map([
+    [60, 2],
+    [72, 1],
+    [61, 1]
+  ]);
+  fillPitchClassBinsFromPitchCounts(counts, bins);
+  assert.equal(bins[0], 1);
+  assert.ok(Math.abs(bins[1] - 1 / 3) < 1e-6);
+  for (let i = 2; i < HARMONIC_BAND_COUNT; i++) assert.equal(bins[i], 0);
+});
+
+test('harmonic smoothing moves toward target bins without allocations', () => {
+  const current = new Float32Array(HARMONIC_BAND_COUNT);
+  const target = new Float32Array(HARMONIC_BAND_COUNT);
+  target[3] = 1;
+  target[9] = 0.5;
+
+  smoothPitchClassBinsInPlace(current, target, 0.05, HARMONIC_PC_SMOOTH_TAU_SECONDS);
+  assert.ok(current[3] > 0 && current[3] < 1);
+  assert.ok(current[9] > 0 && current[9] < 0.5);
+
+  clearPitchClassBins(target);
+  smoothPitchClassBinsInPlace(current, target, 0.05, HARMONIC_PC_SMOOTH_TAU_SECONDS);
+  assert.ok(current[3] < 1);
+  assert.ok(current[9] < 0.5);
 });
 
 test('beat snapped mover arrives exactly on subdivision', () => {
@@ -522,4 +582,24 @@ test('tick range lower bounds support forward and reverse scrub slices', () => {
   const rStart = lowerBoundByEndTick(notesByEnd, 120);
   const rEnd = lowerBoundByEndTick(notesByEnd, 300);
   assert.deepEqual(notesByEnd.slice(rStart, rEnd).map((note) => note.endTick), [120, 240]);
+});
+
+test('tick range upper bounds include reverse boundary crossings at integer ticks', () => {
+  const notesByStart = [
+    { startTick: 80, endTick: 100, pitch: 60, velocity: 100, trackId: 0, channel: 0 },
+    { startTick: 100, endTick: 140, pitch: 64, velocity: 100, trackId: 0, channel: 0 },
+    { startTick: 140, endTick: 180, pitch: 67, velocity: 100, trackId: 0, channel: 0 }
+  ];
+  const notesByEnd = [...notesByStart].sort((a, b) => a.endTick - b.endTick);
+
+  const prevTick = 100.1;
+  const nowTick = 99.9;
+
+  const reverseEndFrom = upperBoundByEndTick(notesByEnd, nowTick);
+  const reverseEndTo = upperBoundByEndTick(notesByEnd, prevTick);
+  assert.deepEqual(notesByEnd.slice(reverseEndFrom, reverseEndTo).map((note) => note.endTick), [100]);
+
+  const reverseStartFrom = upperBoundByStartTick(notesByStart, nowTick);
+  const reverseStartTo = upperBoundByStartTick(notesByStart, prevTick);
+  assert.deepEqual(notesByStart.slice(reverseStartFrom, reverseStartTo).map((note) => note.startTick), [100]);
 });

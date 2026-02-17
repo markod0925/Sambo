@@ -586,8 +586,19 @@ Procedural variation occurs **within authored constraints**.
 * Gameplay camera follows the player with **2.0x zoom** and a 20% stronger upward follow offset (`y = -57.6`, previously `-48`).
 * Runtime blockout scale tuning:
   * player body: `12x19`
+  * player heart marker: `3x3` blue square on torso (`#3A86FF`), pulse-synced to current BPM
   * patrol enemy body: `15x12`
   * flying enemy body: `15x10`
+* Player jump body-language:
+  * player stretches vertically during jump arcs, with intensity driven by absolute vertical velocity (`|vy|`)
+  * apex naturally returns near neutral scale (low `|vy|`)
+  * spring-platform jumps produce stronger stretch due to higher launch speed
+  * stretch cap is intentionally stronger (`PLAYER_JUMP_STRETCH_MAX = 0.34`) for a more elastic read
+  * landing triggers a more pronounced damped "jelly" wobble (short squash/stretch oscillation) based on impact speed
+  * enemy stomp also triggers a lighter/shorter jelly pop so combat contact reads as physical impact
+* Player directional torso cue:
+  * heart flips horizontally and shifts side with movement direction
+  * forward -> left side, backward -> right side
 * Dark atmospheric base palette:
   * Background: `#05070f` / `#0b0f1a`
   * Main text: `#d7e2ff`
@@ -596,6 +607,28 @@ Procedural variation occurs **within authored constraints**.
   * In-game HUD/menus: **monospace**
   * Web shell (`index.html`): system sans + framed game canvas
 * The moon remains the primary diegetic visual anchor and pulses on beat changes.
+
+### Harmonic Background Layer (RFC-001, Implemented)
+
+* Gameplay and preview now render a world-anchored custom WebGL harmonic background (`SinglePipeline`) behind world geometry.
+* The harmonic layer is static in world space (it is not screen/camera-anchored).
+* The shader draws 12 horizontal pitch-class bands (`C..B`) driven by tick-based MIDI note activity, not by audio node state.
+* Harmonic bands now use a sharper ribbon profile (crisp core + controlled halo) with composite wave curvature for a more articulated visual rhythm.
+* Ribbon weaving was tuned up with much denser multi-wave interlacing to produce frequent crossings and a less diffuse read.
+* Band chroma was increased with luma-preserving saturation so harmonic colors are clearer without violating background brightness safety.
+* Band energy is deterministic under forward and reverse scrub:
+  * incremental tick window updates for small deltas
+  * full rebuild when scrub delta exceeds the configured threshold
+* Runtime uniforms:
+  * `uPC[12]`: normalized pitch-class bins (`Float32Array(12)`, no per-frame allocation)
+  * `uIntensity`: movement-driven intensity (smoothed)
+  * `uBeatPhase`: metronome beat phase
+  * `uTime`, `uResolution`
+* Smoothing policy:
+  * pitch-class bins use exponential smoothing (`tau = 0.20s`)
+  * intensity uses exponential smoothing (`tau = 0.12s`)
+* Fallback policy:
+  * if WebGL pipeline support is unavailable, runtime keeps the existing static background color path without errors.
 
 ### Start Screen (Implemented)
 
@@ -611,6 +644,7 @@ Procedural variation occurs **within authored constraints**.
 ### Gameplay Overlay & States (Implemented)
 
 * Darkness overlay alpha is driven by intensity with a non-zero visibility floor.
+* Darkness overlay baseline was rebalanced to coexist with the harmonic shader layer while preserving foreground readability.
 * Directional movement no longer applies extra darkness/visibility penalties at equal intensity; alpha floors are intensity-driven and stable between `step=idle` and `step=moving`.
 * World actors (platforms, enemies, and player) are alpha-clamped by intensity using the same baseline rule in all movement directions.
 * Moon core/halo keep a guaranteed minimum alpha (moon >= 0.30, halo >= 0.12) to preserve diegetic guidance at very low intensity.
@@ -620,6 +654,7 @@ Procedural variation occurs **within authored constraints**.
   * timer (top-center, screen-anchored)
   * kill score with cumulative time discount display (`kills (-Xs)`, one decimal)
   * debug overlay alpha telemetry for level/world clamp, player, moon core, moon halo, and darkness overlay alpha
+  * debug overlay harmonic telemetry row (top 3 pitch classes + smoothed harmonic intensity)
   * all HUD labels/panels remain screen-anchored under camera zoom (zoom-compensated position + scale)
 * Implemented state overlays:
   * pause menu (`ESC`)
@@ -669,6 +704,7 @@ Procedural variation occurs **within authored constraints**.
   * forward motion warms to gold
   * backward motion cools to cyan
   * core + halo pulse scale remains subtle and BPM-synced
+  * vertical anchor is raised by `20px` from the previous tuning while keeping partial halo visibility at the lowest gameplay camera extent
 * Enemy palette now uses dedicated crimson tones (`#A4161A`, `#660708`, `#9D0208`, `#FF4D6D`) and no cyan/gold reuse.
 * HUD and overlays remain monospace with the established runtime text color (`#D7E2FF`), keeping readability at low intensity.
 
@@ -938,9 +974,12 @@ Implemented rules:
   - incremental forward/reverse updates for small deltas
   - rebuild path for large jumps/teleports
   - per-voice overlap counting on `track:channel:pitch` keys to prevent stuck notes.
+  - reverse scrub windows now evaluate event ticks with strict bounds (`nowTick < eventTick <= prevTick`) to avoid missing boundary `NoteOff` updates during rewind.
+  - when player motion becomes idle right after backward scrub, runtime performs an immediate voice panic and marks scrub as paused; the next movement frame rebuilds from current tick to avoid persistent rewind-held drones.
 - Runtime playhead mapping now auto-calibrates to player movement speed (beats traversed by continuous forward movement) so playback tempo in-game matches authoring tempo without manual `x1` tuning.
 - Sustained notes are no longer force-killed when the player becomes idle in MIDI mode; active notes can ring out and release on their natural `NoteOff` path instead of global idle panic.
 - Runtime debug overlay now exposes playback speed diagnostics (`expected beats/s`, `actual beats/s`, `% error`) with `F10` show/hide toggle for live calibration checks.
+- Runtime debug overlay now exposes harmonic diagnostics (`top pitch classes`, smoothed harmonic intensity) for live background-shader verification.
 - Parser/normalizer alignment is now shared across all three systems:
   - game runtime (`GameScene`)
   - level editor (`editor.html`)

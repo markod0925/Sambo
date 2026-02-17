@@ -262,6 +262,23 @@ Static utility platform with jump-boost identity.
 
 ---
 
+## 5.10 Player
+
+Player readability must remain high during movement arcs.
+
+* Body base blockout: `12x19`, fill `#E8E6E3`
+* Jump deformation: vertical stretch driven by absolute vertical speed (`|vy|`)
+* At jump apex (`|vy|` near `0`), body returns close to neutral scale
+* Spring-boost jumps must visibly stretch more than normal jumps because launch speed is higher
+* Apply subtle horizontal squeeze while stretching vertically to preserve mass readability
+* Landing deformation: moderately pronounced damped "jelly" oscillation, scaled by landing impact speed and kept short/readable
+* Combat deformation: stomping an enemy triggers a reduced jelly pop variant (shorter and less intense than landing)
+* Torso marker: `3x3` square heart in `#3A86FF`
+* Heart pulse timing must follow current BPM (metronome beat phase), not a fixed animation timer
+* Direction cue: torso marker flips horizontally and swaps side with movement direction (`forward=left`, `backward=right`)
+
+---
+
 # 6. Enemy Visual Identity
 
 Enemies must be readable even at low intensity.
@@ -304,6 +321,7 @@ Scale pulse: 2–4%
 Glow pulse: synced exactly to BPM
 Never distort or shake.
 Horizontal anchoring: moon stop position is one platform slot (2 grid cells) to the right of the authored level-end platform extent.
+Vertical anchoring: moon center is raised by `20px` from the previous tuning while keeping halo partially visible when camera reaches the lowest gameplay view.
 Moon core and halo keep a guaranteed minimum alpha for readability in very low-intensity states (moon >= 0.30, halo >= 0.12).
 When darkness overlay enters high-opacity range, moon and halo use additional intensity compensation (alpha lift + color brightening toward white) to preserve legibility.
 
@@ -316,6 +334,41 @@ Intensity drives:
 * Moon glow radius
 * Ambient vignette alpha
 * Platform edge brightness
+* Harmonic background band brightness and thickness
+
+## 8.1 Harmonic Background Layer (RFC-001)
+
+The gameplay and preview background includes a world-anchored harmonic shader layer.
+
+Layering:
+
+* Harmonic background renders behind world geometry.
+* Harmonic background is static in world space (not camera/screen anchored).
+* Darkness overlay remains active above world and harmonic background.
+* Foreground readability (platform edges, enemies, player) has priority over background energy.
+
+Color policy:
+
+* Core background anchors: `#05070F`, `#0B1020`, `#111A2E`.
+* Harmonic bands use the fixed 12-color pitch-class table from `GDD/RFC-001.md` Annex A.
+* Current tuning applies a luma-preserving saturation boost so per-band chroma separation is more readable.
+* No hue cycling outside that table.
+* No high-saturation spikes.
+
+Motion policy:
+
+* Band animation is subtle and beat-linked (`uBeatPhase`) with slow time oscillation (`uTime`).
+* Band rendering should prefer articulated ribbon lines: defined luminous core with a thin soft trail (not only diffuse fog bands).
+* Curvature can be composite (multi-sine) to create arcing, interweaving movement, while avoiding hard jitter.
+* Current tuning favors heavy interweaving: high-frequency secondary filaments and amplified cross-skew between wave components for frequent ribbon crossings.
+* Pitch-class bins and intensity are smoothed on JS side to prevent jitter (`tauPC = 0.20s`, `tauIntensity = 0.12s`).
+* No hard flashes, high-frequency flicker, or per-pixel noise.
+
+Safety limits:
+
+* At `uIntensity = 0`, output must stay near dark background values.
+* Per-band additive contribution is capped (`<= 0.25` before final clamp).
+* Shader output is opaque (`alpha = 1.0`) and background-only.
 
 Never drop below:
 
@@ -327,6 +380,7 @@ Darkness overlay should:
 
 * Multiply blend
 * Never reach full opacity
+* Use a slightly lighter baseline than the pre-harmonic implementation so the new background remains visible without reducing gameplay readability
 * Preserve silhouette outlines
 * Apply an intensity-driven world alpha clamp to gameplay actors (platforms, enemies, player) so level readability drops coherently with low intensity.
 * Keep alpha baseline direction-agnostic at equal intensity (`idle` and `moving` must not diverge because of direction-only penalties).
@@ -360,11 +414,13 @@ Debug overlay (runtime):
 
 * Top-right, screen-anchored, right-aligned monospace block.
 * Color: dim pale blue (`#9DB6DE`) to avoid competing with primary HUD labels.
-* Six compact rows:
+* Compact multi-row telemetry block:
   * audio mode, selected MIDI channel count, and de-click mode (`normal`/`strict`)
   * tempo status (current/target/rate/zone)
+  * playback speed diagnostics (`expected beats/s`, `actual beats/s`, `% error`)
   * scheduler status (queue size, predictive queue size, lateness avg/max, underrun count)
   * current grid column, movement direction, step state, note event counts (`on/off`), and active voice count
+  * harmonic telemetry (`top 3 pitch classes` + smoothed harmonic intensity)
   * alpha telemetry row (`level`, `player`, `moon`, `halo`, `dark`) with 2-decimal precision
 * Audio de-click debug mode can be toggled at runtime with `F9`.
 * Overlay must remain readable but secondary; no glow or animation.

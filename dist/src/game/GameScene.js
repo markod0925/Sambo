@@ -1,14 +1,16 @@
 import { BeatSnapMover } from '../core/beatMovement.js';
 import { Metronome } from '../core/metronome.js';
-import { lowerBoundByEndTick, lowerBoundByStartTick, normalizeMidiTickModel, parseMidiToTickModel, tickToSeconds } from '../core/midi.js';
+import { normalizeMidiTickModel, parseMidiToTickModel, tickToSeconds, upperBoundByEndTick, upperBoundByStartTick } from '../core/midi.js';
 import { getBeatPlatformState, getCrossOffsetSteps, getElevatorOffsetSteps, getShuttleOffsetSteps, isAlternateBeatPlatformSolid } from '../core/platforms.js';
 import { defaultIntensityConfig } from '../core/intensity.js';
+import { HARMONIC_BAND_COUNT, HARMONIC_INTENSITY_SMOOTH_TAU_SECONDS, HARMONIC_PC_SMOOTH_TAU_SECONDS, clearPitchClassBins, fillPitchClassBinsFromPitchCounts, smoothPitchClassBinsInPlace, smoothScalarExponential } from '../core/harmonicBands.js';
 import { resolveAudioQualitySettings } from '../core/audioQuality.js';
 import { DEFAULT_TEMPO_SMOOTHING_BPM_PER_SECOND, DEFAULT_REFERENCE_BPM, getTempoAtColumn, normalizeTempoMap, scaleIntervalByTempo, scaleSpeedByTempo, stepTempoToward } from '../core/tempo.js';
 import { buildGridEventKey, computeLatenessMs, computeScheduledAtSec, deriveForwardSpeedSignal, isAudioUnderrun, planForwardGridEvents } from '../core/predictivePlayback.js';
 import { getLevelByOneBasedIndex, LEVELS } from '../data/levels.js';
 import { resolveIntent } from '../core/input.js';
 import { applyDamage, resolveEnemyCollision, updateFlyingEnemy, updatePatrolEnemy } from '../core/enemies.js';
+import { HARMONIC_BANDS_PIPELINE_KEY, HarmonicBandsPipeline } from './render/HarmonicBandsPipeline.js';
 const BEST_TIME_STORAGE_PREFIX = 'sambo.level';
 const ENEMY_TIME_BONUS_MS = 200;
 const BASE_PATROL_SPEED = 45;
@@ -20,6 +22,9 @@ const PLAYER_SNAP_STEP_X = 16 * PLAYER_SPEED_MULTIPLIER;
 const WORLD_GRID_STEP = 32;
 const PLAYER_WIDTH = 12;
 const PLAYER_HEIGHT = 19;
+const PLAYER_HEART_SIZE = 3;
+const PLAYER_HEART_OFFSET_X = -2;
+const PLAYER_HEART_OFFSET_Y = -2;
 const PATROL_ENEMY_WIDTH = 15;
 const PATROL_ENEMY_HEIGHT = 12;
 const FLYING_ENEMY_WIDTH = 15;
@@ -34,12 +39,25 @@ const AUDIO_EVENT_KEY_TTL_MS = 2400;
 const BASE_JUMP_VELOCITY = -560;
 const SPRING_JUMP_HEIGHT_MULTIPLIER = 2;
 const SPRING_JUMP_VELOCITY = BASE_JUMP_VELOCITY * Math.sqrt(SPRING_JUMP_HEIGHT_MULTIPLIER);
+const PLAYER_JUMP_STRETCH_MAX_SPEED = Math.abs(SPRING_JUMP_VELOCITY) * 1.05;
+const PLAYER_JUMP_STRETCH_MAX = 0.34;
+const PLAYER_JUMP_SQUEEZE_COUPLING = 0.7;
+const PLAYER_LANDING_JELLY_MIN_IMPACT_SPEED = 160;
+const PLAYER_LANDING_JELLY_MAX_IMPACT_SPEED = 760;
+const PLAYER_LANDING_JELLY_MAX = 0.4;
+const PLAYER_STOMP_JELLY_MIN = 0.10;
+const PLAYER_STOMP_JELLY_MAX = 0.20;
+const PLAYER_LANDING_JELLY_FREQUENCY_HZ = 8.2;
+const PLAYER_LANDING_JELLY_DAMPING = 7.8;
 const CONTROL_HINT_TEXT = 'A/D or Arrows: move | W/Space/Up: jump.';
+const HARMONIC_PITCH_CLASS_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const HUD_FONT = 'monospace';
+const DEPTH_BACKGROUND = 1;
 const DEPTH_ENVIRONMENT = 2;
 const DEPTH_ENEMY = 3;
 const DEPTH_PLAYER = 4;
 const DEPTH_MOON = 5;
+const MOON_BASE_Y = 184;
 const COLORS = {
     deepBackground: 0x05070f,
     midBackground: 0x0b0f1a,
@@ -47,6 +65,7 @@ const COLORS = {
     segmentFill: 0x2a3244,
     segmentBorder: 0x3a4663,
     player: 0xe8e6e3,
+    playerHeart: 0x3a86ff,
     hudText: '#d7e2ff',
     hudHearts: '#ff6b6b',
     beatSolidFill: 0xf4d35e,
@@ -81,6 +100,7 @@ export class GameScene extends Phaser.Scene {
     metronome;
     mover;
     player;
+    playerHeart;
     moon;
     moonHalo;
     infoText;
@@ -88,6 +108,9 @@ export class GameScene extends Phaser.Scene {
     scoreText;
     livesText;
     timerText;
+    harmonicBackground = null;
+    harmonicPipeline = null;
+    harmonicResizeHandler = null;
     beatPlatforms = [];
     alternateBeatPlatforms = [];
     ghostPlatforms = [];
@@ -119,6 +142,9 @@ export class GameScene extends Phaser.Scene {
     nextFlyingSpawnMs = 0;
     intensity = 1.0;
     currentDirection = 'idle';
+    playerHeartFacing = 'forward';
+    playerLandingJellyAmplitude = 0;
+    playerLandingJellyPhase = 0;
     ghostPlatformLatchedSolid = false;
     reverseGhostPlatformLatchedSolid = true;
     cursors;
@@ -182,6 +208,13 @@ export class GameScene extends Phaser.Scene {
     tickPerUnit = 1;
     scrubThresholdTick = 240;
     scrubWasPaused = false;
+    lastMidiScrubDirection = 'idle';
+    harmonicPitchCounts = new Map();
+    harmonicRawPitchClasses = new Float32Array(HARMONIC_BAND_COUNT);
+    harmonicSmoothPitchClasses = new Float32Array(HARMONIC_BAND_COUNT);
+    harmonicTrackerTick = 0;
+    harmonicTrackerInitialized = false;
+    harmonicIntensitySmoothed = 1;
     midiSelectedChannelCount = 0;
     activeVoices = new Map();
     masterGain = null;
@@ -209,9 +242,10 @@ export class GameScene extends Phaser.Scene {
     debugPlaybackSpeedErrorPct = 0;
     debugLevelAlpha = 1;
     debugPlayerAlpha = 1;
+    playerHeartBaseAlpha = 1;
     debugMoonAlpha = 1;
     debugMoonHaloAlpha = 1;
-    debugDarknessAlpha = 0.82;
+    debugDarknessAlpha = 0.76;
     forwardHoldMs = 0;
     avgForwardStepDurationMs = 0;
     queuedGridAudioEvents = [];
@@ -312,11 +346,16 @@ export class GameScene extends Phaser.Scene {
         this.syncCrossPlatforms(initialNow);
         this.playerY = this.getInitialPlayerYFromPlatforms();
         this.player = this.add.rectangle(150, this.playerY, PLAYER_WIDTH, PLAYER_HEIGHT, COLORS.player, 1).setDepth(DEPTH_PLAYER);
+        this.playerHeart = this.add
+            .rectangle(this.player.x, this.player.y, PLAYER_HEART_SIZE, PLAYER_HEART_SIZE, COLORS.playerHeart, 1)
+            .setDepth(DEPTH_PLAYER + 0.1);
+        this.updatePlayerVisual(initialNow, 0);
         this.cameras.main.setZoom(PLAYER_CAMERA_ZOOM);
         this.cameras.main.startFollow(this.player, false, 0.12, 0.12, 0, PLAYER_CAMERA_FOLLOW_OFFSET_Y);
+        this.setupHarmonicBackground();
         this.initializeGridBounds();
-        this.moonHalo = this.add.circle(this.moonMaxWorldX, 90, 72, COLORS.moonLow, 0.12).setDepth(DEPTH_MOON - 1);
-        this.moon = this.add.circle(this.moonMaxWorldX, 90, 42, COLORS.moonLow, 0.32).setDepth(DEPTH_MOON);
+        this.moonHalo = this.add.circle(this.moonMaxWorldX, MOON_BASE_Y, 72, COLORS.moonLow, 0.12).setDepth(DEPTH_MOON - 1);
+        this.moon = this.add.circle(this.moonMaxWorldX, MOON_BASE_Y, 42, COLORS.moonLow, 0.32).setDepth(DEPTH_MOON);
         this.buildSegmentEnemyPlans();
         this.spawnPatrolEnemiesFromLevel();
         this.livesText = this.add.text(20, 14, '', {
@@ -380,8 +419,8 @@ export class GameScene extends Phaser.Scene {
         this.createGameOverUI();
         this.createPauseUI();
         this.startAudioScheduler();
-        this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.stopAudioScheduler());
-        this.events.once(Phaser.Scenes.Events.DESTROY, () => this.stopAudioScheduler());
+        this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.handleSceneShutdown());
+        this.events.once(Phaser.Scenes.Events.DESTROY, () => this.handleSceneShutdown());
     }
     update(_time, delta) {
         if (Phaser.Input.Keyboard.JustDown(this.keys.F9)) {
@@ -447,6 +486,11 @@ export class GameScene extends Phaser.Scene {
             this.currentDirection = this.mover.currentStep.direction;
         else
             this.currentDirection = 'idle';
+        const tickNow = this.midiTickModel ? this.getTickFromWorldX(this.player.x) : 0;
+        if (this.midiTickModel)
+            this.updateHarmonicTracker(tickNow);
+        else
+            this.clearHarmonicTracker();
         if (intent.direction === 'forward')
             this.forwardHoldMs += delta;
         else
@@ -548,8 +592,13 @@ export class GameScene extends Phaser.Scene {
         }
         const previousPlayerY = this.playerY;
         this.verticalVelocity += 1400 * deltaSeconds;
+        const preCollisionVerticalVelocity = this.verticalVelocity;
         this.playerY += this.verticalVelocity * deltaSeconds;
         this.resolveVerticalCollisions(previousPlayerY, beatSolid, alternateBeatSolid, ghostSolid, reverseGhostSolid, true);
+        const groundedAfterPhysics = this.isPlayerGrounded(beatSolid, alternateBeatSolid, ghostSolid, reverseGhostSolid, true);
+        if (!groundedBeforeJump && groundedAfterPhysics && preCollisionVerticalVelocity > PLAYER_LANDING_JELLY_MIN_IMPACT_SPEED) {
+            this.triggerPlayerLandingJelly(preCollisionVerticalVelocity);
+        }
         if (this.playerY > 620) {
             this.triggerGameOver();
             return;
@@ -561,6 +610,8 @@ export class GameScene extends Phaser.Scene {
         this.handleMoonCollision();
         this.updateIntensityFromMovement(deltaSeconds, movedX);
         this.applyBrightnessFromIntensity();
+        this.updateHarmonicBackground(now, deltaSeconds);
+        this.updatePlayerVisual(now, deltaSeconds);
         this.updateMoonVisual(deltaSeconds);
         this.applyBeatPlatformVisual(beatState, now);
         this.applyAlternateBeatPlatformVisual(alternateBeatSolid);
@@ -593,6 +644,167 @@ export class GameScene extends Phaser.Scene {
         this.applyWorldVisibilityClamp();
         this.infoText.setText(CONTROL_HINT_TEXT);
         this.updateDebugOverlay();
+    }
+    handleSceneShutdown() {
+        this.stopAudioScheduler();
+        this.teardownHarmonicBackground();
+    }
+    setupHarmonicBackground() {
+        this.teardownHarmonicBackground();
+        const renderer = this.game.renderer;
+        const pipelineManager = renderer?.pipelines;
+        if (!renderer || renderer.type !== Phaser.WEBGL || !pipelineManager)
+            return;
+        if (!pipelineManager.has(HARMONIC_BANDS_PIPELINE_KEY)) {
+            pipelineManager.add(HARMONIC_BANDS_PIPELINE_KEY, new HarmonicBandsPipeline(this.game));
+        }
+        const pipeline = pipelineManager.get(HARMONIC_BANDS_PIPELINE_KEY);
+        if (!pipeline)
+            return;
+        this.harmonicPipeline = pipeline;
+        const width = Math.max(1, this.worldWidth);
+        const height = Math.max(1, Number(this.cameras.main?.height) || Number(this.scale.height) || 540);
+        this.harmonicBackground = this.add.image(width * 0.5, height * 0.5, '__WHITE').setDepth(DEPTH_BACKGROUND).setOrigin(0.5);
+        this.harmonicBackground.setDisplaySize(width, height);
+        this.harmonicBackground.setTint(0xffffff);
+        this.harmonicBackground.setAlpha(1);
+        this.harmonicBackground.setPipeline(HARMONIC_BANDS_PIPELINE_KEY);
+        this.harmonicPipeline.setResolution(Math.max(1, Number(this.scale.width) || 960), Math.max(1, Number(this.scale.height) || 540));
+        this.harmonicPipeline.setTime(0);
+        this.harmonicPipeline.setBeatPhase(0);
+        this.harmonicPipeline.setIntensity(this.harmonicIntensitySmoothed);
+        this.harmonicPipeline.setPitchClasses(this.harmonicSmoothPitchClasses);
+        this.harmonicResizeHandler = (gameSize) => this.onHarmonicBackgroundResize(gameSize);
+        this.scale.on('resize', this.harmonicResizeHandler);
+    }
+    teardownHarmonicBackground() {
+        if (this.harmonicResizeHandler) {
+            this.scale.off('resize', this.harmonicResizeHandler);
+            this.harmonicResizeHandler = null;
+        }
+        if (this.harmonicBackground) {
+            this.harmonicBackground.destroy();
+            this.harmonicBackground = null;
+        }
+        this.harmonicPipeline = null;
+    }
+    onHarmonicBackgroundResize(gameSize) {
+        if (!this.harmonicBackground)
+            return;
+        const width = Math.max(1, this.worldWidth);
+        const height = Math.max(1, Number(this.cameras.main?.height) || Number(this.scale.height) || 540);
+        this.harmonicBackground.setPosition(width * 0.5, height * 0.5);
+        if (typeof this.harmonicBackground.setDisplaySize === 'function') {
+            this.harmonicBackground.setDisplaySize(width, height);
+        }
+        this.harmonicPipeline?.setResolution(Math.max(1, Number(gameSize?.width) || Number(this.scale.width) || 960), Math.max(1, Number(gameSize?.height) || Number(this.scale.height) || 540));
+    }
+    resetHarmonicState() {
+        this.clearHarmonicTracker();
+        clearPitchClassBins(this.harmonicRawPitchClasses);
+        clearPitchClassBins(this.harmonicSmoothPitchClasses);
+        this.harmonicIntensitySmoothed = this.intensity;
+        this.harmonicPipeline?.setPitchClasses(this.harmonicSmoothPitchClasses);
+        this.harmonicPipeline?.setIntensity(this.harmonicIntensitySmoothed);
+    }
+    clearHarmonicTracker() {
+        if (this.harmonicPitchCounts.size > 0)
+            this.harmonicPitchCounts.clear();
+        this.harmonicTrackerTick = 0;
+        this.harmonicTrackerInitialized = false;
+    }
+    addHarmonicPitch(pitch) {
+        const safePitch = Math.floor(pitch);
+        const next = (this.harmonicPitchCounts.get(safePitch) ?? 0) + 1;
+        this.harmonicPitchCounts.set(safePitch, next);
+    }
+    removeHarmonicPitch(pitch) {
+        const safePitch = Math.floor(pitch);
+        const count = this.harmonicPitchCounts.get(safePitch) ?? 0;
+        if (count <= 1) {
+            this.harmonicPitchCounts.delete(safePitch);
+            return;
+        }
+        this.harmonicPitchCounts.set(safePitch, count - 1);
+    }
+    rebuildHarmonicTrackerAtTick(tickNow) {
+        if (!this.midiTickModel)
+            return;
+        this.harmonicPitchCounts.clear();
+        const safeTick = Phaser.Math.Clamp(Math.floor(tickNow), 0, this.midiTickModel.songEndTick);
+        for (const note of this.midiTickModel.notesByStart) {
+            if (note.startTick > safeTick)
+                break;
+            if (note.endTick <= safeTick)
+                continue;
+            this.addHarmonicPitch(note.pitch);
+        }
+    }
+    applyHarmonicForward(prevTick, nowTick) {
+        if (!this.midiTickModel)
+            return;
+        const notesByStart = this.midiTickModel.notesByStart;
+        const notesByEnd = this.midiTickModel.notesByEnd;
+        const startFrom = upperBoundByStartTick(notesByStart, prevTick);
+        const startTo = upperBoundByStartTick(notesByStart, nowTick);
+        const endFrom = upperBoundByEndTick(notesByEnd, prevTick);
+        const endTo = upperBoundByEndTick(notesByEnd, nowTick);
+        for (let i = startFrom; i < startTo; i++)
+            this.addHarmonicPitch(notesByStart[i].pitch);
+        for (let i = endFrom; i < endTo; i++)
+            this.removeHarmonicPitch(notesByEnd[i].pitch);
+    }
+    applyHarmonicReverse(prevTick, nowTick) {
+        if (!this.midiTickModel)
+            return;
+        const notesByStart = this.midiTickModel.notesByStart;
+        const notesByEnd = this.midiTickModel.notesByEnd;
+        const endFrom = upperBoundByEndTick(notesByEnd, nowTick);
+        const endTo = upperBoundByEndTick(notesByEnd, prevTick);
+        const startFrom = upperBoundByStartTick(notesByStart, nowTick);
+        const startTo = upperBoundByStartTick(notesByStart, prevTick);
+        for (let i = endFrom; i < endTo; i++)
+            this.addHarmonicPitch(notesByEnd[i].pitch);
+        for (let i = startFrom; i < startTo; i++)
+            this.removeHarmonicPitch(notesByStart[i].pitch);
+    }
+    updateHarmonicTracker(tickNow) {
+        if (!this.midiTickModel) {
+            this.clearHarmonicTracker();
+            return;
+        }
+        const safeTick = Phaser.Math.Clamp(tickNow, 0, this.midiTickModel.songEndTick);
+        if (!this.harmonicTrackerInitialized) {
+            this.rebuildHarmonicTrackerAtTick(safeTick);
+            this.harmonicTrackerTick = safeTick;
+            this.harmonicTrackerInitialized = true;
+            return;
+        }
+        const deltaTick = safeTick - this.harmonicTrackerTick;
+        if (Math.abs(deltaTick) < 0.001)
+            return;
+        if (Math.abs(deltaTick) > this.scrubThresholdTick) {
+            this.rebuildHarmonicTrackerAtTick(safeTick);
+            this.harmonicTrackerTick = safeTick;
+            return;
+        }
+        if (deltaTick > 0)
+            this.applyHarmonicForward(this.harmonicTrackerTick, safeTick);
+        else
+            this.applyHarmonicReverse(this.harmonicTrackerTick, safeTick);
+        this.harmonicTrackerTick = safeTick;
+    }
+    updateHarmonicBackground(nowMs, deltaSeconds) {
+        if (!this.harmonicPipeline)
+            return;
+        const safeDeltaSeconds = Number.isFinite(deltaSeconds) ? Math.max(0, deltaSeconds) : 0;
+        fillPitchClassBinsFromPitchCounts(this.harmonicPitchCounts, this.harmonicRawPitchClasses);
+        smoothPitchClassBinsInPlace(this.harmonicSmoothPitchClasses, this.harmonicRawPitchClasses, safeDeltaSeconds, HARMONIC_PC_SMOOTH_TAU_SECONDS);
+        this.harmonicIntensitySmoothed = smoothScalarExponential(this.harmonicIntensitySmoothed, this.intensity, safeDeltaSeconds, HARMONIC_INTENSITY_SMOOTH_TAU_SECONDS);
+        this.harmonicPipeline.setTime(nowMs / 1000);
+        this.harmonicPipeline.setBeatPhase(this.metronome.beatProgressAt(nowMs));
+        this.harmonicPipeline.setIntensity(this.harmonicIntensitySmoothed);
+        this.harmonicPipeline.setPitchClasses(this.harmonicSmoothPitchClasses);
     }
     resolveSpawnSafeX(x, minX, maxX) {
         const safeLeft = this.playerStartX - this.minEnemySpawnDistanceFromPlayerStart;
@@ -762,6 +974,7 @@ export class GameScene extends Phaser.Scene {
                 else {
                     enemy.sprite.destroy();
                 }
+                this.triggerPlayerStompJelly(this.verticalVelocity);
                 this.verticalVelocity = -420;
                 continue;
             }
@@ -833,8 +1046,45 @@ export class GameScene extends Phaser.Scene {
             `Scheduler: q=${this.queuedGridAudioEvents.length} predQ=${this.predictionKeys.size} late=${this.audioLatenessAvgMs.toFixed(1)}ms max=${this.audioLatenessMaxMs.toFixed(1)}ms underrun=${this.audioUnderrunCount}`,
             `Grid: col=${this.debugLastGridColumn} dir=${this.debugLastDirection} step=${stepState} tick=${Math.round(this.playheadTick)}`,
             `Events: on=${this.debugLastOnCount} off=${this.debugLastOffCount} voices=${voices}`,
+            this.getHarmonicDebugSummary(),
             `Alpha: level=${this.debugLevelAlpha.toFixed(2)} player=${this.debugPlayerAlpha.toFixed(2)} moon=${this.debugMoonAlpha.toFixed(2)} halo=${this.debugMoonHaloAlpha.toFixed(2)} dark=${this.debugDarknessAlpha.toFixed(2)}`
         ].join('\n'));
+    }
+    getHarmonicDebugSummary() {
+        let topAIndex = -1;
+        let topBIndex = -1;
+        let topCIndex = -1;
+        let topAValue = 0;
+        let topBValue = 0;
+        let topCValue = 0;
+        for (let i = 0; i < HARMONIC_BAND_COUNT; i++) {
+            const value = this.harmonicSmoothPitchClasses[i];
+            if (value > topAValue) {
+                topCValue = topBValue;
+                topCIndex = topBIndex;
+                topBValue = topAValue;
+                topBIndex = topAIndex;
+                topAValue = value;
+                topAIndex = i;
+            }
+            else if (value > topBValue) {
+                topCValue = topBValue;
+                topCIndex = topBIndex;
+                topBValue = value;
+                topBIndex = i;
+            }
+            else if (value > topCValue) {
+                topCValue = value;
+                topCIndex = i;
+            }
+        }
+        if (topAValue < 0.01 || topAIndex < 0) {
+            return `Harmonic: silence | intensity=${this.harmonicIntensitySmoothed.toFixed(2)}`;
+        }
+        const first = `${HARMONIC_PITCH_CLASS_NAMES[topAIndex]}=${topAValue.toFixed(2)}`;
+        const second = topBIndex >= 0 && topBValue >= 0.01 ? ` ${HARMONIC_PITCH_CLASS_NAMES[topBIndex]}=${topBValue.toFixed(2)}` : '';
+        const third = topCIndex >= 0 && topCValue >= 0.01 ? ` ${HARMONIC_PITCH_CLASS_NAMES[topCIndex]}=${topCValue.toFixed(2)}` : '';
+        return `Harmonic: ${first}${second}${third} | intensity=${this.harmonicIntensitySmoothed.toFixed(2)}`;
     }
     updatePlaybackSpeedDebugMetrics(deltaSeconds, movedX) {
         if (!this.midiTickModel || deltaSeconds <= 0) {
@@ -1277,10 +1527,10 @@ export class GameScene extends Phaser.Scene {
             return { onCount: 0, offCount: 0 };
         const notesByStart = this.midiTickModel.notesByStart;
         const notesByEnd = this.midiTickModel.notesByEnd;
-        const startFrom = lowerBoundByStartTick(notesByStart, Math.floor(prevTick) + 1);
-        const startTo = lowerBoundByStartTick(notesByStart, Math.floor(nowTick) + 1);
-        const endFrom = lowerBoundByEndTick(notesByEnd, Math.floor(prevTick) + 1);
-        const endTo = lowerBoundByEndTick(notesByEnd, Math.floor(nowTick) + 1);
+        const startFrom = upperBoundByStartTick(notesByStart, prevTick);
+        const startTo = upperBoundByStartTick(notesByStart, nowTick);
+        const endFrom = upperBoundByEndTick(notesByEnd, prevTick);
+        const endTo = upperBoundByEndTick(notesByEnd, nowTick);
         let onCount = 0;
         let offCount = 0;
         for (let i = startFrom; i < startTo; i++) {
@@ -1298,10 +1548,10 @@ export class GameScene extends Phaser.Scene {
             return { onCount: 0, offCount: 0 };
         const notesByStart = this.midiTickModel.notesByStart;
         const notesByEnd = this.midiTickModel.notesByEnd;
-        const endFrom = lowerBoundByEndTick(notesByEnd, Math.floor(nowTick));
-        const endTo = lowerBoundByEndTick(notesByEnd, Math.floor(prevTick));
-        const startFrom = lowerBoundByStartTick(notesByStart, Math.floor(nowTick));
-        const startTo = lowerBoundByStartTick(notesByStart, Math.floor(prevTick));
+        const endFrom = upperBoundByEndTick(notesByEnd, nowTick);
+        const endTo = upperBoundByEndTick(notesByEnd, prevTick);
+        const startFrom = upperBoundByStartTick(notesByStart, nowTick);
+        const startTo = upperBoundByStartTick(notesByStart, prevTick);
         let onCount = 0;
         let offCount = 0;
         for (let i = endFrom; i < endTo; i++) {
@@ -1321,10 +1571,17 @@ export class GameScene extends Phaser.Scene {
         this.playheadTick = tickNow;
         const isMovementIdle = this.currentDirection === 'idle' && !this.mover.currentStep;
         if (isMovementIdle) {
-            this.scrubWasPaused = false;
+            if (this.lastMidiScrubDirection === 'backward') {
+                this.panicAllNotesOff();
+                this.scrubWasPaused = true;
+            }
+            else {
+                this.scrubWasPaused = false;
+            }
             this.previousPlayheadTick = tickNow;
             this.debugLastOnCount = 0;
             this.debugLastOffCount = 0;
+            this.lastMidiScrubDirection = 'idle';
             return;
         }
         if (this.scrubWasPaused) {
@@ -1336,12 +1593,14 @@ export class GameScene extends Phaser.Scene {
             this.scrubWasPaused = false;
             this.previousPlayheadTick = tickNow;
             this.debugAudioMode = 'midi';
+            this.lastMidiScrubDirection = this.currentDirection;
             return;
         }
         const deltaTick = tickNow - this.previousPlayheadTick;
         if (Math.abs(deltaTick) < 0.001) {
             this.debugLastOnCount = 0;
             this.debugLastOffCount = 0;
+            this.lastMidiScrubDirection = this.currentDirection;
             return;
         }
         const prevTick = this.previousPlayheadTick;
@@ -1361,6 +1620,7 @@ export class GameScene extends Phaser.Scene {
         if (stats.onCount > 0 || stats.offCount > 0)
             this.lastMusicEventAtMs = performance.now();
         this.debugAudioMode = 'midi';
+        this.lastMidiScrubDirection = deltaTick > 0 ? 'forward' : 'backward';
     }
     updateIntensityFromMovement(deltaSeconds, movedX) {
         const stepRatio = Math.abs(movedX) / this.mover.stepSize;
@@ -1516,7 +1776,7 @@ export class GameScene extends Phaser.Scene {
     }
     applyBrightnessFromIntensity() {
         const visibility = this.getIntensityVisibility();
-        const darknessAlpha = Phaser.Math.Clamp(0.84 - visibility * 0.64, 0, 0.95);
+        const darknessAlpha = Phaser.Math.Clamp(0.76 - visibility * 0.54, 0, 0.95);
         this.darknessOverlay.setAlpha(darknessAlpha);
         this.debugDarknessAlpha = darknessAlpha;
     }
@@ -1570,6 +1830,58 @@ export class GameScene extends Phaser.Scene {
             enemy.sprite.setAlpha(0.24 + worldVisibility * 0.71);
         }
         this.player.setAlpha(characterVisibility);
+        this.playerHeart.setAlpha(this.playerHeartBaseAlpha * characterVisibility);
+    }
+    triggerPlayerLandingJelly(impactSpeed) {
+        const clampedImpact = Phaser.Math.Clamp(impactSpeed, PLAYER_LANDING_JELLY_MIN_IMPACT_SPEED, PLAYER_LANDING_JELLY_MAX_IMPACT_SPEED);
+        const normalizedImpact = (clampedImpact - PLAYER_LANDING_JELLY_MIN_IMPACT_SPEED) /
+            Math.max(1, PLAYER_LANDING_JELLY_MAX_IMPACT_SPEED - PLAYER_LANDING_JELLY_MIN_IMPACT_SPEED);
+        const amplitude = Phaser.Math.Clamp(normalizedImpact * PLAYER_LANDING_JELLY_MAX, 0, PLAYER_LANDING_JELLY_MAX);
+        this.playerLandingJellyAmplitude = Math.max(this.playerLandingJellyAmplitude, amplitude);
+        this.playerLandingJellyPhase = 0;
+    }
+    triggerPlayerStompJelly(impactSpeed) {
+        const clampedImpact = Phaser.Math.Clamp(Math.abs(impactSpeed), PLAYER_LANDING_JELLY_MIN_IMPACT_SPEED, PLAYER_LANDING_JELLY_MAX_IMPACT_SPEED);
+        const normalizedImpact = (clampedImpact - PLAYER_LANDING_JELLY_MIN_IMPACT_SPEED) /
+            Math.max(1, PLAYER_LANDING_JELLY_MAX_IMPACT_SPEED - PLAYER_LANDING_JELLY_MIN_IMPACT_SPEED);
+        const amplitude = Phaser.Math.Linear(PLAYER_STOMP_JELLY_MIN, PLAYER_STOMP_JELLY_MAX, normalizedImpact);
+        this.playerLandingJellyAmplitude = Math.max(this.playerLandingJellyAmplitude, amplitude);
+        this.playerLandingJellyPhase = 0;
+    }
+    updatePlayerVisual(nowMs, deltaSeconds) {
+        const verticalSpeed = Math.abs(this.verticalVelocity);
+        const stretchAmount = Phaser.Math.Clamp(verticalSpeed / PLAYER_JUMP_STRETCH_MAX_SPEED, 0, 1) * PLAYER_JUMP_STRETCH_MAX;
+        const jumpScaleY = 1 + stretchAmount;
+        const jumpScaleX = 1 / (1 + stretchAmount * PLAYER_JUMP_SQUEEZE_COUPLING);
+        const safeDeltaSeconds = Number.isFinite(deltaSeconds) ? Math.max(0, deltaSeconds) : 0;
+        let jellyScaleX = 1;
+        let jellyScaleY = 1;
+        if (this.playerLandingJellyAmplitude > 0.001 && safeDeltaSeconds > 0) {
+            this.playerLandingJellyPhase += safeDeltaSeconds * PLAYER_LANDING_JELLY_FREQUENCY_HZ * Math.PI * 2;
+            const wave = Math.cos(this.playerLandingJellyPhase);
+            jellyScaleX = 1 + this.playerLandingJellyAmplitude * 0.75 * wave;
+            jellyScaleY = 1 - this.playerLandingJellyAmplitude * wave;
+            this.playerLandingJellyAmplitude *= Math.exp(-PLAYER_LANDING_JELLY_DAMPING * safeDeltaSeconds);
+            if (this.playerLandingJellyAmplitude < 0.001)
+                this.playerLandingJellyAmplitude = 0;
+        }
+        const scaleX = jumpScaleX * jellyScaleX;
+        const scaleY = jumpScaleY * jellyScaleY;
+        this.player.setScale(scaleX, scaleY);
+        if (this.currentDirection === 'forward')
+            this.playerHeartFacing = 'forward';
+        else if (this.currentDirection === 'backward')
+            this.playerHeartFacing = 'backward';
+        const heartSide = this.playerHeartFacing === 'forward' ? -1 : 1;
+        const beatPhase = this.metronome.beatProgressAt(nowMs);
+        const pulse = Math.exp(-beatPhase * 9);
+        const heartScale = 1 + pulse * 0.38;
+        this.playerHeart.setScale(heartScale * heartSide, heartScale);
+        this.playerHeart.x = this.player.x + Math.abs(PLAYER_HEART_OFFSET_X) * heartSide * scaleX;
+        this.playerHeart.y = this.player.y + PLAYER_HEART_OFFSET_Y * scaleY;
+        this.playerHeartBaseAlpha = Phaser.Math.Clamp(0.62 + pulse * 0.38, 0, 1);
+        this.playerHeart.setAlpha(this.playerHeartBaseAlpha);
+        this.playerHeart.setFillStyle(COLORS.playerHeart, this.playerHeartBaseAlpha);
     }
     brightenColor(color, amount) {
         const clamped = Phaser.Math.Clamp(amount, 0, 1);
@@ -1587,7 +1899,7 @@ export class GameScene extends Phaser.Scene {
         this.moon.x = moonX;
         this.moonHalo.x = moonX;
         this.moonBeatPulse = Math.max(0, this.moonBeatPulse - deltaSeconds * 5.5);
-        const moonY = 90;
+        const moonY = MOON_BASE_Y;
         this.moon.y = moonY;
         this.moonHalo.y = moonY;
         const moonColor = this.currentDirection === 'forward'
@@ -1951,6 +2263,7 @@ export class GameScene extends Phaser.Scene {
         this.playheadTick = 0;
         this.previousPlayheadTick = 0;
         this.scrubWasPaused = false;
+        this.lastMidiScrubDirection = 'idle';
         this.scrubThresholdTick = this.midiTickModel ? Math.max(1, Math.floor(this.midiTickModel.ppq / 2)) : 240;
         this.tempoSmoothingBpmPerSecond = Math.max(1, Number(this.currentLevel.tempoSmoothingBpmPerSecond) || DEFAULT_TEMPO_SMOOTHING_BPM_PER_SECOND);
         this.audioQuality = resolveAudioQualitySettings(this.currentLevel.audioQualityMode, this.currentLevel.audioQuality);
@@ -1997,7 +2310,11 @@ export class GameScene extends Phaser.Scene {
         this.crossPlatforms = [];
         this.springPlatforms = [];
         this.intensity = 1.0;
+        this.resetHarmonicState();
         this.currentDirection = 'idle';
+        this.playerHeartFacing = 'forward';
+        this.playerLandingJellyAmplitude = 0;
+        this.playerLandingJellyPhase = 0;
         this.ghostPlatformLatchedSolid = false;
         this.reverseGhostPlatformLatchedSolid = true;
         this.gridColumns = this.resolveGridColumnsFromLevel();
@@ -2028,7 +2345,7 @@ export class GameScene extends Phaser.Scene {
         this.debugPlayerAlpha = 1;
         this.debugMoonAlpha = 1;
         this.debugMoonHaloAlpha = 1;
-        this.debugDarknessAlpha = 0.82;
+        this.debugDarknessAlpha = 0.76;
         this.forwardHoldMs = 0;
         this.avgForwardStepDurationMs = 0;
         this.queuedGridAudioEvents = [];
