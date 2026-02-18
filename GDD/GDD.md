@@ -66,6 +66,15 @@ Reduced visibility increases uncertainty, not punishment.
 * The active BPM is selected by the current map zone (grid column range).
 * BPM transitions are applied on beat subdivisions to avoid phase jumps.
 * After boundary activation, BPM moves toward the zone target using configurable smoothing (`tempoSmoothingBpmPerSecond`) to reduce audio glitches.
+* Start-screen difficulty applies a global BPM multiplier after zone selection:
+  * `Easy`: `0.85x`
+  * `Normal`: `1.00x`
+  * `Hard`: `1.50x`
+  * tempo-map shape and per-zone proportions are preserved; only absolute playback speed changes.
+  * difficulty also configures lives + fall outcome:
+    * `Easy`: `10` lives, falling below bounds respawns the player on the nearest `segment` platform
+    * `Normal`: `5` lives, falling below bounds respawns the player on the nearest `segment` platform and removes `1` life
+    * `Hard`: `5` lives, falling below bounds causes immediate death (`game over`)
 * The beat is authoritative for:
 
   * musical note triggering
@@ -80,38 +89,47 @@ Reduced visibility increases uncertainty, not punishment.
 Notes are triggered by spatial progression (grid cells), but the beat is time-based.
 Free movement speed would desynchronize music from the lunar pulse.
 
-### Solution: **Snap-to-Beat Movement**
+### Solution: **Continuous Movement with Light Beat Assist**
 
-Player movement is **quantized and magnetized to the beat grid**.
+Player movement is continuous while input is held, with tempo-scaled inertia and bounded rhythmic assistance.
 
 **Rules:**
 
-* Player input requests movement to the next grid cell.
-* The character:
+* Holding directional input sets a target movement direction (`forward` or `backward`).
+* Horizontal velocity evolves continuously:
 
-  * starts moving immediately
-  * completes the step **on beat-aligned timing** based on runtime tuning
-    (current prototype tuning: **1 grid step every 4 subdivisions = 1 beat**)
-* Small speed corrections are applied invisibly.
-* Runtime movement snap on X is finer than authoring grid (`19.2px` traversal snap over `32px` logical tempo/grid columns; +20% faster than the previous `16px` step).
+  * acceleration toward target speed while input is held
+  * friction-based deceleration toward zero while idle
+  * stronger braking when reversing direction
+* A light assist nudges position toward the nearest grid center only when both conditions are true:
+
+  * player is within the grid proximity window
+  * current time is within the subdivision proximity window
+* Legacy grid notes are triggered when the player crosses logical grid columns, not on queued step arrivals.
+* Jump stack supports one grounded/coyote jump plus one extra air jump (double jump).
+* While airborne, lateral movement gains a `+20%` speed boost when the player is actively holding left or right input.
+* Dash is triggered by fast double tap on left/right (within `240ms`), applies a short fixed burst, and uses a `3s` cooldown.
 
 ### BPM-Proportional Traversal and Enemy Motion
 
-Traversal speed is derived from the **active zone BPM** so authored MIDI timing and gameplay pressure stay coherent across tempo changes.
+Traversal speed and inertia are derived from the **active zone BPM** so authored MIDI timing and gameplay pressure stay coherent across tempo changes.
 
 ```text
 reference_bpm = 120
 current_bpm = tempoMap[column]
 tempo_scale = current_bpm / reference_bpm
 
-player_step_duration = beat_interval / subdivision
-player_speed = grid_cell_size / player_step_duration
+max_speed_px_per_sec = traversal_distance_per_beat * (current_bpm / 60)
+accel_px_per_sec2 = base_accel * tempo_scale
+friction_px_per_sec2 = base_friction * tempo_scale
+if reversing_input: accel_px_per_sec2 *= reverse_brake_multiplier
 ```
 
 Consequences:
 
 * Tempo can accelerate/decelerate within the same level.
-* Step arrival remains subdivision-locked, so note triggers stay rhythmically correct.
+* Continuous movement remains musically coherent through tempo-scaled inertia.
+* Grid note timing stays stable via per-column crossing events and light beat/grid assistance.
 * Movement and enemy pressure evolve with zone tempo rather than a single global BPM.
 
 Enemy pacing follows the same tempo scale:
@@ -125,11 +143,19 @@ This keeps pressure and readability coherent with the musical tempo of each zone
 
 Current prototype runtime tuning (Feb 2026):
 
-* player movement cadence: 1 step/beat (`4` subdivisions per step)
-* player horizontal step distance: `19.2px` (+20% traversal speed vs `16px` at the same cadence)
+* traversal distance baseline: `35.2px` per beat equivalent
+* logical tempo/grid column width: `32px`
+* dash tuning: `620px/s` for `150ms`, cooldown `3000ms`, tap window `240ms`
+* acceleration: `640 px/s² * tempo_scale`
+* friction: `980 px/s² * tempo_scale`
+* reverse braking multiplier: `1.4`
+* beat assist grid window: `2.75px`
+* beat assist subdivision window: `24ms`
+* max beat assist correction speed: `26 px/s`
 * patrol enemy base speed: `45`
 * flying enemy base horizontal speed: `90`
 * flying enemy base homing rate: `45`
+* falling rock base vertical speed: `120`
 
 Tempo transition smoothing:
 
@@ -147,17 +173,18 @@ Runtime mix architecture:
 * metronome applies subtle short ducking on the music bus to keep pulse readability
 
 ```text
-Input → movement queued
-→ interpolation begins
-→ arrival snaps to beat
+Input hold
+→ velocity integrates with accel/friction
+→ light beat/grid assist (bounded)
+→ grid column crossings detected
 → note triggers in sync
 ```
 
 **Design Result:**
 
 * Music is always rhythmically correct
-* Player does not need rhythm-game precision
-* Level design can assume beat-aligned traversal
+* Player movement stays expressive and continuous
+* Level design keeps tempo-driven readability and pressure
 
 ---
 
@@ -250,17 +277,17 @@ The runtime parses the MIDI file and builds a grid-aligned event map:
 
 ### Forward Movement (Normal Playback)
 
-* On each arrived grid column, process:
+* On each crossed grid column, process:
   * note-off events first
   * then note-on events
 * Runtime predicts upcoming forward columns using current movement speed:
   * `cellsPerSecond = 1000 / stepDurationMs`
   * `lookaheadSteps = clamp(round(cellsPerSecond * 0.5), 1, 3)`
-  * if no active forward step is available, prediction falls back to recent average forward step duration
+  * if current velocity is unstable/low, prediction falls back to recent average forward step duration
 * Predicted events are buffered with target timestamps and deduplicated with `direction:column:roundedTarget`.
-* Arrival events reconcile with buffered predictions:
-  * if the predicted event was already queued/dispatched, arrival does not retrigger it
-  * if no prediction exists, arrival enqueues an immediate fallback event (no lost notes)
+* Crossing events reconcile with buffered predictions:
+  * if the predicted event was already queued/dispatched, the crossing event does not retrigger it
+  * if no prediction exists, the crossing event enqueues an immediate fallback event (no lost notes)
 * Notes sustain until matching note-off is reached.
 * Synth voice uses a brighter low-pass cutoff and fast attack for legibility.
 * Idle continuity policy for forward playback:
@@ -291,11 +318,12 @@ The runtime parses the MIDI file and builds a grid-aligned event map:
   * smooth release ramps and legato handling for near-immediate retriggers on the same note
   * minimum hold time before release to reduce micro-clicks on dense note transitions
   * bounded polyphony with priority-based voice stealing (quiet/old voices are released first instead of FIFO-only policy)
-* Runtime quality profiles are supported (`performance`, `balanced`, `high`) with optional per-level overrides:
+* Runtime quality profiles are supported (`performance`, `balanced`, `high`) and the runtime schema still accepts optional per-level overrides:
   * max polyphony
   * scheduler lookahead/lead timing
   * saturation amount
   * synth style (`game` or `editorLike`)
+  * editor Runtime Export UI intentionally exposes only the profile selector (no manual override fields)
 * `editorLike` synth style aligns runtime oscillator/envelope behavior to editor playback (triangle-led timbre, faster linear attack/decay) for closer audible parity.
 * Anti-click smoothing is applied on runtime release/ducking automations (target-based ramps) to reduce hiss/click artifacts between close notes.
 * `high` profile keeps only light saturation by default to avoid transient frizz while retaining presence.
@@ -303,6 +331,7 @@ The runtime parses the MIDI file and builds a grid-aligned event map:
 * Voice-stop tail timing is intentionally conservative so oscillator stop occurs after envelope decay settles.
 * Scheduler telemetry now tracks predictive queue depth and timing reliability (`late avg/max`, `underrun` over `30ms` threshold).
 * Runtime includes a live debug A/B toggle for de-click strategy (`F9`):
+  * default mode at run start is `strict`
   * `normal`: default release/duck behavior
   * `strict`: slower release targets, longer oscillator stop tails, softer ducking, and reduced effective saturation
 
@@ -411,6 +440,37 @@ Spring platforms are static platforms with a jump amplifier.
 
 ---
 
+## **4.7 Hazard Platforms (Beat-Locked Shock Window)**
+
+Hazard platforms are always solid, but only damage during a BPM-locked shock beat.
+
+**Rules:**
+
+* Global timing is tied to the metronome bar: `3 beats neutral + 1 beat shock`.
+* Shock beat is the 4th beat in the global 4-beat loop.
+* Neutral visual state is a red-tinted slate mix (`#4F2A37` + `#754866`) to pre-signal danger while remaining distinct from shock.
+* Shock visual state uses enemy red (`#A4161A` + `#FF4D6D`) to maximize readability versus neutral state.
+* No dedicated SFX.
+* Contact during shock applies damage only (no instant-kill behavior).
+
+---
+
+## **4.8 Launch Platforms (On-Land Directional Boost)**
+
+Launch platforms apply a directional impulse only when landed on from above.
+
+**Rules:**
+
+* Trigger condition: `onLand` (top crossing during vertical collision resolution).
+* Runtime variants:
+  * `launch30` (`30°`)
+  * `launch60` (`60°`)
+* Launch vector (`vx`, `vy`) is predefined per angle and scaled by BPM-driven traversal speed, so launch energy stays musically coherent across tempo zones.
+* Current launch impulse magnitude tuning is `3x` the previous baseline (`LAUNCH_PLATFORM_SPEED_MULTIPLIER = 25.2`).
+* Each launch platform renders a small line overlay showing launch angle.
+
+---
+
 ### Example Puzzle Pattern
 
 1. Player moves forward → writes music
@@ -428,15 +488,18 @@ Rewind is not undo — it is a **constructive spatial action**.
 
 ### Enemy Type (Prototype)
 
-The prototype includes two enemy archetypes:
+The prototype includes three enemy archetypes:
 
 * **Patrol Block Enemy** (ground)
 * **Hunter Flyer** (airborne)
+* **Crimson Falling Rock** (airborne dropper)
+* Shared enemy border pulse: outlines lerp between warm gray (`#6B707C`) and red (`#FF4D6D`) in beat anti-phase (strongest mid-beat).
 
 **Interaction Rules:**
 
 * Jumping on top of an enemy defeats it.
 * Touching an enemy from the side or from below damages the player.
+* Enemy collision boxes are intentionally reduced to `90%` of the visual enemy body size to improve fairness/readability in tight movement windows.
 
 This provides immediate readability and supports platforming skill checks without introducing complex AI.
 
@@ -451,6 +514,7 @@ Ground enemies move back and forth on platform surfaces.
 * They walk continuously left/right.
 * They reverse direction when they hit a wall.
 * They reverse direction when platform support ends (edge detection).
+* Spawn anchoring is top-surface safe: patrol enemies spawn above the supporting platform top (not intersecting inside geometry).
 * They use a subtle vertical squash animation (`scale.y`) while patrolling to improve movement readability.
 
 **Combat Rules:**
@@ -475,9 +539,31 @@ A flying enemy periodically enters from the **right side** of the screen and tra
 * The player can avoid it, or defeat it by jumping on top.
 * Any non-stomp contact damages the player.
 
+### Crimson Falling Rock (Airborne Dropper)
+
+A red round rock spawns above gameplay space and drops vertically.
+
+**Movement Rules:**
+
+* Spawn timing uses the same segment-trigger queue model used by flying enemies.
+* Spawn position is clamped to the triggering segment lane and starts above the camera top edge.
+* Vertical motion is straight down only (no horizontal homing).
+* It despawns after leaving the lower gameplay boundary.
+* Scale pulse is synced to BPM beat phase for immediate rhythmic readability.
+* Border pulse uses the shared red-gray anti-phase enemy outline behavior.
+
+**Combat Rules:**
+
+* Stomp defeats it.
+* Any non-stomp contact damages the player.
+
 ### Player Lives
 
-The player starts each run with **5 lives**.
+Lives depend on selected difficulty:
+
+* `Easy`: **10 lives**
+* `Normal`: **5 lives**
+* `Hard`: **5 lives**
 
 * Each damaging enemy contact removes 1 life.
 * A short invulnerability window after a hit prevents instant multi-hit loss.
@@ -589,6 +675,8 @@ Procedural variation occurs **within authored constraints**.
   * player heart marker: `3x3` blue square on torso (`#3A86FF`), pulse-synced to current BPM
   * patrol enemy body: `15x12`
   * flying enemy body: `15x10`
+  * falling rock enemy body: `14x14` (circle footprint)
+  * enemy outlines: 2px red-gray anti-phase pulse (`#6B707C <-> #FF4D6D`)
 * Player jump body-language:
   * player stretches vertically during jump arcs, with intensity driven by absolute vertical velocity (`|vy|`)
   * apex naturally returns near neutral scale (low `|vy|`)
@@ -596,6 +684,7 @@ Procedural variation occurs **within authored constraints**.
   * stretch cap is intentionally stronger (`PLAYER_JUMP_STRETCH_MAX = 0.34`) for a more elastic read
   * landing triggers a more pronounced damped "jelly" wobble (short squash/stretch oscillation) based on impact speed
   * enemy stomp also triggers a lighter/shorter jelly pop so combat contact reads as physical impact
+  * dash spawns short-lived ghost afterimages of body + heart, tinted by dash direction and fading quickly (`~180ms`)
 * Player directional torso cue:
   * heart flips horizontally and shifts side with movement direction
   * forward -> left side, backward -> right side
@@ -638,7 +727,12 @@ Procedural variation occurs **within authored constraints**.
   * best-time persistence keyed by level file name (not by list index) to keep records stable when alphabetical order changes
   * no fallback to index-based legacy keys
   * volume slider with immediate audible preview
-  * direct links to level editor (`/editor.html`) and MIDI Step Composer (`/daw.html`)
+  * 3-position difficulty slider (`Easy`, `Normal`, `Hard`) that controls runtime difficulty profile:
+    * BPM multiplier (`0.85x`, `1.00x`, `1.50x`)
+    * lives (`10`, `5`, `5`)
+    * fall outcome (respawn nearest `segment` on `Easy/Normal`, death on `Hard`)
+    * normal-mode fall respawn penalty (`-1` life per fall)
+  * direct link to level editor (`/editor.html`)
 * A dimmed gameplay **preview mode** runs in the background behind the start UI.
 
 ### Gameplay Overlay & States (Implemented)
@@ -658,8 +752,14 @@ Procedural variation occurs **within authored constraints**.
   * all HUD labels/panels remain screen-anchored under camera zoom (zoom-compensated position + scale)
 * Implemented state overlays:
   * pause menu (`ESC`)
+    * actions: `Continue`, `Restart`, `Back to Start Screen`
+    * `Back to Start Screen` is the red danger action
+    * pause menu no longer includes a `Quit` action
   * game over panel
+    * `Restart` and `Back to Start Screen` are vertically closer (with `Back to Start Screen` moved up)
+    * `Back to Start Screen` is the red danger action
   * victory panel (time + best time + next level action)
+    * `Restart` and `Next Level` are vertically closer (`Next Level` moved up)
 * Victory time rule:
   * each defeated enemy grants a `0.2s` completion-time reduction
   * the kill HUD mirrors this in real time (e.g. `1 (-0.2s)`, `6 (-1.2s)`)
@@ -696,6 +796,16 @@ Procedural variation occurs **within authored constraints**.
   * dedicated green family (`#2DC653` fill, `#95D5B2` border, pulse accent `#52B788`)
   * static solid behavior
   * jump from spring reaches exactly `2x` normal jump height
+* **Hazard platform**:
+  * neutral state uses a red-tinted slate mix (`#4F2A37` + `#754866`)
+  * shock state uses enemy red (`#A4161A` + `#FF4D6D`)
+  * 4-beat rhythm lock: beats `1-3` neutral, beat `4` shock
+  * applies damage on contact during shock only
+* **Launch platform**:
+  * cool launch family (`#2F6FD3` fill, `#4CC9F0` border)
+  * rendered with angle guide line (`#CDEFFF`) for readability
+  * runtime variants `launch30` and `launch60` map to fixed launch angles
+  * impulse vector scales with BPM-driven traversal speed baseline
 
 ### Runtime Visual Identity Update (VSG Alignment, Feb 2026)
 
@@ -705,7 +815,7 @@ Procedural variation occurs **within authored constraints**.
   * backward motion cools to cyan
   * core + halo pulse scale remains subtle and BPM-synced
   * vertical anchor is raised by `20px` from the previous tuning while keeping partial halo visibility at the lowest gameplay camera extent
-* Enemy palette now uses dedicated crimson tones (`#A4161A`, `#660708`, `#9D0208`, `#FF4D6D`) and no cyan/gold reuse.
+* Enemy palette now uses dedicated crimson tones (`#A4161A`, `#660708`, `#9D0208`, `#C1121F`, `#FF4D6D`) and no cyan/gold reuse.
 * HUD and overlays remain monospace with the established runtime text color (`#D7E2FF`), keeping readability at low intensity.
 
 ---
@@ -723,56 +833,71 @@ The project includes a browser editor at `/editor.html` for runtime-oriented lev
   * active selection accent aligned to VSG cool energy (`#4CC9F0`)
   * monospace typography
   * warm primary action buttons (`#F4D35E`) with dark text (`#05070F`)
+  * MIDI transport row uses icon-only controls: play triangle (`▶`) and stop square (`■`) with English accessibility labels/tooltips (`Play MIDI`, `Stop MIDI`)
 * Left control panel + right workspace layout.
 * User-facing sections:
   * top `Back to Game` action
-  * top `Open MIDI Composer` action
-  * MIDI/Levels folder loaders
-  * `Load DAW pattern` action (imports latest pattern sent from composer)
-  * playback quality mode selector (`performance`, `balanced`, `high`)
-  * runtime export box
+  * dedicated `MIDI` box (MIDI folder list/load, local MIDI select, transport controls, playback quality selector, MIDI status)
+  * dedicated `Levels` box (level folder list/load)
+  * both `MIDI` and `Levels` selectors place a refresh icon button (`U+1F5D8`) on the left side of the file dropdown, with the same control height as the dropdown and flush top/bottom alignment (no visual step)
+  * dedicated `Level Save` box (level base-name, runtime audio-quality profile, BPM fallback, `Save in Levels`, `Download Level`)
   * segment table editor
-  * live minimap
   * runtime platform layout canvas
 * Segment authoring source of truth:
   * segments are derived from MIDI or loaded JSON data
   * no manual `Load sample` / `Add segment` controls in the editor UI
 
-### Minimap and Layout Editor
+### Layout Editor
 
-* Minimap renders segment energy with fixed color legend:
-  * Low: gray-blue
-  * Medium: blue
-  * High: amber
-* Minimap now overlays tempo-change markers (vertical yellow guides) whenever adjacent segments use different BPM.
 * Layout editor supports:
   * horizontal camera scrollbar
   * auto-follow camera while `Play MIDI` is active (playhead-based scrolling)
   * center on spawn
-  * regenerate from segments
-  * delete selected platform
+  * playable preview toggle (`Preview player: On/Off`) in the layout action row
+  * layout action row includes only `Center spawn` and `Preview player: On/Off`
+  * keyboard capture for preview movement (`A/D` or arrows) and jump (`W/Up/Space`) outside form fields
+  * preview resets player to spawn (`x = 150`) every time the preview toggle is turned on
+  * preview movement speed and inertia scale with active tempo-zone BPM, using the same tempo-map zones as runtime layout export
+  * preview jump + gravity + top-surface collisions against authored layout platforms
+  * preview is decoupled from MIDI/audio generation (no note scheduling, no synth trigger from preview movement)
+  * preview camera auto-follow keeps the player inside the layout viewport margins
+  * layout editing (drag/add/type-change/delete platforms) remains available while preview is active
   * live MIDI playback cursor line (vertical) while `Play MIDI` is active
   * left-click select/drag
-  * right-click cycle platform type or create platform
+  * drag on empty canvas performs box selection
+  * `Ctrl+left click` toggles individual platform membership in the current selection
+  * `Ctrl+C` copies selected platforms
+  * `Ctrl+V` pastes copied platforms using mouse pointer anchoring on the copied selection bottom-left bounding-box point (fallback: last known canvas pointer)
+  * right-click opens a categorized context menu for platform typing/creation
   * X snap aligned to runtime player anchor (`x = 150`) with `32px` grid step
   * Y snap aligned to runtime vertical grid with `32px` spacing
   * canvas grid overlay aligned to the same runtime snap lattice
   * zone BPM readout at the top (`Current zone BPM`) based on current camera area
   * visible BPM boundary bars with per-zone BPM labels
-* Platform type cycle:
-  * `static -> beat -> alternateBeat -> ghost -> reverseGhost -> elevator -> shuttle -> cross -> spring`
+* Platform context menu categories:
+  * `static`: `static`
+  * `dissolving`: `beat`, `alternateBeat`, `ghost`, `reverseGhost`
+  * `moving`: `elevator`, `shuttle`, `cross`
+  * `launching`: `spring`, `launch30`, `launch60`
+  * `hazard`: `hazard`
   * editor label `static` maps to runtime/export kind `segment`
-* Canvas rendering includes visible platform borders, selected-state highlight stroke, spawn guide line, and kind labels.
+* `Segments` table now acts as a selected-platform inspector and shows only current selection rows (`Kind`, `Patrol`, `Flying (s)`, `Falling Rock (s)`).
+* Enemy columns in the selected-platform inspector are editable only for `static` rows (runtime `segment`) and stay disabled for non-static platform kinds.
+* Segment-enemy editor values for `Flying (s)` / `Falling Rock (s)` are shown in seconds and converted to runtime milliseconds during save/load.
+* Canvas rendering includes visible platform borders, selected-state highlight stroke, spawn guide line, launch-angle guide line (`launch30`/`launch60`), and kind labels.
+* Drawing priority in layout canvas is type-aware: `static` (`segment`) platforms are drawn first, while non-static platforms are drawn after and therefore appear in front.
 
 ### Runtime Export Features
 
 * Runtime export parameters:
   * default BPM fallback (20–300) for generation/bootstrap
+  * runtime audio quality profile selector (`performance`, `balanced`, `high`) as the only audio-quality authoring control in editor
   * per-segment BPM values (20–300) as authoring source for tempo zoning
-  * grid columns are auto-derived from authored platform extent (not user-editable in the editor UI)
+  * grid columns are auto-derived from authored platform extent (not user-editable in the editor UI), clamped to `1..4096`
   * platform kinds are exported from explicit layout/platform type definitions
 * Runtime outputs:
-  * `Save runtime to Levels` writes `<base>.runtime.json` to `Levels/`
+  * `Save in Levels` writes `<base>.runtime.json` to `Levels/`
+  * `Download Level` saves the same runtime payload as a local `<base>.runtime.json` file in the browser
   * runtime export writes `tempoMap: [{ startColumn, bpm }]` built from segment BPM zones
   * runtime export includes a `segments` metadata snapshot used by the editor for lossless round-trip of per-segment fields
 * Level load behavior:
@@ -782,8 +907,6 @@ The project includes a browser editor at `/editor.html` for runtime-oriented lev
   * after load, the selected level remains selected in the `Levels/` dropdown
 * MIDI load behavior:
   * manual `Load MIDI file` / `Select local MIDI` rebuilds segments from the loaded MIDI and resets layout editor to generated mode
-  * `Load DAW pattern` reads browser storage payload (`sambo.daw.toEditor.v1`), maps beat-step notes to a synthetic MIDI timeline, and preserves DAW tempo-map zones
-  * DAW-imported patterns are treated as local composition data (runtime export keeps generated `notes` and does not require `midi_file`)
   * segment count is derived from MIDI duration and current default BPM fallback at generation time (`2 beats` per segment)
   * segment BPM values are auto-seeded from MIDI tempo changes (tempo map timeline)
   * changing default BPM fallback after MIDI load does not rebuild segment count automatically; regenerate/reload is required to recalculate beats/segments
@@ -791,10 +914,19 @@ The project includes a browser editor at `/editor.html` for runtime-oriented lev
   * if no generated `static` segment covers spawn, a fallback spawn-support segment is injected immediately left of spawn (its right edge aligns to spawn)
   * default platform width is 2 horizontal grid cells
   * each segment is fixed to 2 beats and generates exactly 1 platform slot
-  * each segment draws a single random roll in `[0,1)` for platform allocation:
-    * `< 0.1`: blank slot (no platform)
-    * `0.1 - 0.5`: static platform
-    * `>= 0.5`: remaining probability split equally across non-static types declared in that segment `platform_types`
+  * platform kind generation is now stateful (sequence-aware) instead of independent per segment:
+    * weighted sampling still uses deterministic seed rolls
+    * generation keeps a low blank-slot probability and applies rhythm-density weighting for static vs dynamic kinds
+  * hard pattern constraints in default generation:
+    * `beat` cannot be followed by `beat` or `alternateBeat`
+    * `alternateBeat` cannot be followed by `beat` or `alternateBeat`
+    * timed-platform runs (`beat`, `alternateBeat`, `ghost`, `reverseGhost`) are capped at 2 in a row
+    * `anti_stall`: static runs (`segment`) are capped at 3 in a row when a valid non-static alternative exists
+    * launch spacing: at least `4` static segments (`segment`) are required between two launch platforms (`launch30`/`launch60`)
+    * `energy_gate`: kind availability is clamped by segment energy
+      * `low`: `segment`, `beat`, `alternateBeat`, `elevator`
+      * `medium`: `low` set + `ghost`, `reverseGhost`, `shuttle`, `cross`, `spring`
+      * `high`: full kind set (includes `hazard`, `launch30`, `launch60`)
   * each generated platform picks a random vertical level between `vertical_min` and `vertical_max`
   * generation avoids overlapping placements while building the lane
   * when generating from loaded MIDI, runtime appends a fixed 3-step static ascent at vertical levels `3 -> 5 -> 7` after authored/generated segment slots to preserve moon reachability
@@ -804,8 +936,13 @@ The project includes a browser editor at `/editor.html` for runtime-oriented lev
   * `flying_spawn_interval_ms` (stored in runtime JSON)
   * editor input is in seconds (`Flying Spawn Interval (s, 0=Off)`), converted to/from ms during runtime export/load
   * `flying_spawn_interval_ms = 0` disables flying spawn for that segment
+  * `falling_rock_spawn_interval_ms` in editor maps to runtime `segmentEnemies[].fallingRockSpawnIntervalMs`
+  * editor input is in seconds (`Falling Rock Spawn Interval (s, 0=Off)`), converted to/from ms during runtime export/load
+  * `fallingRockSpawnIntervalMs = 0` (or missing) disables falling-rock spawn for that segment
+  * in selected-platform editing, enemy fields bind to selected static platforms by left-to-right segment rank mapping, consistent with runtime segment-enemy remapping on mixed layouts
   * MIDI-derived draft default patrols: `low=0`, `medium=random(0|1)`, `high=random(0|1)`
   * MIDI-derived draft enables flying spawn interval only every 5 segments (`5, 10, 15, ...`), using energy-coherent intervals
+  * MIDI-derived draft default for falling rock spawn interval is always `0` (manual opt-in)
   * if `segmentEnemies` exists in runtime JSON (even empty), gameplay uses segment-authoring mode and disables global fallback enemy settings
   * runtime maps authored `segmentIndex` across available segment platforms to avoid front-loading on long mixed-platform levels
   * patrol spawn enforces local spacing/capacity so enemies do not overlap at spawn time
@@ -822,58 +959,15 @@ The project includes a browser editor at `/editor.html` for runtime-oriented lev
 
 ---
 
-## **6.3 MIDI Step Composer (Implemented Tooling)**
-
-The project includes a standalone browser MIDI composer at `/daw.html` for beat-grid composition before level authoring.
-
-### Composer Core Features
-
-* Piano-roll style beat grid (`Note x Beat`) with per-cell note toggle.
-* Note range for composition: `C0 -> C7`.
-* Grid is beat-based: each column is exactly 1 beat.
-* Per-beat chord authoring is supported (multiple notes in the same column).
-* MIDI loading workflow:
-  * load from project `MIDI/` folder list
-  * load from local `.mid/.midi` file
-  * imported notes are quantized to beat columns in the DAW grid.
-* Configurable authoring parameters:
-  * base BPM (`20-300`)
-  * beat count (`4-1024`)
-  * variable tempo map (`startBeat -> bpm`) for per-zone BPM changes across the pattern.
-* Transport:
-  * `Play` (looped scheduler playback)
-  * `Stop` (immediate scheduler stop + voice release)
-  * visual playhead highlights active beat column.
-
-### MIDI Export and Editor Handoff
-
-* Composer exports standard `.mid` files (single track, tempo meta + note on/off events).
-* Composer can send the active pattern to editor through browser storage:
-  * key: `sambo.daw.toEditor.v1`
-  * payload fields: `name`, `bpm`, `beats`, `tempoMap[]`, `steps[]`
-* `Send Pattern to Editor` opens `/editor.html?source=daw`.
-* Editor can load this payload via `Load DAW pattern` and convert it into the same internal note timeline format used by MIDI parsing, preserving DAW tempo-map changes.
-
-### Design Intent
-
-* Keep MIDI ideation in a dedicated, low-friction screen.
-* Preserve editor responsibilities for segment/platform/enemy/runtime authoring.
-* Enable a direct workflow:
-  * compose beat-note idea in DAW screen
-  * import pattern in editor
-  * generate/refine level segments
-  * export runtime level JSON
-
----
-
 ## **7. Prototype Scope**
 
 **Included**
 
 * One procedurally generated level
-* Basic enemy encounters + 5-life HUD
-* Patrol and flying enemy variants
-* Beat-snapped movement
+* Basic enemy encounters + difficulty-scaled lives HUD (Easy 10, Normal/Hard 5)
+* Patrol, flying, and falling-rock enemy variants
+* Continuous movement with tempo-scaled inertia and light beat assist
+* Double jump + directional dash (double tap left/right, 3s cooldown)
 * Intensity-driven lighting
 * Beat-sensitive platforms
 * Ghost platform rewind puzzle
@@ -889,7 +983,7 @@ The project includes a standalone browser MIDI composer at `/daw.html` for beat-
 ## **8. Technical Notes (Godot)**
 
 * Global beat clock using `AudioServer` timing
-* Movement interpolation synced to beat events
+* Continuous movement integration with tempo-scaled acceleration/friction and beat-assist windows
 * Light intensity driven by smoothed intensity variable
 * Procedural segments instantiated via scene templates
 * Envelope modulation implemented via synth parameters or ADSR-controlled AudioStreamPlayers
@@ -949,7 +1043,7 @@ Reference files:
 Scope:
 
 - Replace current primitive runtime shapes with static sprites for player, moon, platforms, and enemies.
-- Keep gameplay behavior and collision dimensions unchanged.
+- Keep gameplay behavior unchanged. Preserve current collision semantics, including reduced enemy collision boxes (`90%` of enemy visual body size).
 - Follow `GDD/VSG.md` color/state semantics exactly.
 
 Animation is intentionally out of scope for this baseline pack; state readability is achieved through sprite variant swapping.
@@ -967,8 +1061,6 @@ Implemented rules:
   - `midiPlayback.tempoPoints[]` (`tick`, `usPerQuarter`)
   - `midiPlayback.notes[]` (`startTick`, `endTick`, `pitch`, `velocity`, `trackId`, `channel`)
   - `midiPlayback.songEndTick`
-- DAW import keeps original note/tempo events without destructive beat quantization.
-- DAW->Editor handoff now transfers raw timeline payload (v3) instead of beat buckets.
 - Runtime level export from editor always includes `midiPlayback`.
 - Game runtime playback state is now tick-scrub driven (movement -> playhead tick), with:
   - incremental forward/reverse updates for small deltas
@@ -983,7 +1075,6 @@ Implemented rules:
 - Parser/normalizer alignment is now shared across all three systems:
   - game runtime (`GameScene`)
   - level editor (`editor.html`)
-  - MIDI composer (`daw.html`)
   through the single core module `src/core/midi.ts` (compiled in `dist/src/core/midi.js`).
 - Runtime default `balanced` audio profile now uses editor-like synthesis envelopes/timbre (`synthStyle: editorLike`) to reduce perceived mismatch versus editor playback.
 - Level migration script added: `scripts/migrate_midi_playback_schema.mjs`.

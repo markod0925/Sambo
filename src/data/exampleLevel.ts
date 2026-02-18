@@ -1,7 +1,19 @@
 import type { NoteInterval, TempoPoint } from '../core/midi.js';
 
 export interface PlatformSpec {
-  kind: 'segment' | 'beat' | 'alternateBeat' | 'ghost' | 'reverseGhost' | 'elevator' | 'shuttle' | 'cross' | 'spring';
+  kind:
+    | 'segment'
+    | 'beat'
+    | 'alternateBeat'
+    | 'ghost'
+    | 'reverseGhost'
+    | 'elevator'
+    | 'shuttle'
+    | 'cross'
+    | 'spring'
+    | 'hazard'
+    | 'launch30'
+    | 'launch60';
   x: number;
   y: number;
   width: number;
@@ -42,6 +54,7 @@ export interface LevelDefinition {
     patrolCount: number;
     flyingSpawnIntervalMs?: number;
     flyingCount?: number;
+    fallingRockSpawnIntervalMs?: number;
   }>;
   enemies?: {
     patrolCount: number;

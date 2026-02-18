@@ -14,7 +14,18 @@ export interface Segment {
   durationBeats: number;
   energyState: EnergyState;
   platformTypes: Array<
-    'static' | 'beat' | 'alternateBeat' | 'ghost' | 'reverseGhost' | 'elevator' | 'shuttle' | 'cross' | 'spring'
+    | 'static'
+    | 'beat'
+    | 'alternateBeat'
+    | 'ghost'
+    | 'reverseGhost'
+    | 'elevator'
+    | 'shuttle'
+    | 'cross'
+    | 'spring'
+    | 'hazard'
+    | 'launch30'
+    | 'launch60'
   >;
   verticalRange: [number, number];
   rhythmDensity: number;

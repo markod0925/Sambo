@@ -5,10 +5,11 @@ The project demonstrates the core loop described in the GDD: movement drives mus
 
 ## Basic game mechanics
 
-### 1) Beat-synced movement ("snap to beat")
-- Horizontal movement is quantized to a beat subdivision.
-- Pressing **A/D** (or **Left/Right**) queues a step.
-- The character arrives exactly on the next beat subdivision, so movement and note playback stay in sync.
+### 1) Continuous movement with rhythm assist
+- Horizontal movement is continuous while holding **A/D** (or **Left/Right**).
+- Movement uses tempo-scaled acceleration and friction (responsive inertia profile).
+- A light beat/grid assist nudges motion near subdivision and grid crossings to keep rhythmic coherence.
+- Legacy grid-triggered notes are emitted when the player crosses grid columns.
 
 ### 2) Intensity and visibility
 - The game tracks an `intensity` value in `[residualFloor, 1.0]`.
@@ -24,6 +25,7 @@ The project demonstrates the core loop described in the GDD: movement drives mus
 ### 4) Enemies and lives
 - Patrol enemies move back and forth between min/max bounds.
 - Flying enemies spawn periodically and home vertically toward the player while moving left.
+- Falling rock enemies spawn from above, pulse on BPM, and drop vertically.
 - Stomping from above defeats enemies.
 - Side collisions deal damage and reduce lives.
 
@@ -64,14 +66,14 @@ Then open:
 - Lets the player select level and start it.
 - Shows per-level best time (if present).
 - Includes a volume slider (saved in localStorage).
-- Includes direct links to `editor.html` and `daw.html` (MIDI Step Composer).
+- Includes direct link to `editor.html`.
 
 ### CLI test mode (no browser)
 ```bash
 npm run play:cli
 ```
 
-This mode runs a text simulation of core gameplay systems (beat-synced movement, intensity, beat/ghost platform states) directly in terminal.
+This mode runs a text simulation of core gameplay systems (continuous movement with inertia, intensity, beat/ghost platform states) directly in terminal.
 Useful for quick behavior checks when you cannot use the browser renderer.
 
 Commands in CLI mode:
@@ -79,7 +81,7 @@ Commands in CLI mode:
 - `a` / `left` / `backward`
 - `jump` / `j` / `up`
 - `wait`
-- `tick <ms> [azioni...]` (example: `tick 250 d jump`)
+- `tick <ms> [actions...]` (example: `tick 250 d jump`)
 - `status`
 - `restart`
 - `help`
@@ -109,10 +111,9 @@ The repository includes a lightweight browser editor for `level_draft.json` file
 ### What you can do in the editor
 - Load a draft JSON (`{ "segments": [...], "midi_file": "track.mid" }`) from your machine.
 - Load a MIDI from project folder `MIDI/` (or from local file) and play/stop it directly in the editor.
-- Open the standalone MIDI Step Composer (`daw.html`) and import the latest DAW pattern with `Load DAW pattern`.
 - Generate the first level draft automatically from the loaded MIDI.
 - Configure runtime output (`bpm`, `gridColumns`, optional `reverseGhost`) and save/copy a runtime level JSON:
-  - `{ "bpm": number, "gridColumns": number, "notes": number[], "platforms": [...], "segmentEnemies": [{ "segmentIndex": number, "patrolCount": number, "flyingSpawnIntervalMs": number }], "enemies": { "patrolCount": number, "flyingSpawnIntervalMs": number } }`
+  - `{ "bpm": number, "gridColumns": number, "notes": number[], "platforms": [...], "segmentEnemies": [{ "segmentIndex": number, "patrolCount": number, "flyingSpawnIntervalMs": number, "fallingRockSpawnIntervalMs": number }], "enemies": { "patrolCount": number, "flyingSpawnIntervalMs": number } }`
   - Runtime export automatically appends final approach platforms so the moon is always reachable.
 - Add segments.
 - Delete segments.
@@ -125,6 +126,7 @@ The repository includes a lightweight browser editor for `level_draft.json` file
   - `rhythm_density`
   - `patrol_enemies`
   - `flying_spawn_interval_ms`
+  - `falling_rock_spawn_interval_ms`
 - Preview a live minimap:
   - color-coded by energy state
   - ghost segments outlined when `platform_types` includes `ghost`
@@ -132,26 +134,6 @@ The repository includes a lightweight browser editor for `level_draft.json` file
   - If a MIDI file has been loaded, the editor stores its filename in `midi_file` (the binary MIDI is not embedded in JSON).
   - Runtime save uses sampled notes from the loaded MIDI when available; otherwise it generates fallback notes from segment energy.
   - Level-related JSON output is written to `Levels/`.
-
-## MIDI Step Composer usage
-
-The repository includes a standalone DAW-like MIDI step composer at `daw.html`.
-
-### Open the composer
-1. Start the local server:
-   ```bash
-   npm run start
-   ```
-2. Open:
-   - `http://localhost:4173/daw.html`
-
-### What you can do in the composer
-- Insert/remove notes per beat in a piano-roll grid.
-- Configure beat count and a variable-BPM tempo map (tempo changes by beat zone).
-- Play/stop looped preview directly in browser.
-- Load MIDI from project folder `MIDI/` or from local file and quantize it into the step grid.
-- Download a standard `.mid` file generated from the current step pattern.
-- Send the current pattern to the level editor (`Send Pattern to Editor`), then load it with `Load DAW pattern` in `editor.html`.
 
 ### Suggested workflow with audio analysis script
 1. Generate draft data from a WAV file:
@@ -174,7 +156,6 @@ python scripts/audio_to_level.py --input path/to/track.wav --output-dir data --b
 - `src/game/GameScene.ts` - Phaser scene and gameplay loop.
 - `src/core/*` - metronome, movement, intensity, platforms, enemies, generator logic.
 - `editor.html` - level draft editor.
-- `daw.html` - MIDI step composer (beat-note piano roll + MIDI export).
 - `scripts/audio_to_level.py` - WAV analysis + level draft generation.
 - `scripts/serve.mjs` - static local HTTP server used by `npm run start`.
 - `GDD/GDD.md` - high-level design document.

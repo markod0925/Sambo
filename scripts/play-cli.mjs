@@ -8,8 +8,8 @@ import { applyDamage, resolveEnemyCollision, updateFlyingEnemy, updatePatrolEnem
 
 const HELP_TEXT = [
   'Commands:',
-  '  d | right | forward      Move forward (beat-quantized step)',
-  '  a | left | backward      Move backward (beat-quantized step)',
+  '  d | right | forward      Move forward (continuous with inertia)',
+  '  a | left | backward      Move backward (continuous with inertia)',
   '  jump | j | up            Jump',
   '  wait | w                 No input, advance time',
   '  tick <ms> [actions...]   Custom tick (example: tick 250 d jump)',
@@ -114,23 +114,19 @@ function getAliveEnemyCounts() {
   return { patrol, flying };
 }
 
-function formatSnapshot(lastArrived, events) {
+function formatSnapshot(events) {
   const beatInBar = metronome.beatInBarAt(nowMs);
   const beatState = getBeatPlatformState(beatInBar);
   const ghostSolid = isGhostPlatformSolid(currentDirection);
-  const queued = mover.queuedCount;
-  const moving = mover.currentStep ? `yes (${mover.currentStep.direction})` : 'no';
+  const speed = mover.velocityPxPerSec;
+  const moving = Math.abs(speed) > MOVEMENT_EPSILON ? 'yes' : 'no';
   const aliveEnemies = getAliveEnemyCounts();
 
   const lines = [
     `t=${nowMs}ms | beat=${beatInBar} | beatPlatform=${beatState} | ghost=${ghostSolid ? 'SOLID' : 'OFF'}`,
-    `x=${playerX.toFixed(0)} y=${playerY.toFixed(1)} vy=${verticalVelocity.toFixed(1)} | dir=${currentDirection} | intensity=${intensity.toFixed(3)}`,
-    `lives=${lives}/${MAX_LIVES} | enemies patrol=${aliveEnemies.patrol} flying=${aliveEnemies.flying} | queued=${queued} | moving=${moving}`
+    `x=${playerX.toFixed(0)} y=${playerY.toFixed(1)} vy=${verticalVelocity.toFixed(1)} | dir=${currentDirection} | speed=${speed.toFixed(1)} | intensity=${intensity.toFixed(3)}`,
+    `lives=${lives}/${MAX_LIVES} | enemies patrol=${aliveEnemies.patrol} flying=${aliveEnemies.flying} | moving=${moving}`
   ];
-
-  if (lastArrived) {
-    lines.push(`Arrived on subdivision: ${lastArrived}`);
-  }
 
   if (events.length > 0) {
     lines.push(`Events: ${events.join(' | ')}`);
@@ -299,11 +295,12 @@ function handleEnemyCollisions(events) {
   }
 }
 
-function simulateTick(deltaMs, jumpRequested) {
+function simulateTick(deltaMs, jumpRequested, directionInput) {
   const events = [];
   const previousX = playerX;
 
   nowMs += deltaMs;
+  mover.setDirection(directionInput);
   const movement = mover.update(nowMs);
 
   const targetX = PLAYER_START_X + movement.x;
@@ -317,9 +314,9 @@ function simulateTick(deltaMs, jumpRequested) {
   playerX = clampedX;
   const movedX = playerX - previousX;
 
-  if (movedX > MOVEMENT_EPSILON) currentDirection = 'forward';
-  else if (movedX < -MOVEMENT_EPSILON) currentDirection = 'backward';
-  else if (mover.currentStep) currentDirection = mover.currentStep.direction;
+  if (mover.velocityPxPerSec > MOVEMENT_EPSILON) currentDirection = 'forward';
+  else if (mover.velocityPxPerSec < -MOVEMENT_EPSILON) currentDirection = 'backward';
+  else if (directionInput !== 'idle') currentDirection = directionInput;
   else currentDirection = 'idle';
 
   const beatState = getBeatPlatformState(metronome.beatInBarAt(nowMs));
@@ -354,7 +351,6 @@ function simulateTick(deltaMs, jumpRequested) {
   }
 
   return {
-    arrivedDirection: movement.arrived ? movement.direction : null,
     events
   };
 }
@@ -396,9 +392,9 @@ async function run() {
 
   output.write('Sambo CLI Test Mode\n');
   output.write(`BPM=${BPM}, subdivision=${SUBDIVISION}, step=${STEP_SIZE}px\n`);
-  output.write('Core gameplay simulation without Phaser/browser rendering.\n\n');
+  output.write('Core gameplay simulation without Phaser/browser rendering (continuous movement with inertia).\n\n');
   output.write(`${HELP_TEXT}\n\n`);
-  output.write(`${formatSnapshot(null, [])}\n\n`);
+  output.write(`${formatSnapshot([])}\n\n`);
 
   try {
     while (true) {
@@ -414,13 +410,13 @@ async function run() {
       }
 
       if (command === 'status') {
-        output.write(`${formatSnapshot(null, [])}\n\n`);
+        output.write(`${formatSnapshot([])}\n\n`);
         continue;
       }
 
       if (command === 'restart') {
         resetGameplayState();
-        output.write(`Run reset.\n${formatSnapshot(null, ['restart'])}\n\n`);
+        output.write(`Run reset.\n${formatSnapshot(['restart'])}\n\n`);
         continue;
       }
 
@@ -451,13 +447,9 @@ async function run() {
 
       const direction = parsedActions.direction;
       const jumpRequested = parsedActions.jump;
-
-      if (direction && mover.queuedCount === 0 && !mover.currentStep) {
-        mover.enqueue(direction);
-      }
-
-      const result = simulateTick(deltaMs, jumpRequested);
-      output.write(`${formatSnapshot(result.arrivedDirection, result.events)}\n\n`);
+      const directionInput = direction || 'idle';
+      const result = simulateTick(deltaMs, jumpRequested, directionInput);
+      output.write(`${formatSnapshot(result.events)}\n\n`);
     }
   } finally {
     rl.close();

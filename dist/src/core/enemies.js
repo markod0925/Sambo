@@ -45,3 +45,15 @@ export function updateFlyingEnemy(enemy, playerY, deltaSeconds, offscreenLeftX) 
     }
     return next;
 }
+export function updateFallingRockEnemy(enemy, deltaSeconds, offscreenBottomY) {
+    if (!enemy.active)
+        return enemy;
+    const next = {
+        ...enemy,
+        y: enemy.y + enemy.speedY * deltaSeconds
+    };
+    if (next.y > offscreenBottomY) {
+        return { ...next, active: false };
+    }
+    return next;
+}

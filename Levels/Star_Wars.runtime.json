@@ -1,767 +1,4 @@
 {
-  "tempoMap": [
-    {
-      "startColumn": 0,
-      "bpm": 125
-    }
-  ],
-  "audioQualityMode": "balanced",
-  "audioQuality": {
-    "maxPolyphony": 2,
-    "schedulerLookaheadMs": 8,
-    "schedulerLeadMs": 4,
-    "saturationAmount": 0,
-    "synthStyle": "editorLike"
-  },
-  "gridColumns": 57,
-  "notes": [
-    523.2511306011972,
-    220,
-    130.8127826502993,
-    32.70319566257483,
-    65.40639132514966,
-    65.40639132514966,
-    391.99543598174927,
-    523.2511306011972,
-    466.1637615180899,
-    65.40639132514966,
-    65.40639132514966,
-    65.40639132514966,
-    391.99543598174927,
-    130.8127826502993,
-    32.70319566257483,
-    391.99543598174927,
-    32.70319566257483,
-    32.70319566257483,
-    466.1637615180899,
-    440,
-    391.99543598174927,
-    391.99543598174927,
-    783.9908719634985,
-    261.6255653005986,
-    261.6255653005986,
-    783.9908719634985,
-    783.9908719634985,
-    783.9908719634985,
-    349.2282314330039,
-    391.99543598174927,
-    391.99543598174927,
-    261.6255653005986,
-    466.1637615180899,
-    155.56349186104046,
-    466.1637615180899,
-    261.6255653005986,
-    261.6255653005986,
-    698.4564628660078,
-    349.2282314330039,
-    349.2282314330039,
-    349.2282314330039,
-    523.2511306011972,
-    174.61411571650194,
-    174.61411571650194,
-    174.61411571650194,
-    174.61411571650194,
-    174.61411571650194,
-    174.61411571650194,
-    174.61411571650194,
-    174.61411571650194,
-    174.61411571650194,
-    349.2282314330039,
-    349.2282314330039,
-    349.2282314330039,
-    349.2282314330039,
-    349.2282314330039,
-    349.2282314330039
-  ],
-  "platforms": [
-    {
-      "kind": "segment",
-      "x": 118,
-      "y": 416,
-      "width": 64,
-      "height": 18
-    },
-    {
-      "kind": "segment",
-      "x": 182,
-      "y": 416,
-      "width": 64,
-      "height": 18
-    },
-    {
-      "kind": "segment",
-      "x": 246,
-      "y": 416,
-      "width": 64,
-      "height": 18
-    },
-    {
-      "kind": "segment",
-      "x": 310,
-      "y": 416,
-      "width": 64,
-      "height": 18
-    },
-    {
-      "kind": "segment",
-      "x": 374,
-      "y": 416,
-      "width": 64,
-      "height": 18
-    },
-    {
-      "kind": "segment",
-      "x": 438,
-      "y": 416,
-      "width": 64,
-      "height": 18
-    },
-    {
-      "kind": "segment",
-      "x": 502,
-      "y": 416,
-      "width": 64,
-      "height": 18
-    },
-    {
-      "kind": "segment",
-      "x": 566,
-      "y": 416,
-      "width": 64,
-      "height": 18
-    },
-    {
-      "kind": "segment",
-      "x": 630,
-      "y": 416,
-      "width": 64,
-      "height": 18
-    },
-    {
-      "kind": "segment",
-      "x": 694,
-      "y": 416,
-      "width": 64,
-      "height": 18
-    },
-    {
-      "kind": "segment",
-      "x": 758,
-      "y": 416,
-      "width": 64,
-      "height": 18
-    },
-    {
-      "kind": "segment",
-      "x": 822,
-      "y": 416,
-      "width": 64,
-      "height": 18
-    },
-    {
-      "kind": "segment",
-      "x": 886,
-      "y": 416,
-      "width": 64,
-      "height": 18
-    },
-    {
-      "kind": "segment",
-      "x": 950,
-      "y": 416,
-      "width": 64,
-      "height": 18
-    },
-    {
-      "kind": "segment",
-      "x": 1014,
-      "y": 416,
-      "width": 64,
-      "height": 18
-    },
-    {
-      "kind": "segment",
-      "x": 1078,
-      "y": 416,
-      "width": 64,
-      "height": 18
-    },
-    {
-      "kind": "segment",
-      "x": 1142,
-      "y": 416,
-      "width": 64,
-      "height": 18
-    },
-    {
-      "kind": "segment",
-      "x": 1206,
-      "y": 416,
-      "width": 64,
-      "height": 18
-    },
-    {
-      "kind": "segment",
-      "x": 1270,
-      "y": 416,
-      "width": 64,
-      "height": 18
-    },
-    {
-      "kind": "segment",
-      "x": 1334,
-      "y": 416,
-      "width": 64,
-      "height": 18
-    },
-    {
-      "kind": "segment",
-      "x": 1398,
-      "y": 416,
-      "width": 64,
-      "height": 18
-    },
-    {
-      "kind": "segment",
-      "x": 1462,
-      "y": 416,
-      "width": 64,
-      "height": 18
-    },
-    {
-      "kind": "segment",
-      "x": 1526,
-      "y": 384,
-      "width": 64,
-      "height": 18
-    },
-    {
-      "kind": "segment",
-      "x": 1590,
-      "y": 352,
-      "width": 64,
-      "height": 18
-    },
-    {
-      "kind": "segment",
-      "x": 1654,
-      "y": 320,
-      "width": 64,
-      "height": 18
-    },
-    {
-      "kind": "segment",
-      "x": 1718,
-      "y": 288,
-      "width": 64,
-      "height": 18
-    },
-    {
-      "kind": "segment",
-      "x": 1782,
-      "y": 256,
-      "width": 64,
-      "height": 18
-    },
-    {
-      "kind": "segment",
-      "x": 1846,
-      "y": 224,
-      "width": 64,
-      "height": 18
-    },
-    {
-      "kind": "segment",
-      "x": 1910,
-      "y": 192,
-      "width": 64,
-      "height": 18
-    }
-  ],
-  "segmentEnemies": [],
-  "segments": [
-    {
-      "index": 0,
-      "duration_beats": 2,
-      "bpm": 125,
-      "energy_state": "low",
-      "platform_types": [
-        "static",
-        "beat",
-        "alternateBeat"
-      ],
-      "vertical_range": [
-        0,
-        1
-      ],
-      "rhythm_density": 0,
-      "patrol_enemies": 0,
-      "flying_spawn_interval_ms": 0
-    },
-    {
-      "index": 1,
-      "duration_beats": 2,
-      "bpm": 125,
-      "energy_state": "low",
-      "platform_types": [
-        "static",
-        "beat",
-        "alternateBeat"
-      ],
-      "vertical_range": [
-        0,
-        3
-      ],
-      "rhythm_density": 0.7657480314960632,
-      "patrol_enemies": 0,
-      "flying_spawn_interval_ms": 0
-    },
-    {
-      "index": 2,
-      "duration_beats": 2,
-      "bpm": 125,
-      "energy_state": "low",
-      "platform_types": [
-        "static",
-        "beat",
-        "alternateBeat"
-      ],
-      "vertical_range": [
-        0,
-        4
-      ],
-      "rhythm_density": 0.8324982104509665,
-      "patrol_enemies": 0,
-      "flying_spawn_interval_ms": 0
-    },
-    {
-      "index": 3,
-      "duration_beats": 2,
-      "bpm": 125,
-      "energy_state": "low",
-      "platform_types": [
-        "static",
-        "beat",
-        "alternateBeat"
-      ],
-      "vertical_range": [
-        0,
-        4
-      ],
-      "rhythm_density": 0.794349235757295,
-      "patrol_enemies": 0,
-      "flying_spawn_interval_ms": 0
-    },
-    {
-      "index": 4,
-      "duration_beats": 2,
-      "bpm": 125,
-      "energy_state": "medium",
-      "platform_types": [
-        "static",
-        "beat",
-        "alternateBeat",
-        "ghost",
-        "reverseGhost"
-      ],
-      "vertical_range": [
-        0,
-        4
-      ],
-      "rhythm_density": 0.6795617939061966,
-      "patrol_enemies": 0,
-      "flying_spawn_interval_ms": 0
-    },
-    {
-      "index": 5,
-      "duration_beats": 2,
-      "bpm": 125,
-      "energy_state": "low",
-      "platform_types": [
-        "static",
-        "beat",
-        "alternateBeat"
-      ],
-      "vertical_range": [
-        0,
-        4
-      ],
-      "rhythm_density": 0.828458942632171,
-      "patrol_enemies": 0,
-      "flying_spawn_interval_ms": 0
-    },
-    {
-      "index": 6,
-      "duration_beats": 2,
-      "bpm": 125,
-      "energy_state": "medium",
-      "platform_types": [
-        "static",
-        "beat",
-        "alternateBeat",
-        "ghost",
-        "reverseGhost"
-      ],
-      "vertical_range": [
-        0,
-        3
-      ],
-      "rhythm_density": 0.6683464566929135,
-      "patrol_enemies": 0,
-      "flying_spawn_interval_ms": 0
-    },
-    {
-      "index": 7,
-      "duration_beats": 2,
-      "bpm": 125,
-      "energy_state": "medium",
-      "platform_types": [
-        "static",
-        "beat",
-        "alternateBeat",
-        "ghost",
-        "reverseGhost"
-      ],
-      "vertical_range": [
-        0,
-        4
-      ],
-      "rhythm_density": 0.8057742782152232,
-      "patrol_enemies": 0,
-      "flying_spawn_interval_ms": 0
-    },
-    {
-      "index": 8,
-      "duration_beats": 2,
-      "bpm": 125,
-      "energy_state": "medium",
-      "platform_types": [
-        "static",
-        "beat",
-        "alternateBeat",
-        "ghost",
-        "reverseGhost"
-      ],
-      "vertical_range": [
-        0,
-        4
-      ],
-      "rhythm_density": 0.7103316630875687,
-      "patrol_enemies": 0,
-      "flying_spawn_interval_ms": 0
-    },
-    {
-      "index": 9,
-      "duration_beats": 2,
-      "bpm": 125,
-      "energy_state": "medium",
-      "platform_types": [
-        "static",
-        "beat",
-        "alternateBeat",
-        "ghost",
-        "reverseGhost"
-      ],
-      "vertical_range": [
-        0,
-        4
-      ],
-      "rhythm_density": 0.8204118715929738,
-      "patrol_enemies": 0,
-      "flying_spawn_interval_ms": 0
-    },
-    {
-      "index": 10,
-      "duration_beats": 2,
-      "bpm": 125,
-      "energy_state": "low",
-      "platform_types": [
-        "static",
-        "beat",
-        "alternateBeat"
-      ],
-      "vertical_range": [
-        0,
-        4
-      ],
-      "rhythm_density": 0.8310665712240515,
-      "patrol_enemies": 0,
-      "flying_spawn_interval_ms": 0
-    },
-    {
-      "index": 11,
-      "duration_beats": 2,
-      "bpm": 125,
-      "energy_state": "medium",
-      "platform_types": [
-        "static",
-        "beat",
-        "alternateBeat",
-        "ghost",
-        "reverseGhost"
-      ],
-      "vertical_range": [
-        0,
-        4
-      ],
-      "rhythm_density": 0.829724409448819,
-      "patrol_enemies": 0,
-      "flying_spawn_interval_ms": 0
-    },
-    {
-      "index": 12,
-      "duration_beats": 2,
-      "bpm": 125,
-      "energy_state": "high",
-      "platform_types": [
-        "static",
-        "beat",
-        "alternateBeat",
-        "ghost",
-        "reverseGhost",
-        "elevator",
-        "shuttle",
-        "cross"
-      ],
-      "vertical_range": [
-        0,
-        4
-      ],
-      "rhythm_density": 0.7031734669529944,
-      "patrol_enemies": 0,
-      "flying_spawn_interval_ms": 0
-    },
-    {
-      "index": 13,
-      "duration_beats": 2,
-      "bpm": 125,
-      "energy_state": "medium",
-      "platform_types": [
-        "static",
-        "beat",
-        "alternateBeat",
-        "ghost",
-        "reverseGhost"
-      ],
-      "vertical_range": [
-        0,
-        4
-      ],
-      "rhythm_density": 0.7615748031496062,
-      "patrol_enemies": 0,
-      "flying_spawn_interval_ms": 0
-    },
-    {
-      "index": 14,
-      "duration_beats": 2,
-      "bpm": 125,
-      "energy_state": "medium",
-      "platform_types": [
-        "static",
-        "beat",
-        "alternateBeat",
-        "ghost",
-        "reverseGhost"
-      ],
-      "vertical_range": [
-        0,
-        4
-      ],
-      "rhythm_density": 0.7026880260657073,
-      "patrol_enemies": 0,
-      "flying_spawn_interval_ms": 0
-    },
-    {
-      "index": 15,
-      "duration_beats": 2,
-      "bpm": 125,
-      "energy_state": "high",
-      "platform_types": [
-        "static",
-        "beat",
-        "alternateBeat",
-        "ghost",
-        "reverseGhost",
-        "elevator",
-        "shuttle",
-        "cross"
-      ],
-      "vertical_range": [
-        0,
-        4
-      ],
-      "rhythm_density": 0.762410133515919,
-      "patrol_enemies": 0,
-      "flying_spawn_interval_ms": 0
-    },
-    {
-      "index": 16,
-      "duration_beats": 2,
-      "bpm": 125,
-      "energy_state": "medium",
-      "platform_types": [
-        "static",
-        "beat",
-        "alternateBeat",
-        "ghost",
-        "reverseGhost"
-      ],
-      "vertical_range": [
-        0,
-        2
-      ],
-      "rhythm_density": 0.5375805297065139,
-      "patrol_enemies": 0,
-      "flying_spawn_interval_ms": 0
-    },
-    {
-      "index": 17,
-      "duration_beats": 2,
-      "bpm": 125,
-      "energy_state": "medium",
-      "platform_types": [
-        "static",
-        "beat",
-        "alternateBeat",
-        "ghost",
-        "reverseGhost"
-      ],
-      "vertical_range": [
-        0,
-        2
-      ],
-      "rhythm_density": 0.7227803421124086,
-      "patrol_enemies": 0,
-      "flying_spawn_interval_ms": 0
-    },
-    {
-      "index": 18,
-      "duration_beats": 2,
-      "bpm": 125,
-      "energy_state": "medium",
-      "platform_types": [
-        "static",
-        "beat",
-        "alternateBeat",
-        "ghost",
-        "reverseGhost"
-      ],
-      "vertical_range": [
-        0,
-        1
-      ],
-      "rhythm_density": 0.7723693629205441,
-      "patrol_enemies": 0,
-      "flying_spawn_interval_ms": 0
-    },
-    {
-      "index": 19,
-      "duration_beats": 2,
-      "bpm": 125,
-      "energy_state": "medium",
-      "platform_types": [
-        "static",
-        "beat",
-        "alternateBeat",
-        "ghost",
-        "reverseGhost"
-      ],
-      "vertical_range": [
-        0,
-        2
-      ],
-      "rhythm_density": 0.7922888949226173,
-      "patrol_enemies": 0,
-      "flying_spawn_interval_ms": 0
-    },
-    {
-      "index": 20,
-      "duration_beats": 2,
-      "bpm": 125,
-      "energy_state": "high",
-      "platform_types": [
-        "static",
-        "beat",
-        "alternateBeat",
-        "ghost",
-        "reverseGhost",
-        "elevator",
-        "shuttle",
-        "cross"
-      ],
-      "vertical_range": [
-        0,
-        3
-      ],
-      "rhythm_density": 0.7709107116327438,
-      "patrol_enemies": 0,
-      "flying_spawn_interval_ms": 0
-    },
-    {
-      "index": 21,
-      "duration_beats": 2,
-      "bpm": 125,
-      "energy_state": "medium",
-      "platform_types": [
-        "static",
-        "beat",
-        "alternateBeat",
-        "ghost",
-        "reverseGhost"
-      ],
-      "vertical_range": [
-        0,
-        3
-      ],
-      "rhythm_density": 0.7780626258926937,
-      "patrol_enemies": 0,
-      "flying_spawn_interval_ms": 0
-    },
-    {
-      "index": 22,
-      "duration_beats": 2,
-      "bpm": 125,
-      "energy_state": "high",
-      "platform_types": [
-        "static",
-        "beat",
-        "alternateBeat",
-        "ghost",
-        "reverseGhost",
-        "elevator",
-        "shuttle",
-        "cross"
-      ],
-      "vertical_range": [
-        0,
-        4
-      ],
-      "rhythm_density": 0.6982820329277021,
-      "patrol_enemies": 0,
-      "flying_spawn_interval_ms": 0
-    },
-    {
-      "index": 23,
-      "duration_beats": 2,
-      "bpm": 125,
-      "energy_state": "medium",
-      "platform_types": [
-        "static",
-        "beat",
-        "alternateBeat",
-        "ghost",
-        "reverseGhost"
-      ],
-      "vertical_range": [
-        0,
-        4
-      ],
-      "rhythm_density": 0.7699662542182226,
-      "patrol_enemies": 0,
-      "flying_spawn_interval_ms": 0
-    }
-  ],
-  "midi_file": "Star Wars.mid",
   "midiPlayback": {
     "ppq": 384,
     "songEndTick": 21120,
@@ -6302,6 +5539,984 @@
       }
     ],
     "x0": 150,
-    "x1": 1942
-  }
+    "x1": 1030
+  },
+  "tempoMap": [
+    {
+      "startColumn": 0,
+      "bpm": 125
+    }
+  ],
+  "audioQualityMode": "balanced",
+  "gridColumns": 63,
+  "notes": [
+    523.2511306011972,
+    130.8127826502993,
+    220,
+    65.40639132514966,
+    65.40639132514966,
+    65.40639132514966,
+    65.40639132514966,
+    523.2511306011972,
+    65.40639132514966,
+    440,
+    391.99543598174927,
+    65.40639132514966,
+    391.99543598174927,
+    32.70319566257483,
+    32.70319566257483,
+    32.70319566257483,
+    32.70319566257483,
+    466.1637615180899,
+    440,
+    440,
+    391.99543598174927,
+    783.9908719634985,
+    261.6255653005986,
+    261.6255653005986,
+    783.9908719634985,
+    783.9908719634985,
+    82.4068892282175,
+    82.4068892282175,
+    391.99543598174927,
+    261.6255653005986,
+    783.9908719634985,
+    466.1637615180899,
+    466.1637615180899,
+    261.6255653005986,
+    261.6255653005986,
+    155.56349186104046,
+    82.4068892282175,
+    349.2282314330039,
+    349.2282314330039,
+    523.2511306011972,
+    174.61411571650194,
+    174.61411571650194,
+    174.61411571650194,
+    174.61411571650194,
+    174.61411571650194,
+    174.61411571650194,
+    174.61411571650194,
+    174.61411571650194,
+    174.61411571650194,
+    349.2282314330039,
+    349.2282314330039,
+    349.2282314330039,
+    349.2282314330039,
+    174.61411571650194,
+    73.41619197935188,
+    391.99543598174927,
+    73.41619197935188,
+    73.41619197935188,
+    73.41619197935188,
+    73.41619197935188,
+    932.3275230361799,
+    82.4068892282175,
+    880
+  ],
+  "platforms": [
+    {
+      "kind": "segment",
+      "x": 118,
+      "y": 384,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "segment",
+      "x": 182,
+      "y": 352,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "beat",
+      "x": 246,
+      "y": 320,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "elevator",
+      "x": 310,
+      "y": 320,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "alternateBeat",
+      "x": 374,
+      "y": 416,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "ghost",
+      "x": 438,
+      "y": 416,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "elevator",
+      "x": 502,
+      "y": 416,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "elevator",
+      "x": 566,
+      "y": 384,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "elevator",
+      "x": 630,
+      "y": 352,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "beat",
+      "x": 694,
+      "y": 288,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "segment",
+      "x": 758,
+      "y": 384,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "beat",
+      "x": 822,
+      "y": 352,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "reverseGhost",
+      "x": 886,
+      "y": 288,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "ghost",
+      "x": 950,
+      "y": 384,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "alternateBeat",
+      "x": 1014,
+      "y": 352,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "ghost",
+      "x": 1078,
+      "y": 320,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "shuttle",
+      "x": 1142,
+      "y": 320,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "elevator",
+      "x": 1206,
+      "y": 352,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "elevator",
+      "x": 1270,
+      "y": 352,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "segment",
+      "x": 1334,
+      "y": 416,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "beat",
+      "x": 1398,
+      "y": 384,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "ghost",
+      "x": 1462,
+      "y": 320,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "elevator",
+      "x": 1526,
+      "y": 384,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "segment",
+      "x": 1590,
+      "y": 288,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "elevator",
+      "x": 1654,
+      "y": 384,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "segment",
+      "x": 1718,
+      "y": 416,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "beat",
+      "x": 1782,
+      "y": 384,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "segment",
+      "x": 1846,
+      "y": 416,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "alternateBeat",
+      "x": 1910,
+      "y": 384,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "segment",
+      "x": 1974,
+      "y": 320,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "segment",
+      "x": 2038,
+      "y": 256,
+      "width": 64,
+      "height": 18
+    },
+    {
+      "kind": "segment",
+      "x": 2102,
+      "y": 192,
+      "width": 64,
+      "height": 18
+    }
+  ],
+  "segmentEnemies": [
+    {
+      "segmentIndex": 4,
+      "patrolCount": 0,
+      "flyingSpawnIntervalMs": 2600,
+      "fallingRockSpawnIntervalMs": 0
+    },
+    {
+      "segmentIndex": 7,
+      "patrolCount": 1,
+      "flyingSpawnIntervalMs": 0,
+      "fallingRockSpawnIntervalMs": 0
+    },
+    {
+      "segmentIndex": 9,
+      "patrolCount": 0,
+      "flyingSpawnIntervalMs": 2600,
+      "fallingRockSpawnIntervalMs": 0
+    },
+    {
+      "segmentIndex": 11,
+      "patrolCount": 1,
+      "flyingSpawnIntervalMs": 0,
+      "fallingRockSpawnIntervalMs": 0
+    },
+    {
+      "segmentIndex": 14,
+      "patrolCount": 1,
+      "flyingSpawnIntervalMs": 2600,
+      "fallingRockSpawnIntervalMs": 0
+    },
+    {
+      "segmentIndex": 15,
+      "patrolCount": 1,
+      "flyingSpawnIntervalMs": 0,
+      "fallingRockSpawnIntervalMs": 0
+    },
+    {
+      "segmentIndex": 19,
+      "patrolCount": 1,
+      "flyingSpawnIntervalMs": 2600,
+      "fallingRockSpawnIntervalMs": 0
+    },
+    {
+      "segmentIndex": 21,
+      "patrolCount": 1,
+      "flyingSpawnIntervalMs": 0,
+      "fallingRockSpawnIntervalMs": 0
+    },
+    {
+      "segmentIndex": 24,
+      "patrolCount": 0,
+      "flyingSpawnIntervalMs": 3400,
+      "fallingRockSpawnIntervalMs": 0
+    }
+  ],
+  "segments": [
+    {
+      "index": 0,
+      "duration_beats": 2,
+      "bpm": 125,
+      "energy_state": "low",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "elevator"
+      ],
+      "vertical_range": [
+        0,
+        1
+      ],
+      "rhythm_density": 0,
+      "patrol_enemies": 0,
+      "flying_spawn_interval_ms": 0,
+      "falling_rock_spawn_interval_ms": 0
+    },
+    {
+      "index": 1,
+      "duration_beats": 2,
+      "bpm": 125,
+      "energy_state": "low",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "elevator"
+      ],
+      "vertical_range": [
+        0,
+        3
+      ],
+      "rhythm_density": 0.7657480314960632,
+      "patrol_enemies": 0,
+      "flying_spawn_interval_ms": 0,
+      "falling_rock_spawn_interval_ms": 0
+    },
+    {
+      "index": 2,
+      "duration_beats": 2,
+      "bpm": 125,
+      "energy_state": "low",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "elevator"
+      ],
+      "vertical_range": [
+        0,
+        4
+      ],
+      "rhythm_density": 0.8324982104509665,
+      "patrol_enemies": 0,
+      "flying_spawn_interval_ms": 0,
+      "falling_rock_spawn_interval_ms": 0
+    },
+    {
+      "index": 3,
+      "duration_beats": 2,
+      "bpm": 125,
+      "energy_state": "low",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "elevator"
+      ],
+      "vertical_range": [
+        0,
+        4
+      ],
+      "rhythm_density": 0.7943492357572951,
+      "patrol_enemies": 0,
+      "flying_spawn_interval_ms": 0,
+      "falling_rock_spawn_interval_ms": 0
+    },
+    {
+      "index": 4,
+      "duration_beats": 2,
+      "bpm": 125,
+      "energy_state": "medium",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "ghost",
+        "reverseGhost",
+        "elevator"
+      ],
+      "vertical_range": [
+        0,
+        4
+      ],
+      "rhythm_density": 0.6795617939061966,
+      "patrol_enemies": 0,
+      "flying_spawn_interval_ms": 2600,
+      "falling_rock_spawn_interval_ms": 0
+    },
+    {
+      "index": 5,
+      "duration_beats": 2,
+      "bpm": 125,
+      "energy_state": "low",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "elevator"
+      ],
+      "vertical_range": [
+        0,
+        4
+      ],
+      "rhythm_density": 0.828458942632171,
+      "patrol_enemies": 0,
+      "flying_spawn_interval_ms": 0,
+      "falling_rock_spawn_interval_ms": 0
+    },
+    {
+      "index": 6,
+      "duration_beats": 2,
+      "bpm": 125,
+      "energy_state": "medium",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "ghost",
+        "reverseGhost",
+        "elevator"
+      ],
+      "vertical_range": [
+        0,
+        3
+      ],
+      "rhythm_density": 0.6683464566929135,
+      "patrol_enemies": 0,
+      "flying_spawn_interval_ms": 0,
+      "falling_rock_spawn_interval_ms": 0
+    },
+    {
+      "index": 7,
+      "duration_beats": 2,
+      "bpm": 125,
+      "energy_state": "medium",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "ghost",
+        "reverseGhost",
+        "elevator"
+      ],
+      "vertical_range": [
+        0,
+        4
+      ],
+      "rhythm_density": 0.8057742782152232,
+      "patrol_enemies": 1,
+      "flying_spawn_interval_ms": 0,
+      "falling_rock_spawn_interval_ms": 0
+    },
+    {
+      "index": 8,
+      "duration_beats": 2,
+      "bpm": 125,
+      "energy_state": "medium",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "ghost",
+        "reverseGhost",
+        "elevator"
+      ],
+      "vertical_range": [
+        0,
+        4
+      ],
+      "rhythm_density": 0.703798054654933,
+      "patrol_enemies": 0,
+      "flying_spawn_interval_ms": 0,
+      "falling_rock_spawn_interval_ms": 0
+    },
+    {
+      "index": 9,
+      "duration_beats": 2,
+      "bpm": 125,
+      "energy_state": "medium",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "ghost",
+        "reverseGhost",
+        "elevator"
+      ],
+      "vertical_range": [
+        0,
+        4
+      ],
+      "rhythm_density": 0.8204118715929738,
+      "patrol_enemies": 0,
+      "flying_spawn_interval_ms": 2600,
+      "falling_rock_spawn_interval_ms": 0
+    },
+    {
+      "index": 10,
+      "duration_beats": 2,
+      "bpm": 125,
+      "energy_state": "low",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "elevator"
+      ],
+      "vertical_range": [
+        0,
+        4
+      ],
+      "rhythm_density": 0.8310665712240515,
+      "patrol_enemies": 0,
+      "flying_spawn_interval_ms": 0,
+      "falling_rock_spawn_interval_ms": 0
+    },
+    {
+      "index": 11,
+      "duration_beats": 2,
+      "bpm": 125,
+      "energy_state": "medium",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "ghost",
+        "reverseGhost",
+        "elevator"
+      ],
+      "vertical_range": [
+        0,
+        4
+      ],
+      "rhythm_density": 0.829724409448819,
+      "patrol_enemies": 1,
+      "flying_spawn_interval_ms": 0,
+      "falling_rock_spawn_interval_ms": 0
+    },
+    {
+      "index": 12,
+      "duration_beats": 2,
+      "bpm": 125,
+      "energy_state": "high",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "ghost",
+        "reverseGhost",
+        "elevator",
+        "shuttle",
+        "cross",
+        "spring",
+        "hazard",
+        "launch30",
+        "launch60"
+      ],
+      "vertical_range": [
+        0,
+        4
+      ],
+      "rhythm_density": 0.7031734669529944,
+      "patrol_enemies": 0,
+      "flying_spawn_interval_ms": 0,
+      "falling_rock_spawn_interval_ms": 0
+    },
+    {
+      "index": 13,
+      "duration_beats": 2,
+      "bpm": 125,
+      "energy_state": "medium",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "ghost",
+        "reverseGhost",
+        "elevator"
+      ],
+      "vertical_range": [
+        0,
+        4
+      ],
+      "rhythm_density": 0.7615748031496063,
+      "patrol_enemies": 0,
+      "flying_spawn_interval_ms": 0,
+      "falling_rock_spawn_interval_ms": 0
+    },
+    {
+      "index": 14,
+      "duration_beats": 2,
+      "bpm": 125,
+      "energy_state": "medium",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "ghost",
+        "reverseGhost",
+        "elevator"
+      ],
+      "vertical_range": [
+        0,
+        4
+      ],
+      "rhythm_density": 0.7026880260657073,
+      "patrol_enemies": 1,
+      "flying_spawn_interval_ms": 2600,
+      "falling_rock_spawn_interval_ms": 0
+    },
+    {
+      "index": 15,
+      "duration_beats": 2,
+      "bpm": 125,
+      "energy_state": "high",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "ghost",
+        "reverseGhost",
+        "elevator",
+        "shuttle",
+        "cross",
+        "spring",
+        "hazard",
+        "launch30",
+        "launch60"
+      ],
+      "vertical_range": [
+        0,
+        4
+      ],
+      "rhythm_density": 0.762410133515919,
+      "patrol_enemies": 1,
+      "flying_spawn_interval_ms": 0,
+      "falling_rock_spawn_interval_ms": 0
+    },
+    {
+      "index": 16,
+      "duration_beats": 2,
+      "bpm": 125,
+      "energy_state": "medium",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "ghost",
+        "reverseGhost",
+        "elevator"
+      ],
+      "vertical_range": [
+        0,
+        2
+      ],
+      "rhythm_density": 0.5375805297065139,
+      "patrol_enemies": 0,
+      "flying_spawn_interval_ms": 0,
+      "falling_rock_spawn_interval_ms": 0
+    },
+    {
+      "index": 17,
+      "duration_beats": 2,
+      "bpm": 125,
+      "energy_state": "medium",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "ghost",
+        "reverseGhost",
+        "elevator"
+      ],
+      "vertical_range": [
+        0,
+        2
+      ],
+      "rhythm_density": 0.7283464566929134,
+      "patrol_enemies": 0,
+      "flying_spawn_interval_ms": 0,
+      "falling_rock_spawn_interval_ms": 0
+    },
+    {
+      "index": 18,
+      "duration_beats": 2,
+      "bpm": 125,
+      "energy_state": "medium",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "ghost",
+        "reverseGhost",
+        "elevator"
+      ],
+      "vertical_range": [
+        0,
+        1
+      ],
+      "rhythm_density": 0.7723693629205441,
+      "patrol_enemies": 0,
+      "flying_spawn_interval_ms": 0,
+      "falling_rock_spawn_interval_ms": 0
+    },
+    {
+      "index": 19,
+      "duration_beats": 2,
+      "bpm": 125,
+      "energy_state": "medium",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "ghost",
+        "reverseGhost",
+        "elevator"
+      ],
+      "vertical_range": [
+        0,
+        2
+      ],
+      "rhythm_density": 0.7922888949226172,
+      "patrol_enemies": 1,
+      "flying_spawn_interval_ms": 2600,
+      "falling_rock_spawn_interval_ms": 0
+    },
+    {
+      "index": 20,
+      "duration_beats": 2,
+      "bpm": 125,
+      "energy_state": "high",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "ghost",
+        "reverseGhost",
+        "elevator",
+        "shuttle",
+        "cross",
+        "spring",
+        "hazard",
+        "launch30",
+        "launch60"
+      ],
+      "vertical_range": [
+        0,
+        3
+      ],
+      "rhythm_density": 0.7709107116327437,
+      "patrol_enemies": 0,
+      "flying_spawn_interval_ms": 0,
+      "falling_rock_spawn_interval_ms": 0
+    },
+    {
+      "index": 21,
+      "duration_beats": 2,
+      "bpm": 125,
+      "energy_state": "medium",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "ghost",
+        "reverseGhost",
+        "elevator"
+      ],
+      "vertical_range": [
+        0,
+        3
+      ],
+      "rhythm_density": 0.7780626258926936,
+      "patrol_enemies": 1,
+      "flying_spawn_interval_ms": 0,
+      "falling_rock_spawn_interval_ms": 0
+    },
+    {
+      "index": 22,
+      "duration_beats": 2,
+      "bpm": 125,
+      "energy_state": "high",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "ghost",
+        "reverseGhost",
+        "elevator",
+        "shuttle",
+        "cross",
+        "spring",
+        "hazard",
+        "launch30",
+        "launch60"
+      ],
+      "vertical_range": [
+        0,
+        4
+      ],
+      "rhythm_density": 0.6982820329277021,
+      "patrol_enemies": 0,
+      "flying_spawn_interval_ms": 0,
+      "falling_rock_spawn_interval_ms": 0
+    },
+    {
+      "index": 23,
+      "duration_beats": 2,
+      "bpm": 125,
+      "energy_state": "medium",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "ghost",
+        "reverseGhost",
+        "elevator"
+      ],
+      "vertical_range": [
+        0,
+        4
+      ],
+      "rhythm_density": 0.7699662542182226,
+      "patrol_enemies": 0,
+      "flying_spawn_interval_ms": 0,
+      "falling_rock_spawn_interval_ms": 0
+    },
+    {
+      "index": 24,
+      "duration_beats": 2,
+      "bpm": 125,
+      "energy_state": "low",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "elevator"
+      ],
+      "vertical_range": [
+        0,
+        1
+      ],
+      "rhythm_density": 0,
+      "patrol_enemies": 0,
+      "flying_spawn_interval_ms": 3400,
+      "falling_rock_spawn_interval_ms": 0
+    },
+    {
+      "index": 25,
+      "duration_beats": 2,
+      "bpm": 125,
+      "energy_state": "low",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "elevator"
+      ],
+      "vertical_range": [
+        0,
+        1
+      ],
+      "rhythm_density": 0,
+      "patrol_enemies": 0,
+      "flying_spawn_interval_ms": 0,
+      "falling_rock_spawn_interval_ms": 0
+    },
+    {
+      "index": 26,
+      "duration_beats": 2,
+      "bpm": 125,
+      "energy_state": "low",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "elevator"
+      ],
+      "vertical_range": [
+        0,
+        1
+      ],
+      "rhythm_density": 0,
+      "patrol_enemies": 0,
+      "flying_spawn_interval_ms": 0,
+      "falling_rock_spawn_interval_ms": 0
+    },
+    {
+      "index": 27,
+      "duration_beats": 2,
+      "bpm": 125,
+      "energy_state": "low",
+      "platform_types": [
+        "static",
+        "beat",
+        "alternateBeat",
+        "elevator"
+      ],
+      "vertical_range": [
+        0,
+        1
+      ],
+      "rhythm_density": 0,
+      "patrol_enemies": 0,
+      "flying_spawn_interval_ms": 0,
+      "falling_rock_spawn_interval_ms": 0
+    }
+  ],
+  "midi_file": "Star Wars.mid"
 }

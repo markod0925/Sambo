@@ -133,6 +133,35 @@ The green layer must read as utility/boost, not hazard.
 
 ---
 
+## 4.5 Hazard Shock (Enemy Red Danger Window)
+
+For hazard platforms (3 beats neutral, 1 beat shock).
+
+| Role          | Color          | Hex       |
+| ------------- | -------------- | --------- |
+| Neutral Base  | Tinted Slate   | `#4F2A37` |
+| Neutral Border| Tinted Edge    | `#754866` |
+| Shock Base    | Enemy Crimson  | `#A4161A` |
+| Shock Border  | Enemy Alert Red| `#FF4D6D` |
+
+Shock state must read clearly as "unsafe now" without relying on audio.
+
+---
+
+## 4.6 Launch Guidance (Cool Utility)
+
+For launch platforms (`launch30`, `launch60`).
+
+| Role         | Color         | Hex       |
+| ------------ | ------------- | --------- |
+| Base Fill    | Launch Blue   | `#2F6FD3` |
+| Border       | Cyan Edge     | `#4CC9F0` |
+| Angle Guide  | Ice White     | `#CDEFFF` |
+
+Guide line must remain thin and readable, and must not overpower collision silhouette.
+
+---
+
 # 5. Platform Visual Language
 
 Each platform type must be distinguishable at 50% opacity and 20% intensity.
@@ -262,7 +291,37 @@ Static utility platform with jump-boost identity.
 
 ---
 
-## 5.10 Player
+## 5.10 Hazard Platform
+
+Beat-locked danger platform (`3 neutral + 1 shock`).
+
+* Neutral beats (1-3):
+  * Fill: `#4F2A37`
+  * Border: `#754866`
+  * Alpha close to normal solid-platform readability
+* Shock beat (4):
+  * Fill: `#A4161A`
+  * Border: `#FF4D6D`
+  * Slight pulse tied to beat phase is allowed during shock
+* Shock readability must be immediately clear at low intensity and without audio support.
+
+---
+
+## 5.11 Launch Platform
+
+Directional utility platform with `onLand` trigger behavior.
+
+* Fill: `#2F6FD3`
+* Border: `#4CC9F0`
+* Overlay: thin angle guide line in `#CDEFFF`
+* Two runtime variants must remain visually explicit through the line angle:
+  * `launch30`
+  * `launch60`
+* Guide line must remain secondary to the platform silhouette and collision readability.
+
+---
+
+## 5.12 Player
 
 Player readability must remain high during movement arcs.
 
@@ -270,26 +329,32 @@ Player readability must remain high during movement arcs.
 * Jump deformation: vertical stretch driven by absolute vertical speed (`|vy|`)
 * At jump apex (`|vy|` near `0`), body returns close to neutral scale
 * Spring-boost jumps must visibly stretch more than normal jumps because launch speed is higher
+* Double-jump (air jump) should reuse the same core stretch language as base jump, without spring-specific over-stretch
 * Apply subtle horizontal squeeze while stretching vertically to preserve mass readability
 * Landing deformation: moderately pronounced damped "jelly" oscillation, scaled by landing impact speed and kept short/readable
 * Combat deformation: stomping an enemy triggers a reduced jelly pop variant (shorter and less intense than landing)
 * Torso marker: `3x3` square heart in `#3A86FF`
 * Heart pulse timing must follow current BPM (metronome beat phase), not a fixed animation timer
 * Direction cue: torso marker flips horizontally and swaps side with movement direction (`forward=left`, `backward=right`)
+* Dash ghosting: spawn short body+heart afterimages while dash is active, with quick fade (`~180ms`) and directional tint (`forward` warm / `backward` cool)
 
 ---
 
 # 6. Enemy Visual Identity
 
 Enemies must be readable even at low intensity.
+Shared border rhythm system:
+* All enemies use a pulsing 2px outline that lerps from warm gray `#6B707C` to red `#FF4D6D`.
+* Pulse timing is anti-phase against BPM downbeats (minimum on beat, maximum mid-beat).
 
 ## Patrol Block Enemy
 
 * Shape: solid square
 * Runtime blockout size: `15x12`
 * Color: muted crimson `#A4161A`
-* Border: darker red `#660708`
+* Base border tone: darker red `#660708` (runtime pulse applies shared red-gray anti-phase outline)
 * No glow
+* Placement rule: spawn baseline sits above platform top edge (no initial overlap with platform body)
 
 Danger color distinct from warm energy palette.
 
@@ -304,6 +369,19 @@ Danger color distinct from warm energy palette.
 * Motion trail: faint streak (low alpha)
 
 Never use the cyan or gold families for enemies.
+
+---
+
+## Crimson Falling Rock
+
+* Shape: round rock silhouette
+* Runtime blockout size: circle radius `7` (approx `14x14` footprint)
+* Core: vivid crimson `#C1121F`
+* Border pulse accent: shared red-gray anti-phase pulse (`#6B707C <-> #FF4D6D`)
+* Motion identity: vertical drop from above
+* Pulse identity: scale tracks BPM beat phase, while border pulse stays in anti-phase for contrast
+
+The falling-rock pulse must stay readable without overpowering beat/ghost platform telegraphs.
 
 ---
 
@@ -419,11 +497,31 @@ Debug overlay (runtime):
   * tempo status (current/target/rate/zone)
   * playback speed diagnostics (`expected beats/s`, `actual beats/s`, `% error`)
   * scheduler status (queue size, predictive queue size, lateness avg/max, underrun count)
-  * current grid column, movement direction, step state, note event counts (`on/off`), and active voice count
+  * current grid column, movement direction, step state, dash state (`active` / cooldown / `ready`), note event counts (`on/off`), and active voice count
   * harmonic telemetry (`top 3 pitch classes` + smoothed harmonic intensity)
   * alpha telemetry row (`level`, `player`, `moon`, `halo`, `dark`) with 2-decimal precision
 * Audio de-click debug mode can be toggled at runtime with `F9`.
 * Overlay must remain readable but secondary; no glow or animation.
+
+Start screen controls:
+
+* Top-right control cluster keeps two aligned horizontal sliders: `Volume` and `Difficulty`.
+* Difficulty uses the same hard-edged slider language as Volume (track `#2A3244`, fill `#4CC9F0`, handle `#E8E6E3`).
+* Difficulty slider has exactly three snap points with visible labels (`Easy`, `Normal`, `Hard`) under the track.
+* Difficulty label text must include both mode name and BPM multiplier (`0.85x`, `1.00x`, `1.50x`) for immediate readability.
+
+Pause menu controls:
+
+* Pause overlay actions are `Continue`, `Restart`, and `Back to Start Screen`.
+* `Restart` uses the cool accent button family (cyan) and replaces the previous `Quit` action.
+* `Back to Start Screen` uses the danger button family (red fill, light-red text).
+* Vertical order is fixed as: `Continue` (top), `Restart` (middle), `Back to Start Screen` (bottom).
+
+Game over and victory menu controls:
+
+* In `GAME OVER`, `Restart` and `Back to Start Screen` stay visually grouped with reduced vertical spacing; `Back to Start Screen` is moved upward.
+* In `VICTORY`, `Restart` and `Next Level` stay visually grouped with reduced vertical spacing; `Next Level` is moved upward.
+* In `GAME OVER` and `VICTORY`, `Back to Start Screen` must keep the red danger styling.
 
 No excessive animations.
 
@@ -455,31 +553,21 @@ Editor controls should use the same hard-edged UI language used by runtime overl
 * Warm gold for primary/confirm actions
 * Red reserved for destructive actions
 * `Back to Game` is a primary warm action and should be placed at top of the editor control panel
-* `Open MIDI Composer` sits beside top navigation actions and uses the same primary warm treatment
-* Runtime export controls expose editable `Default BPM fallback` plus read-only `Grid columns (auto)` status text (no editable grid-columns input)
+* MIDI transport buttons are icon-only:
+  * play uses a triangle glyph (`▶`)
+  * stop uses a square glyph (`■`)
+  * keep `aria-label`/tooltip text in English (`Play MIDI`, `Stop MIDI`)
+* `Level Save` controls expose editable `Default BPM fallback` plus read-only `Grid columns (auto)` status text (no editable grid-columns input)
 * Segment BPM editing is first-class in the segments table and drives runtime tempo zoning
-* Runtime export panel includes audio-quality authoring controls:
+* `Level Save` panel includes audio-quality authoring controls:
   * profile selector (`performance`, `balanced`, `high`)
-  * optional numeric overrides (polyphony, scheduler lookahead/lead, saturation)
-  * synth style selector (`game`, `editorLike`, or preset default)
+  * no manual numeric/style override fields in editor runtime export UI
 * Editor playback-quality selector (MIDI parsing/playback) uses the same profile naming (`performance`, `balanced`, `high`) for consistency.
-
-MIDI Step Composer (`/daw.html`) must stay visually aligned with editor/runtime families:
-
-* Same dark panel/workspace split (`#0C1322` + `#05070F`).
-* Piano-roll headers use deep blue panel tone (`#0F182C`) with sticky note/beat labels.
-* Grid base:
-  * natural-note rows: `#0B0F1A`
-  * sharp-note rows: `#121A2B`
-* Active note cells use warm action family (`#F4D35E` fill, `#FFB703` edge) for immediate edit readability.
-* Playhead column highlight uses cool interactive accent (`#4CC9F0`) across header and body.
-* Tempo-map editor block keeps editor panel language:
-  * container uses input surface family (`#121A2B`) with border `#3A4663`
-  * compact row structure (`Start Beat`, `BPM`, `Delete`) stays monospace and square-cornered
-  * tempo-change beat headers in the piano roll are highlighted with warm accent (`#F4D35E`) for scanability.
-* Transport semantics remain consistent:
-  * primary actions (`Play`, `Download MIDI`, navigation) use warm style
-  * destructive/stop actions (`Stop`, `Clear`) use red danger style.
+* Left control panel groups controls into separate bordered boxes:
+  * `MIDI` box for MIDI browsing/loading, local MIDI selection, transport, quality, and MIDI status
+  * `Levels` box for level browsing/loading only
+  * `Level Save` remains its own dedicated box (not merged with MIDI/Levels controls), and contains the base-name input plus `Save in Levels` / `Download Level` actions
+* `MIDI` and `Levels` file selectors use an icon refresh control (`U+1F5D8`) positioned to the left of the dropdown; refresh button height must match the adjacent dropdown height and remain visually flush (no vertical step).
 
 Editor scrollbars must match runtime color families:
 
@@ -495,35 +583,42 @@ Layout editor grid must remain visually aligned with runtime snap rules:
 * Horizontal navigation uses a dedicated range scrollbar under layout actions (replacing left/right buttons)
 * During MIDI playback, camera auto-scroll keeps the playhead in view (target window inside the canvas, not hard-centered)
 * Platform kind label `static` is shown in the layout canvas for base platforms (runtime kind remains `segment`)
+* Platform typing is driven by a right-click context menu (no rotate/cycle interaction)
+* Context menu categories must remain grouped and lowercase:
+  * `static`: `static`
+  * `dissolving`: `beat`, `alternateBeat`, `ghost`, `reverseGhost`
+  * `moving`: `elevator`, `shuttle`, `cross`
+  * `launching`: `spring`, `launch30`, `launch60`
+  * `hazard`: `hazard`
+* Launch kinds draw an in-platform angle guide line (`launch30`/`launch60`) so angle intent is readable directly in layout view
 * Layout canvas shows tempo-zone boundary bars in warm accent (`#FFB703`) with BPM labels
 * While MIDI playback is active, the layout canvas shows a moving vertical playback cursor line in cyan (`#4CC9F0`) with `MIDI` label
 * Top layout info strip shows `Current zone BPM` for the active camera area
+* Layout actions include a preview toggle button (`Preview player: Off/On`) with cyan active state and clear pressed feedback
+* Layout action row is intentionally minimal: only `Center spawn` and `Preview player: Off/On` are visible (no `Regenerate from segments` / `Delete selected` buttons)
+* Multi-selection uses both:
+  * box selection drag on empty canvas
+  * `Ctrl+left click` toggle on platforms
+* Selected platforms use the existing cyan accent highlight, and box-selection overlay uses translucent cyan fill + cyan stroke
+* `Ctrl+C`/`Ctrl+V` editing is visual-canvas anchored; paste anchor is the copied selection bottom-left bounding-box point
+* Drawing order must keep non-static platforms visually in front of static base platforms (`segment`): draw statics first, non-statics second.
+* Layout canvas preview player style:
+  * body block size `12x19` (`#E8E6E3`) with dark border for contrast on the editor background
+  * heart marker `3x3` (`#3A86FF`) offset on torso side and pulse-synced to preview metronome beat phase
+  * heart side flips with movement direction (forward/backward readability cue)
+* Preview status line under the canvas stays concise and English-only:
+  * control hint (`A/D or Arrows`, `W/Up/Space`)
+  * state (`On/Off`) and live BPM telemetry (`current -> target`) while active
+* During preview mode, camera follow prioritizes player tracking; MIDI cursor can remain visible but must not override preview follow behavior
 
 Segments table conventions:
 
 * Column headers use Title Case labels (not snake_case)
-* Segment ID is read-only text (non-editable)
-* `Segment BPM` is an editable numeric column (`20-300`) and appears immediately after Segment ID
-* `Duration Beats` is fixed to `2` internally and not shown in table UI
-* `Platform Types (CSV)` column is intentionally wider than numeric columns for readability
-* `Vertical Min` and `Vertical Max` are compact numeric columns with matched width/visual weight
-* `Vertical Min`, `Vertical Max`, `Patrol Enemies`, and `Flying Spawn Interval` inputs use a reduced visual width (75% of cell width)
-* Flying spawn interval column is shown in seconds (`s`) and communicates disable state explicitly (`0 = Off`)
-* `Rhythm Density` is not shown in the table UI
-* `Energy State` is edited only through a single dropdown control (no duplicated colored badge above it)
-
-Minimap energy legend:
-
-| Energy | Color     |
-| ------ | --------- |
-| Low    | `#3A4663` |
-| Medium | `#3A86FF` |
-| High   | `#F4D35E` |
-
-Minimap tempo markers:
-
-* Tempo-change boundaries are rendered as vertical warm lines (`#FFB703`)
-* Marker labels show target BPM near the boundary
+* Table content is scoped to selected platforms only (empty selection => empty body)
+* Columns are `Kind`, `Patrol`, `Flying (s)`, `Falling Rock (s)`, and row-level `Delete`
+* Numeric platform fields use compact inputs (75% width) for dense editing
+* `Kind` uses the same platform naming shown in the context menu (`static`, `beat`, `alternateBeat`, `ghost`, `reverseGhost`, `elevator`, `shuttle`, `cross`, `spring`, `launch30`, `launch60`, `hazard`)
+* Enemy columns are active only for selected `static` platforms (runtime `segment`); for non-static rows they remain disabled to avoid ambiguous mapping
 
 ---
 
@@ -586,24 +681,20 @@ Mandatory constraints:
 - Keep all assets in minimal geometric language; no texture noise, no realism.
 - Preserve gameplay readability first (collision silhouette > decoration).
 - Respect state color semantics from sections 4 and 5.
-- Keep enemy palette isolated from warm/cool platform families.
+- Keep enemy palette isolated from warm/cool platform families, except hazard shock state.
 
 These assets are static sprite replacements for current primitive runtime shapes; animation is optional and not required for the baseline visual pack.
 
 ---
 
-# 15. MIDI Authoring Screens (DAW + Editor)
+# 15. MIDI Authoring Screens (Editor)
 
 Functional update aligned to current UI implementation:
 
-- DAW and editor maintain the existing visual language (dark indigo background, cyan/gold accents).
-- Tempo-change markers in piano-roll headers remain the primary tempo cue.
-- Playhead highlight remains the only persistent playback cursor style in the DAW grid.
+- Editor keeps the existing visual language (dark indigo background, cyan/gold accents).
 - No new decorative visual systems were introduced for MIDI fidelity updates.
 
 Readability constraints:
 
-- Step-grid remains a helper projection only; visual density must not imply note deletion.
-- Tempo rows must keep numeric controls clear and compact to support frequent BPM edits.
 - MIDI status labels must stay concise and in English (loaded/playing/stopped/error states).
 - Runtime debug text may include one additional diagnostics line for playback speed (`expected/actual beats per second` plus error %); it must stay monochrome and non-promotional, with visibility toggle (`F10`).

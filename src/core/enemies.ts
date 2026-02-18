@@ -26,6 +26,13 @@ export interface FlyingEnemyState {
   active: boolean;
 }
 
+export interface FallingRockEnemyState {
+  x: number;
+  y: number;
+  speedY: number;
+  active: boolean;
+}
+
 export function intersects(a: Rect, b: Rect): boolean {
   return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
 }
@@ -77,6 +84,25 @@ export function updateFlyingEnemy(enemy: FlyingEnemyState, playerY: number, delt
   };
 
   if (next.x < offscreenLeftX) {
+    return { ...next, active: false };
+  }
+
+  return next;
+}
+
+export function updateFallingRockEnemy(
+  enemy: FallingRockEnemyState,
+  deltaSeconds: number,
+  offscreenBottomY: number
+): FallingRockEnemyState {
+  if (!enemy.active) return enemy;
+
+  const next = {
+    ...enemy,
+    y: enemy.y + enemy.speedY * deltaSeconds
+  };
+
+  if (next.y > offscreenBottomY) {
     return { ...next, active: false };
   }
 

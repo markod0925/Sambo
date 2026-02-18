@@ -83,7 +83,6 @@
         outline-offset: 1px;
       }
       #backToGameStart,
-      #openMidiComposer,
       #exportRuntime,
       #playMidi {
         background: var(--accent-warm);
@@ -91,24 +90,56 @@
         border-color: #e8bf39;
       }
       #backToGameStart:hover,
-      #openMidiComposer:hover,
       #exportRuntime:hover,
       #playMidi:hover {
         background: #f8de82;
         border-color: #f8de82;
       }
-      #stopMidi,
-      #layoutDeleteSelected {
+      #stopMidi {
         background: var(--accent-danger);
         color: var(--ink);
         border-color: #ff8585;
       }
-      #stopMidi:hover,
-      #layoutDeleteSelected:hover {
+      #stopMidi:hover {
         background: #ff8585;
         border-color: #ffb2b2;
       }
+      #layoutPreviewToggle[aria-pressed='true'] {
+        background: var(--accent-cool);
+        color: var(--ink);
+        border-color: #7edcf7;
+      }
+      #layoutPreviewToggle[aria-pressed='true']:hover {
+        background: #7edcf7;
+        border-color: #a5ebff;
+      }
       .button-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+      .refresh-select-row {
+        display: grid;
+        grid-template-columns: 40px minmax(0, 1fr);
+        gap: 6px;
+        margin: 6px 0;
+        align-items: center;
+        grid-auto-rows: 38px;
+      }
+      .refresh-select-row button {
+        width: 100%;
+        margin: 0;
+        height: 38px;
+        padding: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 15px;
+        line-height: 1;
+        box-sizing: border-box;
+      }
+      .refresh-select-row select {
+        margin: 0;
+        height: 38px;
+        padding: 0 10px;
+        box-sizing: border-box;
+      }
       .panel label { display: block; margin-top: 10px; font-size: 12px; color: var(--text-dim); }
       .panel input[type='checkbox'] { width: auto; margin-right: 8px; }
       .panel input,
@@ -123,6 +154,8 @@
         box-sizing: border-box;
       }
       .hidden-file-input { display: none; }
+      .panel-box { margin-top: 12px; border: 1px solid var(--border-2); border-radius: 10px; padding: 10px; background: var(--surface-2); }
+      .panel-box h3 { margin: 0 0 6px; font-size: 14px; }
       .runtime-box { margin-top: 12px; border: 1px solid var(--border-2); border-radius: 10px; padding: 10px; background: var(--surface-2); }
       .runtime-box h3 { margin: 0 0 6px; font-size: 14px; }
       .runtime-box input[type='number'] { width: 130px; max-width: 100%; }
@@ -130,8 +163,8 @@
       table { width: 100%; border-collapse: collapse; }
       th, td { border-bottom: 1px solid var(--border); padding: 8px; text-align: left; }
       th { color: var(--text-dim); background: #0f182c; }
-      .segments-table th:nth-child(4),
-      .segments-table td:nth-child(4) { min-width: 340px; }
+      .segments-table th:nth-child(1),
+      .segments-table td:nth-child(1) { min-width: 140px; }
       .segments-table .size-75 { width: 75%; }
       select, input[type='number'], input[type='text'] { width: 100%; padding: 6px; border-radius: 0; border: 1px solid var(--border-2); background: var(--surface-2); color: var(--text); }
       .small { font-size: 12px; color: var(--text-dim); }
@@ -140,33 +173,8 @@
       .medium { background: #3a86ff; color: #05070f; }
       .high { background: #f4d35e; color: #05070f; }
 
-      .minimap {
-        width: 100%;
-        margin: 0 0 12px;
-        box-sizing: border-box;
-        background: rgba(12, 19, 34, 0.96);
-        border: 1px solid var(--border-2);
-        border-radius: 10px;
-        box-shadow: var(--shadow);
-        padding: 10px;
-      }
-      .minimap h3 { margin: 0 0 6px; font-size: 14px; }
-      .minimap canvas {
-        width: 100%;
-        height: 180px;
-        display: block;
-        box-sizing: border-box;
-        border-radius: 6px;
-        border: 1px solid var(--border);
-        background: #0b0f1a;
-        box-shadow: var(--shadow);
-      }
-      .legend { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
-      .legend span { font-size: 11px; padding: 2px 8px; border-radius: 999px; }
-      .l-low { background: #3a4663; }
-      .l-medium { background: #3a86ff; color: #05070f; }
-      .l-high { background: #f4d35e; color: #05070f; }
       .level-layout-editor {
+        position: relative;
         width: 100%;
         margin: 0 0 14px;
         box-sizing: border-box;
@@ -177,7 +185,7 @@
         padding: 10px;
       }
       .level-layout-editor h3 { margin: 0 0 6px; font-size: 14px; }
-      .level-layout-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 8px; }
+      .level-layout-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 8px; }
       .layout-scroll { margin: 8px 0 6px; }
       .layout-scroll input[type='range'] { width: 100%; }
       .level-layout-editor canvas {
@@ -190,6 +198,43 @@
         background: #0b0f1a;
         box-shadow: var(--shadow);
       }
+      .layout-context-menu {
+        position: absolute;
+        z-index: 50;
+        min-width: 220px;
+        max-width: 260px;
+        padding: 8px;
+        border: 1px solid var(--border-2);
+        background: var(--surface-2);
+        box-shadow: var(--shadow);
+      }
+      .layout-context-menu[hidden] { display: none; }
+      .layout-context-menu-group + .layout-context-menu-group {
+        margin-top: 8px;
+        padding-top: 8px;
+        border-top: 1px solid var(--border);
+      }
+      .layout-context-menu-group-title {
+        margin: 0 0 6px;
+        color: var(--text-dim);
+        font-size: 11px;
+        text-transform: lowercase;
+      }
+      .layout-context-menu-kind {
+        margin: 0;
+        padding: 7px 8px;
+        width: 100%;
+        text-align: left;
+        border: 1px solid var(--border);
+        background: var(--list-bg);
+        color: var(--text);
+        font-size: 12px;
+      }
+      .layout-context-menu-kind:hover {
+        border-color: var(--accent-cool);
+        background: var(--accent-cool);
+        color: var(--ink);
+      }
       button, input, select, textarea { font-family: inherit; }
     </style>
   </head>
@@ -198,43 +243,47 @@
       <div class="panel">
         <h1>Level Draft Editor</h1>
         <button id="backToGameStart">Back to Game</button>
-        <button id="openMidiComposer">Open MIDI Composer</button>
-        <label for="midiFolderSelect">MIDI files available in <code>MIDI/</code></label>
-        <select id="midiFolderSelect">
-          <option value="">(no file)</option>
-        </select>
-        <div class="button-row">
-          <button id="refreshMidiFolder">Refresh MIDI list</button>
+        <section class="panel-box">
+          <h3>MIDI</h3>
+          <label for="midiFolderSelect">MIDI files available in <code>MIDI/</code></label>
+          <div class="refresh-select-row">
+            <button id="refreshMidiFolder" aria-label="Refresh MIDI list" title="Refresh MIDI list">&#x1F5D8;</button>
+            <select id="midiFolderSelect">
+              <option value="">(no file)</option>
+            </select>
+          </div>
           <button id="loadMidiFromFolder">Load MIDI file</button>
-        </div>
-        <input id="fileInput" class="hidden-file-input" type="file" accept="application/json" />
-        <input id="midiInput" class="hidden-file-input" type="file" accept=".mid,.midi,audio/midi,audio/x-midi" />
-        <button id="openMidiFile">Select local MIDI</button>
-        <button id="loadDawPattern">Load DAW pattern</button>
-        <p id="localMidiStatus" class="small">No local MIDI selected</p>
-        <div class="button-row">
-          <button id="playMidi">Play MIDI</button>
-          <button id="stopMidi">Stop MIDI</button>
-        </div>
-        <label for="levelsFolderSelect">Level files available in <code>Levels/</code></label>
-        <select id="levelsFolderSelect">
-          <option value="">(no file)</option>
-        </select>
-        <div class="button-row">
-          <button id="refreshLevelsFolder">Refresh level list</button>
+          <input id="midiInput" class="hidden-file-input" type="file" accept=".mid,.midi,audio/midi,audio/x-midi" />
+          <button id="openMidiFile">Select local MIDI</button>
+          <p id="localMidiStatus" class="small">No local MIDI selected</p>
+          <div class="button-row">
+            <button id="playMidi" aria-label="Play MIDI" title="Play MIDI">&#9654;</button>
+            <button id="stopMidi" aria-label="Stop MIDI" title="Stop MIDI">&#9632;</button>
+          </div>
+          <label for="qualityMode">Playback quality mode</label>
+          <select id="qualityMode">
+            <option value="balanced" selected>Balanced</option>
+            <option value="performance">Performance</option>
+            <option value="high">High</option>
+          </select>
+          <p id="midiStatus" class="small">MIDI: no file loaded</p>
+        </section>
+        <section class="panel-box">
+          <h3>Levels</h3>
+          <label for="levelsFolderSelect">Level files available in <code>Levels/</code></label>
+          <div class="refresh-select-row">
+            <button id="refreshLevelsFolder" aria-label="Refresh level list" title="Refresh level list">&#x1F5D8;</button>
+            <select id="levelsFolderSelect">
+              <option value="">(no file)</option>
+            </select>
+          </div>
           <button id="loadLevelFromFolder">Load level file</button>
-        </div>
-        <label for="qualityMode">Playback quality mode</label>
-        <select id="qualityMode">
-          <option value="balanced" selected>Balanced</option>
-          <option value="performance">Performance</option>
-          <option value="high">High</option>
-        </select>
-        <label for="levelBaseName">Level base name (saved in <code>Levels/</code>)</label>
-        <input id="levelBaseName" type="text" value="level_01" />
-        <p id="midiStatus" class="small">MIDI: no file loaded</p>
+        </section>
+        <input id="fileInput" class="hidden-file-input" type="file" accept="application/json" />
         <section class="runtime-box">
-          <h3>Runtime export</h3>
+          <h3>Level Save</h3>
+          <label for="levelBaseName">Level base name (saved in <code>Levels/</code>)</label>
+          <input id="levelBaseName" type="text" value="level_01" />
           <label for="runtimeBpm">Default BPM fallback</label>
           <input id="runtimeBpm" type="number" min="20" max="300" value="120" />
           <p class="small">Default BPM fallback. Runtime uses a tempo map vector generated from segment BPM values.</p>
@@ -244,66 +293,70 @@
             <option value="balanced" selected>Balanced</option>
             <option value="high">High</option>
           </select>
-          <label for="runtimeAudioPolyphony">Runtime max polyphony (optional)</label>
-          <input id="runtimeAudioPolyphony" type="number" min="2" max="12" step="1" placeholder="Preset default" />
-          <label for="runtimeAudioLookaheadMs">Runtime scheduler lookahead ms (optional)</label>
-          <input id="runtimeAudioLookaheadMs" type="number" min="8" max="60" step="1" placeholder="Preset default" />
-          <label for="runtimeAudioLeadMs">Runtime scheduler lead ms (optional)</label>
-          <input id="runtimeAudioLeadMs" type="number" min="4" max="40" step="1" placeholder="Preset default" />
-          <label for="runtimeAudioSaturation">Runtime saturation amount (0-0.4, optional)</label>
-          <input id="runtimeAudioSaturation" type="number" min="0" max="0.4" step="0.01" placeholder="Preset default" />
-          <label for="runtimeAudioSynthStyle">Runtime synth style</label>
-          <select id="runtimeAudioSynthStyle">
-            <option value="">Preset default</option>
-            <option value="game">Game</option>
-            <option value="editorLike">Editor-like</option>
-          </select>
           <p class="small">Grid columns (auto): <span id="runtimeGridColumnsAuto">29</span></p>
           <div class="button-row">
-            <button id="exportRuntime">Save runtime to Levels</button>
+            <button id="exportRuntime">Save in Levels</button>
+            <button id="downloadLevel">Download Level</button>
           </div>
         </section>
       </div>
       <div class="main">
-        <section class="minimap">
-          <h3>Minimap preview (live)</h3>
-          <canvas id="minimap" width="320" height="180"></canvas>
-          <div class="legend">
-            <span class="l-low">Low</span>
-            <span class="l-medium">Medium</span>
-            <span class="l-high">High</span>
-            <span class="l-high">Tempo change marker</span>
-          </div>
-        </section>
         <section class="level-layout-editor">
           <h3>Layout editor (runtime platforms)</h3>
           <p id="layoutTempoInfo" class="small">Current zone BPM: 120</p>
           <div class="button-row level-layout-actions">
             <button id="layoutCenterSpawn">Center spawn</button>
-            <button id="layoutRegenerate">Regenerate from segments</button>
-            <button id="layoutDeleteSelected">Delete selected</button>
+            <button id="layoutPreviewToggle" aria-pressed="false">Preview player: Off</button>
           </div>
           <div class="layout-scroll">
             <input id="layoutScrollBar" type="range" min="0" max="0" value="0" step="1" aria-label="Layout horizontal scroll" />
           </div>
           <canvas id="layoutEditorCanvas" width="960" height="280"></canvas>
+          <div id="layoutContextMenu" class="layout-context-menu" hidden>
+            <div class="layout-context-menu-group">
+              <p class="layout-context-menu-group-title">static</p>
+              <button class="layout-context-menu-kind" type="button" data-kind="static">static</button>
+            </div>
+            <div class="layout-context-menu-group">
+              <p class="layout-context-menu-group-title">dissolving</p>
+              <button class="layout-context-menu-kind" type="button" data-kind="beat">beat</button>
+              <button class="layout-context-menu-kind" type="button" data-kind="alternateBeat">alternateBeat</button>
+              <button class="layout-context-menu-kind" type="button" data-kind="ghost">ghost</button>
+              <button class="layout-context-menu-kind" type="button" data-kind="reverseGhost">reverseGhost</button>
+            </div>
+            <div class="layout-context-menu-group">
+              <p class="layout-context-menu-group-title">moving</p>
+              <button class="layout-context-menu-kind" type="button" data-kind="elevator">elevator</button>
+              <button class="layout-context-menu-kind" type="button" data-kind="shuttle">shuttle</button>
+              <button class="layout-context-menu-kind" type="button" data-kind="cross">cross</button>
+            </div>
+            <div class="layout-context-menu-group">
+              <p class="layout-context-menu-group-title">launching</p>
+              <button class="layout-context-menu-kind" type="button" data-kind="spring">spring</button>
+              <button class="layout-context-menu-kind" type="button" data-kind="launch30">launch30</button>
+              <button class="layout-context-menu-kind" type="button" data-kind="launch60">launch60</button>
+            </div>
+            <div class="layout-context-menu-group">
+              <p class="layout-context-menu-group-title">hazard</p>
+              <button class="layout-context-menu-kind" type="button" data-kind="hazard">hazard</button>
+            </div>
+          </div>
           <p class="small">
-            Left click selects/drags a platform. Right click changes platform type, or adds a platform if empty.
+            Left click selects/drags. Drag on empty space draws a box selection. Ctrl+left click toggles selection. Right click opens the platform menu.
+          </p>
+          <p id="layoutPreviewInfo" class="small">
+            Preview controls: A/D or Arrows move, W/Up/Space jump | Status: Off
           </p>
         </section>
-        <h2>Segments</h2>
+        <h2>Segments (Selected Platforms)</h2>
         <div id="summary" class="small"></div>
         <table class="segments-table">
           <thead>
             <tr>
-              <th>Segment ID</th>
-              <th>Segment BPM</th>
-              <th>Energy State</th>
-              <th>Platform Types (CSV)</th>
-              <th>Vertical Min</th>
-              <th>Vertical Max</th>
-              <th>Patrol Enemies</th>
-              <th>Flying Spawn Interval (s, 0=Off)</th>
+              <th>Kind</th>
+              <th>Patrol</th>
+              <th>Flying (s)</th>
+              <th>Falling Rock (s)</th>
               <th></th>
             </tr>
           </thead>
@@ -318,6 +371,11 @@
         parseMidiToTickModel,
         tickToSeconds
       } from '/dist/src/core/midi.js';
+      import { Metronome } from '/dist/src/core/metronome.js';
+      import { BeatSnapMover } from '/dist/src/core/beatMovement.js';
+      import { resolveIntent } from '/dist/src/core/input.js';
+      import { generatePlatformKindSequence } from '/dist/src/core/levelGenerator.js';
+      import { DEFAULT_REFERENCE_BPM, DEFAULT_TEMPO_SMOOTHING_BPM_PER_SECOND, stepTempoToward } from '/dist/src/core/tempo.js';
 
       const rowsEl = document.getElementById('rows');
       const summaryEl = document.getElementById('summary');
@@ -330,26 +388,32 @@
       const midiStatusEl = document.getElementById('midiStatus');
       const runtimeBpmInput = document.getElementById('runtimeBpm');
       const runtimeAudioQualityModeInput = document.getElementById('runtimeAudioQualityMode');
-      const runtimeAudioPolyphonyInput = document.getElementById('runtimeAudioPolyphony');
-      const runtimeAudioLookaheadMsInput = document.getElementById('runtimeAudioLookaheadMs');
-      const runtimeAudioLeadMsInput = document.getElementById('runtimeAudioLeadMs');
-      const runtimeAudioSaturationInput = document.getElementById('runtimeAudioSaturation');
-      const runtimeAudioSynthStyleInput = document.getElementById('runtimeAudioSynthStyle');
       const runtimeGridColumnsAutoEl = document.getElementById('runtimeGridColumnsAuto');
       const qualityModeSelect = document.getElementById('qualityMode');
-      const minimap = document.getElementById('minimap');
-      const minimapContainer = minimap ? minimap.closest('.minimap') : null;
-      const mapCtx = minimap.getContext('2d');
       const layoutEditorCanvas = document.getElementById('layoutEditorCanvas');
       const layoutEditorContainer = layoutEditorCanvas ? layoutEditorCanvas.closest('.level-layout-editor') : null;
+      const layoutContextMenu = document.getElementById('layoutContextMenu');
       const layoutScrollBar = document.getElementById('layoutScrollBar');
       const layoutTempoInfo = document.getElementById('layoutTempoInfo');
+      const layoutPreviewToggle = document.getElementById('layoutPreviewToggle');
+      const layoutPreviewInfo = document.getElementById('layoutPreviewInfo');
       const layoutCtx = layoutEditorCanvas ? layoutEditorCanvas.getContext('2d') : null;
-      const DAW_TO_EDITOR_STORAGE_KEY = 'sambo.daw.toEditor.v1';
       let model = { segments: [], midi_file: null };
       const GAME_PLAYER_START_X = 150;
       const GRID_STEP = 32;
       const GAME_PLAYER_UNITS_PER_BEAT = 16;
+      const PREVIEW_PLAYER_WIDTH = 12;
+      const PREVIEW_PLAYER_HEIGHT = 19;
+      const PREVIEW_PLAYER_HEART_SIZE = 3;
+      const PREVIEW_PLAYER_HEART_OFFSET_X = -2;
+      const PREVIEW_PLAYER_HEART_OFFSET_Y = -2;
+      const PREVIEW_PLAYER_STEP_SUBDIVISIONS = 4;
+      const PREVIEW_PLAYER_SPEED_MULTIPLIER = 2.2;
+      const PREVIEW_PLAYER_SNAP_STEP_X = GAME_PLAYER_UNITS_PER_BEAT * PREVIEW_PLAYER_SPEED_MULTIPLIER;
+      const PREVIEW_JUMP_VELOCITY = -560;
+      const PREVIEW_GRAVITY = 1400;
+      const PREVIEW_COYOTE_JUMP_MS = 120;
+      const PREVIEW_RESPAWN_Y = 620;
       const PLATFORM_WIDTH = GRID_STEP * 2;
       const PLATFORM_BLOCK_HEIGHT = 18;
       const LAYOUT_WORLD_TOP = 80;
@@ -359,14 +423,57 @@
       let runtimeGridColumns = 29;
       let generatedLayoutSeed = 1;
       let customRuntimePlatforms = null;
+      let platformClipboard = [];
       const layoutEditorState = {
         cameraX: 0,
-        selectedIndex: -1,
-        dragging: false,
-        dragOffsetX: 0,
-        dragOffsetY: 0
+        selectedIndices: new Set(),
+        draggingGroup: false,
+        dragAnchorWorldX: 0,
+        dragAnchorWorldY: 0,
+        dragStartSnapshot: [],
+        boxSelecting: false,
+        boxStartWorldX: 0,
+        boxStartWorldY: 0,
+        boxEndWorldX: 0,
+        boxEndWorldY: 0,
+        pointerInsideCanvas: false,
+        lastPointerCanvasX: null,
+        lastPointerCanvasY: null,
+        contextMenuOpen: false,
+        contextMenuCreateMode: false,
+        contextMenuCanvasX: 0,
+        contextMenuCanvasY: 0,
+        contextMenuWorldX: 0,
+        contextMenuWorldY: 0
       };
-      const platformKindCycle = ['segment', 'beat', 'alternateBeat', 'ghost', 'reverseGhost', 'elevator', 'shuttle', 'cross', 'spring'];
+      const editorKindOptions = [
+        'static',
+        'beat',
+        'alternateBeat',
+        'ghost',
+        'reverseGhost',
+        'elevator',
+        'shuttle',
+        'cross',
+        'spring',
+        'launch30',
+        'launch60',
+        'hazard'
+      ];
+      const platformKindCycle = [
+        'segment',
+        'beat',
+        'alternateBeat',
+        'ghost',
+        'reverseGhost',
+        'elevator',
+        'shuttle',
+        'cross',
+        'spring',
+        'hazard',
+        'launch30',
+        'launch60'
+      ];
       const FLYING_SPAWN_SEGMENT_STRIDE = 5;
       const EDITOR_COLORS = {
         segmentLow: '#3a4663',
@@ -381,6 +488,9 @@
         platformShuttle: '#3a86ff',
         platformCross: '#3a86ff',
         platformSpring: '#2dc653',
+        platformHazard: '#4f2a37',
+        platformLaunch: '#2f6fd3',
+        platformLaunchGuide: '#cdefff',
         canvasBackground: '#0b0f1a',
         canvasGrid: '#1b2a45',
         canvasLabel: '#d7e2ff',
@@ -389,7 +499,28 @@
         canvasSpawn: '#ffb703',
         canvasMidiCursor: '#4cc9f0',
         canvasSelection: '#4cc9f0',
-        canvasBorder: '#05070f'
+        canvasBorder: '#05070f',
+        previewPlayer: '#e8e6e3',
+        previewPlayerHeart: '#3a86ff'
+      };
+      const layoutPreviewState = {
+        enabled: false,
+        rafId: null,
+        lastFrameMs: null,
+        metronome: null,
+        mover: null,
+        x: GAME_PLAYER_START_X,
+        y: 380,
+        verticalVelocity: 0,
+        lastGroundedAtMs: 0,
+        currentBpm: DEFAULT_REFERENCE_BPM,
+        targetBpm: DEFAULT_REFERENCE_BPM,
+        facing: 'forward',
+        input: {
+          left: false,
+          right: false,
+          jumpPressedEdge: false
+        }
       };
       let midiPlayback = {
         fileName: null,
@@ -411,7 +542,7 @@
       };
 
       function enemyDefaultsByEnergy(energyState) {
-        return { patrol: patrolDefaultsByEnergy(energyState), flyingSpawnIntervalMs: 0 };
+        return { patrol: patrolDefaultsByEnergy(energyState), flyingSpawnIntervalMs: 0, fallingRockSpawnIntervalMs: 0 };
       }
 
       function patrolDefaultsByEnergy(energyState) {
@@ -426,9 +557,22 @@
       }
 
       function platformTypesByEnergy(energyState) {
-        if (energyState === 'low') return ['static', 'beat', 'alternateBeat'];
-        if (energyState === 'medium') return ['static', 'beat', 'alternateBeat', 'ghost', 'reverseGhost'];
-        return ['static', 'beat', 'alternateBeat', 'ghost', 'reverseGhost', 'elevator', 'shuttle', 'cross', 'spring'];
+        if (energyState === 'low') return ['static', 'beat', 'alternateBeat', 'elevator'];
+        if (energyState === 'medium') return ['static', 'beat', 'alternateBeat', 'ghost', 'reverseGhost', 'elevator'];
+        return [
+          'static',
+          'beat',
+          'alternateBeat',
+          'ghost',
+          'reverseGhost',
+          'elevator',
+          'shuttle',
+          'cross',
+          'spring',
+          'hazard',
+          'launch30',
+          'launch60'
+        ];
       }
 
       function mapPlatformTypeToKind(platformType) {
@@ -468,7 +612,15 @@
         if (kind === 'shuttle') return EDITOR_COLORS.platformShuttle;
         if (kind === 'cross') return EDITOR_COLORS.platformCross;
         if (kind === 'spring') return EDITOR_COLORS.platformSpring;
+        if (kind === 'hazard') return EDITOR_COLORS.platformHazard;
+        if (kind === 'launch30' || kind === 'launch60') return EDITOR_COLORS.platformLaunch;
         return EDITOR_COLORS.platformSegment;
+      }
+
+      function launchAngleForKind(kind) {
+        if (kind === 'launch30') return 30;
+        if (kind === 'launch60') return 60;
+        return null;
       }
 
       function sanitizeBaseName(value) {
@@ -502,7 +654,7 @@
       }
 
       function setRuntimeGridColumns(value) {
-        const next = clampNumber(Math.round(Number(value) || 29), 1, 128);
+        const next = clampNumber(Math.round(Number(value) || 29), 1, 4096);
         runtimeGridColumns = next;
         runtimeGridColumnsAutoEl.textContent = String(next);
       }
@@ -514,7 +666,7 @@
         );
         if (maxPlatformRight <= 0) return runtimeGridColumns;
         const derived = Math.round((maxPlatformRight - GAME_PLAYER_START_X) / GRID_STEP) + 1;
-        return clampNumber(derived, 1, 128);
+        return clampNumber(derived, 1, 4096);
       }
 
       function clonePlatform(platform) {
@@ -524,8 +676,8 @@
           kind,
           x: Number.isFinite(Number(platform?.x)) ? snapWorldX(Number(platform.x)) : GAME_PLAYER_START_X,
           y: Number.isFinite(Number(platform?.y)) ? snapWorldY(Number(platform.y)) : snapWorldY(405),
-          width: defaults.width,
-          height: defaults.height
+          width: Number.isFinite(Number(platform?.width)) && Number(platform.width) >= 10 ? Number(platform.width) : defaults.width,
+          height: Number.isFinite(Number(platform?.height)) && Number(platform.height) >= 8 ? Number(platform.height) : defaults.height
         };
       }
 
@@ -619,6 +771,24 @@
         }
       }
 
+      function followLayoutCameraToPreviewPlayer() {
+        if (!layoutEditorCanvas || !layoutPreviewState.enabled) return;
+        const playerWorldX = Number(layoutPreviewState.x);
+        if (!Number.isFinite(playerWorldX)) return;
+        const width = layoutEditorCanvas.width;
+        const leftMargin = width * 0.25;
+        const rightMargin = width * 0.72;
+        const leftWorld = layoutEditorState.cameraX + leftMargin;
+        const rightWorld = layoutEditorState.cameraX + rightMargin;
+        if (playerWorldX > rightWorld) {
+          layoutEditorState.cameraX = playerWorldX - rightMargin;
+          clampLayoutCamera();
+        } else if (playerWorldX < leftWorld) {
+          layoutEditorState.cameraX = playerWorldX - leftMargin;
+          clampLayoutCamera();
+        }
+      }
+
       function stopMidiCursorAnimation() {
         if (!Number.isInteger(midiPlayback.cursorAnimationFrameId)) return;
         cancelAnimationFrame(midiPlayback.cursorAnimationFrameId);
@@ -633,11 +803,255 @@
             renderLayoutEditor();
             return;
           }
-          followLayoutCameraToMidiCursor();
+          if (!layoutPreviewState.enabled) followLayoutCameraToMidiCursor();
           renderLayoutEditor();
           midiPlayback.cursorAnimationFrameId = requestAnimationFrame(tick);
         };
         midiPlayback.cursorAnimationFrameId = requestAnimationFrame(tick);
+      }
+
+      function clampPreviewBpm(value, fallback = DEFAULT_REFERENCE_BPM) {
+        const n = Number(value);
+        const base = Number.isFinite(Number(fallback)) ? Number(fallback) : DEFAULT_REFERENCE_BPM;
+        if (!Number.isFinite(n) || n <= 0) return Math.max(20, Math.min(300, base));
+        return Math.max(20, Math.min(300, n));
+      }
+
+      function isEditableDomTarget(target) {
+        const el = target instanceof Element ? target : document.activeElement instanceof Element ? document.activeElement : null;
+        if (!el) return false;
+        const tag = String(el.tagName || '').toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || tag === 'select') return true;
+        if (el.isContentEditable) return true;
+        return Boolean(el.closest('[contenteditable=""], [contenteditable="true"]'));
+      }
+
+      function clearLayoutPreviewInputState() {
+        layoutPreviewState.input.left = false;
+        layoutPreviewState.input.right = false;
+        layoutPreviewState.input.jumpPressedEdge = false;
+      }
+
+      function isLayoutPreviewLeftKey(key) {
+        const normalized = String(key || '').toLowerCase();
+        return normalized === 'a' || normalized === 'arrowleft';
+      }
+
+      function isLayoutPreviewRightKey(key) {
+        const normalized = String(key || '').toLowerCase();
+        return normalized === 'd' || normalized === 'arrowright';
+      }
+
+      function isLayoutPreviewJumpKey(key) {
+        const normalized = String(key || '').toLowerCase();
+        return normalized === 'w' || normalized === 'arrowup' || normalized === ' ' || normalized === 'space' || normalized === 'spacebar';
+      }
+
+      function getLayoutPreviewHorizontalBounds(platforms) {
+        const worldWidth = getLayoutWorldWidth(platforms);
+        const minX = PREVIEW_PLAYER_WIDTH / 2;
+        const maxX = Math.max(minX, worldWidth - PREVIEW_PLAYER_WIDTH / 2);
+        return { minX, maxX };
+      }
+
+      function getLayoutPreviewSpawnY(platforms) {
+        const targetX = GAME_PLAYER_START_X;
+        const maxDistance = GRID_STEP * 3;
+        const valid = (Array.isArray(platforms) ? platforms : [])
+          .filter((platform) =>
+            Number.isFinite(Number(platform?.x)) &&
+            Number.isFinite(Number(platform?.y)) &&
+            Number.isFinite(Number(platform?.width)) &&
+            Number.isFinite(Number(platform?.height))
+          )
+          .sort((a, b) => Math.abs(Number(a.x) - targetX) - Math.abs(Number(b.x) - targetX));
+        let picked = valid.find((platform) => Math.abs(Number(platform.x) - targetX) <= maxDistance);
+        if (!picked) picked = valid[0];
+        if (!picked) return 380;
+        const top = Number(picked.y) - Number(picked.height) / 2;
+        return top - PREVIEW_PLAYER_HEIGHT / 2;
+      }
+
+      function resetLayoutPreviewPlayer(platforms) {
+        const tempoMap = buildTempoMapFromSegments(runtimeGridColumns);
+        const spawnTempo = clampPreviewBpm(getTempoAtColumn(tempoMap, 0).bpm, Number(runtimeBpmInput.value) || DEFAULT_REFERENCE_BPM);
+        layoutPreviewState.metronome = new Metronome(spawnTempo, PREVIEW_PLAYER_STEP_SUBDIVISIONS);
+        layoutPreviewState.mover = new BeatSnapMover(
+          layoutPreviewState.metronome,
+          PREVIEW_PLAYER_SNAP_STEP_X,
+          PREVIEW_PLAYER_STEP_SUBDIVISIONS,
+          GRID_STEP
+        );
+        layoutPreviewState.mover.stopAt(0);
+        layoutPreviewState.currentBpm = spawnTempo;
+        layoutPreviewState.targetBpm = spawnTempo;
+        layoutPreviewState.x = GAME_PLAYER_START_X;
+        layoutPreviewState.y = getLayoutPreviewSpawnY(platforms);
+        layoutPreviewState.verticalVelocity = 0;
+        layoutPreviewState.lastGroundedAtMs = performance.now();
+        layoutPreviewState.facing = 'forward';
+        layoutPreviewState.lastFrameMs = null;
+        clearLayoutPreviewInputState();
+      }
+
+      function isPreviewGroundedOnPlatform(platform, playerX, playerY) {
+        const playerHalfWidth = PREVIEW_PLAYER_WIDTH / 2;
+        const playerHalfHeight = PREVIEW_PLAYER_HEIGHT / 2;
+        const platformHalfWidth = Number(platform.width) / 2;
+        const platformTop = Number(platform.y) - Number(platform.height) / 2;
+        const playerLeft = playerX - playerHalfWidth;
+        const playerRight = playerX + playerHalfWidth;
+        const platformLeft = Number(platform.x) - platformHalfWidth;
+        const platformRight = Number(platform.x) + platformHalfWidth;
+        const overlapsX = playerRight > platformLeft && playerLeft < platformRight;
+        const playerBottom = playerY + playerHalfHeight;
+        return overlapsX && Math.abs(playerBottom - platformTop) <= 2;
+      }
+
+      function isLayoutPreviewGrounded(platforms) {
+        for (const platform of platforms) {
+          if (isPreviewGroundedOnPlatform(platform, layoutPreviewState.x, layoutPreviewState.y)) return true;
+        }
+        return false;
+      }
+
+      function resolveLayoutPreviewLandingY(previousY, nextY, verticalVelocity, platforms) {
+        const playerHalfWidth = PREVIEW_PLAYER_WIDTH / 2;
+        const playerHalfHeight = PREVIEW_PLAYER_HEIGHT / 2;
+        const prevBottom = previousY + playerHalfHeight;
+        const nextBottom = nextY + playerHalfHeight;
+        const playerLeft = layoutPreviewState.x - playerHalfWidth;
+        const playerRight = layoutPreviewState.x + playerHalfWidth;
+        let landingY = null;
+        for (const platform of platforms) {
+          const platformHalfWidth = Number(platform.width) / 2;
+          const platformTop = Number(platform.y) - Number(platform.height) / 2;
+          const platformLeft = Number(platform.x) - platformHalfWidth;
+          const platformRight = Number(platform.x) + platformHalfWidth;
+          const overlapsX = playerRight > platformLeft && playerLeft < platformRight;
+          const crossingTop = verticalVelocity >= 0 && prevBottom <= platformTop + 1 && nextBottom >= platformTop;
+          if (!overlapsX || !crossingTop) continue;
+          const candidateY = platformTop - playerHalfHeight;
+          if (landingY === null || candidateY < landingY) landingY = candidateY;
+        }
+        return landingY;
+      }
+
+      function updateLayoutPreviewUi(activeTempo = null) {
+        if (layoutPreviewToggle) {
+          const on = layoutPreviewState.enabled;
+          layoutPreviewToggle.setAttribute('aria-pressed', on ? 'true' : 'false');
+          layoutPreviewToggle.textContent = on ? 'Preview player: On' : 'Preview player: Off';
+        }
+        if (!layoutPreviewInfo) return;
+        const controls = 'Preview controls: A/D or Arrows move, W/Up/Space jump';
+        if (layoutPreviewState.enabled) {
+          layoutPreviewInfo.textContent = `${controls} | Status: On | BPM ${layoutPreviewState.currentBpm.toFixed(1)} -> ${layoutPreviewState.targetBpm.toFixed(1)}`;
+          return;
+        }
+        const fallbackBpm = Number(activeTempo?.bpm);
+        const shownBpm = Number.isFinite(fallbackBpm)
+          ? clampPreviewBpm(fallbackBpm, DEFAULT_REFERENCE_BPM).toFixed(0)
+          : String(clampBpm(Number(runtimeBpmInput.value) || 120));
+        layoutPreviewInfo.textContent = `${controls} | Status: Off | BPM ${shownBpm}`;
+      }
+
+      function stopLayoutPreviewLoop() {
+        if (Number.isInteger(layoutPreviewState.rafId)) {
+          cancelAnimationFrame(layoutPreviewState.rafId);
+        }
+        layoutPreviewState.rafId = null;
+        layoutPreviewState.lastFrameMs = null;
+      }
+
+      function tickLayoutPreview(nowMs) {
+        if (!layoutPreviewState.enabled || !layoutPreviewState.metronome || !layoutPreviewState.mover) return;
+        const previousFrameMs = layoutPreviewState.lastFrameMs;
+        layoutPreviewState.lastFrameMs = nowMs;
+        const deltaSeconds =
+          previousFrameMs === null ? 0 : Math.max(0, Math.min(0.05, (Math.max(nowMs, previousFrameMs) - previousFrameMs) / 1000));
+        const platforms = getEditablePlatforms();
+        const tempoMap = buildTempoMapFromSegments(runtimeGridColumns);
+        const currentColumn = clampNumber(
+          Math.round((layoutPreviewState.x - GAME_PLAYER_START_X) / GRID_STEP),
+          0,
+          Math.max(0, runtimeGridColumns - 1)
+        );
+        const pickedTempo = getTempoAtColumn(tempoMap, currentColumn);
+        layoutPreviewState.targetBpm = clampPreviewBpm(pickedTempo.bpm, layoutPreviewState.currentBpm);
+        layoutPreviewState.currentBpm = clampPreviewBpm(
+          stepTempoToward(
+            layoutPreviewState.currentBpm,
+            layoutPreviewState.targetBpm,
+            DEFAULT_TEMPO_SMOOTHING_BPM_PER_SECOND,
+            deltaSeconds
+          ),
+          layoutPreviewState.targetBpm
+        );
+        layoutPreviewState.metronome.setBpm(layoutPreviewState.currentBpm, nowMs);
+
+        const intent = resolveIntent({
+          left: layoutPreviewState.input.left,
+          right: layoutPreviewState.input.right,
+          jumpPressed: layoutPreviewState.input.jumpPressedEdge
+        });
+        layoutPreviewState.mover.setDirection(intent.direction);
+        const movement = layoutPreviewState.mover.update(nowMs);
+        const bounds = getLayoutPreviewHorizontalBounds(platforms);
+        const unclampedX = GAME_PLAYER_START_X + movement.x;
+        const clampedX = clampNumber(unclampedX, bounds.minX, bounds.maxX);
+        if (clampedX !== unclampedX) layoutPreviewState.mover.stopAt(clampedX - GAME_PLAYER_START_X);
+        layoutPreviewState.x = clampedX;
+        if (intent.direction === 'forward' || intent.direction === 'backward') layoutPreviewState.facing = intent.direction;
+
+        const groundedBeforeJump = isLayoutPreviewGrounded(platforms);
+        if (groundedBeforeJump) layoutPreviewState.lastGroundedAtMs = nowMs;
+        const canUseCoyoteJump = nowMs - layoutPreviewState.lastGroundedAtMs <= PREVIEW_COYOTE_JUMP_MS;
+        if (intent.jump && (groundedBeforeJump || canUseCoyoteJump)) {
+          layoutPreviewState.verticalVelocity = PREVIEW_JUMP_VELOCITY;
+        }
+        const previousY = layoutPreviewState.y;
+        layoutPreviewState.verticalVelocity += PREVIEW_GRAVITY * deltaSeconds;
+        let nextY = layoutPreviewState.y + layoutPreviewState.verticalVelocity * deltaSeconds;
+        const landingY = resolveLayoutPreviewLandingY(previousY, nextY, layoutPreviewState.verticalVelocity, platforms);
+        if (Number.isFinite(landingY)) {
+          nextY = landingY;
+          layoutPreviewState.verticalVelocity = 0;
+        }
+        layoutPreviewState.y = nextY;
+        if (layoutPreviewState.y > PREVIEW_RESPAWN_Y) {
+          resetLayoutPreviewPlayer(platforms);
+        }
+        layoutPreviewState.input.jumpPressedEdge = false;
+        followLayoutCameraToPreviewPlayer();
+      }
+
+      function setLayoutPreviewEnabled(enabled) {
+        const next = Boolean(enabled);
+        if (layoutPreviewState.enabled === next) return;
+        layoutPreviewState.enabled = next;
+        if (next) {
+          const currentPlatforms = getEditablePlatforms();
+          setRuntimeGridColumns(deriveGridColumnsFromPlatforms(currentPlatforms));
+          resetLayoutPreviewPlayer(currentPlatforms);
+          stopLayoutPreviewLoop();
+          const loop = (nowMs) => {
+            if (!layoutPreviewState.enabled) {
+              layoutPreviewState.rafId = null;
+              renderLayoutEditor();
+              return;
+            }
+            tickLayoutPreview(nowMs);
+            renderLayoutEditor();
+            layoutPreviewState.rafId = requestAnimationFrame(loop);
+          };
+          layoutPreviewState.rafId = requestAnimationFrame(loop);
+        } else {
+          stopLayoutPreviewLoop();
+          clearLayoutPreviewInputState();
+          renderLayoutEditor();
+        }
+        updateLayoutPreviewUi();
       }
 
       function clampLayoutCamera() {
@@ -667,10 +1081,298 @@
         return -1;
       }
 
-      function cyclePlatformKind(kind) {
-        const at = platformKindCycle.indexOf(String(kind));
-        if (at < 0) return platformKindCycle[0];
-        return platformKindCycle[(at + 1) % platformKindCycle.length];
+      function getPlatformBounds(platform) {
+        const x = Number(platform?.x) || 0;
+        const y = Number(platform?.y) || 0;
+        const width = Number(platform?.width) || 0;
+        const height = Number(platform?.height) || 0;
+        return {
+          left: x - width / 2,
+          right: x + width / 2,
+          top: y - height / 2,
+          bottom: y + height / 2
+        };
+      }
+
+      function getSelectionBoundingBox(platforms, indices) {
+        const sourcePlatforms = Array.isArray(platforms) ? platforms : [];
+        const sourceIndices = Array.isArray(indices) ? indices : [];
+        let left = Infinity;
+        let right = -Infinity;
+        let top = Infinity;
+        let bottom = -Infinity;
+        for (const idx of sourceIndices) {
+          if (!Number.isInteger(idx) || idx < 0 || idx >= sourcePlatforms.length) continue;
+          const bounds = getPlatformBounds(sourcePlatforms[idx]);
+          left = Math.min(left, bounds.left);
+          right = Math.max(right, bounds.right);
+          top = Math.min(top, bounds.top);
+          bottom = Math.max(bottom, bounds.bottom);
+        }
+        if (!Number.isFinite(left) || !Number.isFinite(right) || !Number.isFinite(top) || !Number.isFinite(bottom)) return null;
+        return { left, right, top, bottom };
+      }
+
+      function getSelectedIndicesSorted(platforms = getEditablePlatforms()) {
+        const max = Array.isArray(platforms) ? platforms.length : 0;
+        return [...layoutEditorState.selectedIndices]
+          .map((idx) => Number(idx))
+          .filter((idx) => Number.isInteger(idx) && idx >= 0 && idx < max)
+          .sort((a, b) => a - b);
+      }
+
+      function clearSelection() {
+        layoutEditorState.selectedIndices.clear();
+      }
+
+      function setSingleSelection(idx) {
+        clearSelection();
+        if (Number.isInteger(idx) && idx >= 0) layoutEditorState.selectedIndices.add(idx);
+      }
+
+      function toggleSelection(idx) {
+        if (!Number.isInteger(idx) || idx < 0) return;
+        if (layoutEditorState.selectedIndices.has(idx)) layoutEditorState.selectedIndices.delete(idx);
+        else layoutEditorState.selectedIndices.add(idx);
+      }
+
+      function normalizeSelectionAfterMutation(platforms = getEditablePlatforms()) {
+        const max = Array.isArray(platforms) ? platforms.length : 0;
+        for (const idx of [...layoutEditorState.selectedIndices]) {
+          if (!Number.isInteger(idx) || idx < 0 || idx >= max) layoutEditorState.selectedIndices.delete(idx);
+        }
+      }
+
+      function getSelectedPlatforms(platforms = getEditablePlatforms()) {
+        const indices = getSelectedIndicesSorted(platforms);
+        return indices.map((idx) => platforms[idx]);
+      }
+
+      function getOrderedModelSegments() {
+        return [...model.segments]
+          .map((segment, modelArrayIndex) => ({ segment, modelArrayIndex }))
+          .sort((a, b) => {
+            const aIndex = Number.isFinite(Number(a.segment?.index)) ? Number(a.segment.index) : a.modelArrayIndex;
+            const bIndex = Number.isFinite(Number(b.segment?.index)) ? Number(b.segment.index) : b.modelArrayIndex;
+            if (aIndex === bIndex) return a.modelArrayIndex - b.modelArrayIndex;
+            return aIndex - bIndex;
+          });
+      }
+
+      function getSegmentBindingForPlatformIndex(platformIndex, platforms = getEditablePlatforms()) {
+        const sourcePlatforms = Array.isArray(platforms) ? platforms : [];
+        if (!Number.isInteger(platformIndex) || platformIndex < 0 || platformIndex >= sourcePlatforms.length) return null;
+        if (String(sourcePlatforms[platformIndex]?.kind) !== 'segment') return null;
+        const orderedSegments = getOrderedModelSegments();
+        if (orderedSegments.length === 0) return null;
+        const segmentPlatformIndices = sourcePlatforms
+          .map((platform, idx) => ({ platform, idx }))
+          .filter((row) => String(row.platform?.kind) === 'segment')
+          .sort((a, b) => {
+            const deltaX = (Number(a.platform?.x) || 0) - (Number(b.platform?.x) || 0);
+            if (deltaX !== 0) return deltaX;
+            return a.idx - b.idx;
+          })
+          .map((row) => row.idx);
+        if (segmentPlatformIndices.length === 0) return null;
+        const segmentPlatformRank = segmentPlatformIndices.indexOf(platformIndex);
+        if (segmentPlatformRank < 0) return null;
+        const sourceSegmentRank =
+          orderedSegments.length <= 1 || segmentPlatformIndices.length <= 1
+            ? 0
+            : clampNumber(
+                Math.round((segmentPlatformRank / Math.max(1, segmentPlatformIndices.length - 1)) * (orderedSegments.length - 1)),
+                0,
+                orderedSegments.length - 1
+              );
+        const binding = orderedSegments[sourceSegmentRank];
+        if (!binding) return null;
+        return { sourceIndex: sourceSegmentRank, segment: binding.segment };
+      }
+
+      function intervalMsToSeconds(intervalMs) {
+        const ms = Number(intervalMs);
+        if (!Number.isFinite(ms) || ms <= 0) return 0;
+        return Math.round((ms / 1000) * 10) / 10;
+      }
+
+      function secondsToIntervalMs(seconds) {
+        const sec = Number(seconds);
+        if (!Number.isFinite(sec) || sec <= 0) return 0;
+        return clampNumber(Math.round(sec * 1000), 500, 30000);
+      }
+
+      function stopLayoutSelectionInteractions() {
+        layoutEditorState.draggingGroup = false;
+        layoutEditorState.dragStartSnapshot = [];
+        layoutEditorState.boxSelecting = false;
+      }
+
+      function beginGroupDrag(worldX, worldY) {
+        const mutable = ensureCustomRuntimePlatforms();
+        const selectedIndices = getSelectedIndicesSorted(mutable);
+        if (selectedIndices.length === 0) return false;
+        layoutEditorState.draggingGroup = true;
+        layoutEditorState.dragAnchorWorldX = Number(worldX) || 0;
+        layoutEditorState.dragAnchorWorldY = Number(worldY) || 0;
+        layoutEditorState.dragStartSnapshot = selectedIndices
+          .filter((idx) => idx >= 0 && idx < mutable.length)
+          .map((idx) => ({
+            idx,
+            x: Number(mutable[idx].x),
+            y: Number(mutable[idx].y)
+          }));
+        return layoutEditorState.dragStartSnapshot.length > 0;
+      }
+
+      function beginBoxSelection(worldX, worldY) {
+        layoutEditorState.boxSelecting = true;
+        layoutEditorState.boxStartWorldX = Number(worldX) || 0;
+        layoutEditorState.boxStartWorldY = Number(worldY) || 0;
+        layoutEditorState.boxEndWorldX = Number(worldX) || 0;
+        layoutEditorState.boxEndWorldY = Number(worldY) || 0;
+      }
+
+      function updateLayoutPointerStateFromEvent(ev, pointOverride = null) {
+        if (!layoutEditorCanvas) return null;
+        const point = pointOverride || getLayoutCanvasPoint(ev);
+        layoutEditorState.lastPointerCanvasX = clampNumber(Number(point.x) || 0, 0, layoutEditorCanvas.width);
+        layoutEditorState.lastPointerCanvasY = clampNumber(Number(point.y) || 0, 0, layoutEditorCanvas.height);
+        layoutEditorState.pointerInsideCanvas = true;
+        return point;
+      }
+
+      function getLastPointerWorldPosition() {
+        if (!layoutEditorCanvas) return null;
+        if (!Number.isFinite(layoutEditorState.lastPointerCanvasX) || !Number.isFinite(layoutEditorState.lastPointerCanvasY)) return null;
+        return {
+          x: layoutEditorState.cameraX + Number(layoutEditorState.lastPointerCanvasX),
+          y: layoutWorldYFromCanvas(Number(layoutEditorState.lastPointerCanvasY))
+        };
+      }
+
+      function removePlatformsByIndices(indices, options = {}) {
+        const clearSelectionAfterDelete = options.clearSelection === true;
+        const mutable = ensureCustomRuntimePlatforms();
+        const normalized = [...new Set((Array.isArray(indices) ? indices : []).map((v) => Number(v)))]
+          .filter((idx) => Number.isInteger(idx) && idx >= 0 && idx < mutable.length)
+          .sort((a, b) => b - a);
+        if (normalized.length === 0) return false;
+        for (const idx of normalized) mutable.splice(idx, 1);
+        if (clearSelectionAfterDelete) {
+          clearSelection();
+        } else {
+          const removedAsc = [...normalized].sort((a, b) => a - b);
+          const next = new Set();
+          for (const sel of layoutEditorState.selectedIndices) {
+            if (!Number.isInteger(sel) || sel < 0) continue;
+            if (removedAsc.includes(sel)) continue;
+            const shift = removedAsc.reduce((acc, removed) => (removed < sel ? acc + 1 : acc), 0);
+            next.add(sel - shift);
+          }
+          layoutEditorState.selectedIndices = next;
+        }
+        normalizeSelectionAfterMutation(mutable);
+        stopLayoutSelectionInteractions();
+        return true;
+      }
+
+      function copySelectedPlatformsToClipboard() {
+        const platforms = getEditablePlatforms();
+        const selected = getSelectedPlatforms(platforms);
+        if (selected.length === 0) return false;
+        platformClipboard = selected.map((platform) => clonePlatform(platform));
+        return true;
+      }
+
+      function pasteClipboardAtPointer() {
+        if (!Array.isArray(platformClipboard) || platformClipboard.length === 0) return false;
+        const pointerWorld = getLastPointerWorldPosition();
+        if (!pointerWorld) return false;
+        const sourceIndices = platformClipboard.map((_, idx) => idx);
+        const sourceBox = getSelectionBoundingBox(platformClipboard, sourceIndices);
+        if (!sourceBox) return false;
+        const deltaX = Number(pointerWorld.x) - sourceBox.left;
+        const deltaY = Number(pointerWorld.y) - sourceBox.bottom;
+        const mutable = ensureCustomRuntimePlatforms();
+        const startIndex = mutable.length;
+        for (const platform of platformClipboard) {
+          const kind = mapPlatformTypeToKind(kindToEditorLabel(platform.kind));
+          const defaults = platformDefaultsByKind(kind);
+          mutable.push({
+            kind,
+            x: snapWorldX((Number(platform.x) || GAME_PLAYER_START_X) + deltaX),
+            y: clampNumber(snapWorldY((Number(platform.y) || snapWorldY(405)) + deltaY), 120, 440),
+            width: Number.isFinite(Number(platform.width)) ? Math.max(10, Number(platform.width)) : defaults.width,
+            height: Number.isFinite(Number(platform.height)) ? Math.max(8, Number(platform.height)) : defaults.height
+          });
+        }
+        clearSelection();
+        for (let i = startIndex; i < mutable.length; i++) layoutEditorState.selectedIndices.add(i);
+        normalizeSelectionAfterMutation(mutable);
+        return true;
+      }
+
+      function closeLayoutContextMenu() {
+        layoutEditorState.contextMenuOpen = false;
+        if (!layoutContextMenu) return;
+        layoutContextMenu.hidden = true;
+      }
+
+      function openLayoutContextMenu(clientX, clientY, worldX, worldY, createMode) {
+        if (!layoutContextMenu || !layoutEditorContainer) return;
+        layoutEditorState.contextMenuOpen = true;
+        layoutEditorState.contextMenuCreateMode = Boolean(createMode);
+        layoutEditorState.contextMenuWorldX = Number(worldX) || 0;
+        layoutEditorState.contextMenuWorldY = Number(worldY) || 0;
+        layoutContextMenu.hidden = false;
+        const hostRect = layoutEditorContainer.getBoundingClientRect();
+        const localX = clientX - hostRect.left;
+        const localY = clientY - hostRect.top;
+        layoutContextMenu.style.visibility = 'hidden';
+        layoutContextMenu.style.left = `${Math.max(4, localX)}px`;
+        layoutContextMenu.style.top = `${Math.max(4, localY)}px`;
+        const maxLeft = Math.max(4, layoutEditorContainer.clientWidth - layoutContextMenu.offsetWidth - 6);
+        const maxTop = Math.max(4, layoutEditorContainer.clientHeight - layoutContextMenu.offsetHeight - 6);
+        const clampedLeft = clampNumber(localX, 4, maxLeft);
+        const clampedTop = clampNumber(localY, 4, maxTop);
+        layoutEditorState.contextMenuCanvasX = clampedLeft;
+        layoutEditorState.contextMenuCanvasY = clampedTop;
+        layoutContextMenu.style.left = `${clampedLeft}px`;
+        layoutContextMenu.style.top = `${clampedTop}px`;
+        layoutContextMenu.style.visibility = 'visible';
+      }
+
+      function applyKindToSelection(editorKind) {
+        const runtimeKind = mapPlatformTypeToKind(editorKind);
+        const mutable = ensureCustomRuntimePlatforms();
+        const selected = getSelectedIndicesSorted(mutable);
+        if (selected.length === 0) return false;
+        for (const idx of selected) {
+          const current = mutable[idx];
+          if (!current) continue;
+          const defaults = platformDefaultsByKind(runtimeKind);
+          current.kind = runtimeKind;
+          if (!Number.isFinite(Number(current.width)) || Number(current.width) < 10) current.width = defaults.width;
+          if (!Number.isFinite(Number(current.height)) || Number(current.height) < 8) current.height = defaults.height;
+        }
+        return true;
+      }
+
+      function createPlatformFromContextMenu(editorKind) {
+        const runtimeKind = mapPlatformTypeToKind(editorKind);
+        const defaults = platformDefaultsByKind(runtimeKind);
+        const mutable = ensureCustomRuntimePlatforms();
+        mutable.push({
+          kind: runtimeKind,
+          x: snapWorldX(layoutEditorState.contextMenuWorldX),
+          y: clampNumber(snapWorldY(layoutEditorState.contextMenuWorldY), 120, 440),
+          width: defaults.width,
+          height: defaults.height
+        });
+        setSingleSelection(mutable.length - 1);
+        normalizeSelectionAfterMutation(mutable);
+        return true;
       }
 
       function getQualityConfig() {
@@ -689,7 +1391,7 @@
         }
         const onsetEstimate = onsetBuckets.size;
         const beatEstimate = Math.round(beats * 1.25);
-        const suggested = Math.max(8, Math.min(128, Math.round((onsetEstimate + beatEstimate) / 2)));
+        const suggested = Math.max(8, Math.min(4096, Math.round((onsetEstimate + beatEstimate) / 2)));
         return suggested;
       }
 
@@ -941,8 +1643,9 @@
           buildDraftFromMidi();
           if (resetLayoutFromSegments) {
             customRuntimePlatforms = null;
-            layoutEditorState.selectedIndex = -1;
-            layoutEditorState.dragging = false;
+            clearSelection();
+            stopLayoutSelectionInteractions();
+            closeLayoutContextMenu();
             layoutEditorState.cameraX = 0;
           }
         }
@@ -956,89 +1659,6 @@
         stopMidiPlayback();
         const parsed = parseMidiFile(arrayBuffer);
         applyParsedMidiState(fileName, parsed, { ...options, persistMidiFile: options.persistMidiFile !== false });
-      }
-
-      function parseDawPatternPayload(rawPayload) {
-        if (!rawPayload || typeof rawPayload !== 'object') {
-          throw new Error('Invalid DAW pattern payload');
-        }
-        const fallbackBpm = Number(runtimeBpmInput.value) || 120;
-        const name = sanitizeBaseName(rawPayload.name || 'daw_pattern');
-        if (rawPayload.timeline && typeof rawPayload.timeline === 'object') {
-          const timeline = normalizeMidiTimeline(rawPayload.timeline, { fallbackBpm, fallbackBeats: 32 });
-          return { name, timeline };
-        }
-
-        // Legacy DAW payload fallback (quantized step grid).
-        const rawSteps = Array.isArray(rawPayload.steps) ? rawPayload.steps : [];
-        const beats = clampNumber(Math.floor(Number(rawPayload.beats) || rawSteps.length || 32), 4, 128);
-        const rawTempoRows = Array.isArray(rawPayload.tempoMap)
-          ? rawPayload.tempoMap
-          : [{ startBeat: 0, bpm: clampBpm(Number(rawPayload.bpm), fallbackBpm) }];
-        const normalizedTempoRows = normalizeTempoMap(rawTempoRows, fallbackBpm, beats);
-        const ppq = 480;
-        const notesByStart = [];
-        for (let beat = 0; beat < beats; beat++) {
-          const rawStep = Array.isArray(rawSteps[beat]) ? rawSteps[beat] : [];
-          for (const candidate of rawStep) {
-            const midi = Math.floor(Number(candidate));
-            if (!Number.isFinite(midi) || midi < 0 || midi > 127) continue;
-            notesByStart.push({
-              startTick: beat * ppq,
-              endTick: beat * ppq + ppq,
-              pitch: midi,
-              velocity: 108,
-              trackId: 0,
-              channel: 0
-            });
-          }
-        }
-        const timeline = normalizeMidiTimeline(
-          {
-            ppq,
-            songEndTick: beats * ppq,
-            tempoPoints: normalizedTempoRows.map((row) => ({
-              tick: row.startBeat * ppq,
-              usPerQuarter: Math.round(60000000 / row.bpm)
-            })),
-            notesByStart
-          },
-          { fallbackBpm, fallbackBeats: beats }
-        );
-        return { name, timeline };
-      }
-
-      function dawPatternToParsedMidi(pattern) {
-        return timelineToParsedMidi(pattern.timeline);
-      }
-
-      function loadDawPatternFromStorage(options = {}) {
-        if (typeof window === 'undefined' || !window.localStorage) {
-          throw new Error('Browser storage is not available');
-        }
-        const raw = window.localStorage.getItem(DAW_TO_EDITOR_STORAGE_KEY);
-        if (!raw) {
-          throw new Error('No DAW pattern found. Use \"Send Pattern to Editor\" from MIDI Composer first.');
-        }
-        let payload;
-        try {
-          payload = JSON.parse(raw);
-        } catch {
-          throw new Error('DAW pattern in storage is invalid JSON');
-        }
-        const pattern = parseDawPatternPayload(payload);
-        const parsed = dawPatternToParsedMidi(pattern);
-        stopMidiPlayback();
-        applyParsedMidiState(`${pattern.name}.mid`, parsed, {
-          ...options,
-          updateBaseName: true,
-          persistMidiFile: false,
-          baseName: pattern.name,
-          statusName: `DAW ${pattern.name}`
-        });
-        const beats = Math.max(1, Math.ceil(pattern.timeline.songEndTick / Math.max(1, pattern.timeline.ppq)));
-        setLocalMidiStatus(`Loaded DAW pattern (${beats} beats)`);
-        return pattern;
       }
 
       function buildPlaybackNotes(notes) {
@@ -1143,7 +1763,8 @@
             vertical_range: verticalRange,
             rhythm_density: Math.max(0, Math.min(1, counts[i] > 0 ? velocitySums[i] / counts[i] : 0)),
             patrol_enemies: patrolDefaultsByEnergy(energyState),
-            flying_spawn_interval_ms: (i + 1) % FLYING_SPAWN_SEGMENT_STRIDE === 0 ? flyingIntervalByEnergy(energyState) : 0
+            flying_spawn_interval_ms: (i + 1) % FLYING_SPAWN_SEGMENT_STRIDE === 0 ? flyingIntervalByEnergy(energyState) : 0,
+            falling_rock_spawn_interval_ms: 0
           });
         }
 
@@ -1279,12 +1900,6 @@
         }, Math.max(0, midiPlayback.durationSec * 1000 + 250));
       }
 
-      function energyColor(state) {
-        if (state === 'low') return EDITOR_COLORS.segmentLow;
-        if (state === 'medium') return EDITOR_COLORS.segmentMedium;
-        return EDITOR_COLORS.segmentHigh;
-      }
-
       function buildFallbackRuntimeNotes(gridColumns) {
         const energyToMidi = { low: 57, medium: 60, high: 64 };
         const sorted = [...model.segments].sort((a, b) => a.index - b.index);
@@ -1309,13 +1924,6 @@
         const n = Number(value);
         if (!Number.isFinite(n) || n <= 0) return clampNumber(Math.round(fallback), 20, 300);
         return clampNumber(Math.round(n), 20, 300);
-      }
-
-      function parseOptionalNumber(value, min, max, roundInt = false) {
-        const n = Number(value);
-        if (!Number.isFinite(n)) return undefined;
-        const clamped = clampNumber(n, min, max);
-        return roundInt ? Math.round(clamped) : clamped;
       }
 
       function getSegmentBpm(segment) {
@@ -1395,7 +2003,7 @@
 
         const segmentsSource = segmentPlatforms.length > 0 ? segmentPlatforms : [{ x: 150, y: 405, width: 96, height: 18 }];
         const inferredGridColumns = Number.isFinite(Number(raw.gridColumns))
-          ? clampNumber(Math.floor(Number(raw.gridColumns)), 1, 128)
+          ? clampNumber(Math.floor(Number(raw.gridColumns)), 1, 4096)
           : deriveGridColumnsFromPlatforms(runtimePlatforms);
 
         const segments = segmentsSource.map((platform, idx) => {
@@ -1415,6 +2023,11 @@
             Number.isFinite(rawSpawn) && rawSpawn > 0
               ? clampNumber(Math.floor(rawSpawn), 500, 30000)
               : 0;
+          const rawRockSpawn = Number(enemy?.fallingRockSpawnIntervalMs);
+          const fallingRockSpawnIntervalMs =
+            Number.isFinite(rawRockSpawn) && rawRockSpawn > 0
+              ? clampNumber(Math.floor(rawRockSpawn), 500, 30000)
+              : defaults.fallingRockSpawnIntervalMs;
 
           const platformTypes = platformTypesByEnergy(energyState);
 
@@ -1430,7 +2043,8 @@
             vertical_range: [minV, maxV],
             rhythm_density: energyState === 'high' ? 0.8 : energyState === 'medium' ? 0.55 : 0.3,
             patrol_enemies: patrolEnemies,
-            flying_spawn_interval_ms: flyingSpawnIntervalMs
+            flying_spawn_interval_ms: flyingSpawnIntervalMs,
+            falling_rock_spawn_interval_ms: fallingRockSpawnIntervalMs
           };
         });
 
@@ -1445,8 +2059,9 @@
         model = nextModel;
         customRuntimePlatforms = Array.isArray(rawLevel?.platforms) ? clonePlatforms(rawLevel.platforms) : null;
         generatedLayoutSeed = Date.now() + Math.floor(Math.random() * 1000000);
-        layoutEditorState.selectedIndex = -1;
-        layoutEditorState.dragging = false;
+        clearSelection();
+        stopLayoutSelectionInteractions();
+        closeLayoutContextMenu();
         layoutEditorState.cameraX = 0;
 
         stopMidiPlayback();
@@ -1464,25 +2079,10 @@
         const bpm = Number(tempoMap[0]?.bpm);
         const gridColumns = Number(rawLevel?.gridColumns);
         const audioQualityMode = String(rawLevel?.audioQualityMode || 'balanced');
-        const audioQuality = rawLevel?.audioQuality && typeof rawLevel.audioQuality === 'object' ? rawLevel.audioQuality : {};
         if (Number.isFinite(bpm)) runtimeBpmInput.value = String(clampNumber(Math.round(bpm), 20, 300));
         runtimeAudioQualityModeInput.value = ['performance', 'balanced', 'high'].includes(audioQualityMode)
           ? audioQualityMode
           : 'balanced';
-        runtimeAudioPolyphonyInput.value = Number.isFinite(Number(audioQuality.maxPolyphony))
-          ? String(Math.round(Number(audioQuality.maxPolyphony)))
-          : '';
-        runtimeAudioLookaheadMsInput.value = Number.isFinite(Number(audioQuality.schedulerLookaheadMs))
-          ? String(Math.round(Number(audioQuality.schedulerLookaheadMs)))
-          : '';
-        runtimeAudioLeadMsInput.value = Number.isFinite(Number(audioQuality.schedulerLeadMs))
-          ? String(Math.round(Number(audioQuality.schedulerLeadMs)))
-          : '';
-        runtimeAudioSaturationInput.value = Number.isFinite(Number(audioQuality.saturationAmount))
-          ? String(Number(audioQuality.saturationAmount))
-          : '';
-        runtimeAudioSynthStyleInput.value =
-          audioQuality.synthStyle === 'game' || audioQuality.synthStyle === 'editorLike' ? String(audioQuality.synthStyle) : '';
         if (Number.isFinite(gridColumns)) setRuntimeGridColumns(gridColumns);
         else setRuntimeGridColumns(deriveGridColumnsFromPlatforms(rawLevel?.platforms));
         setLevelBaseNameFromLevelFile(sourceName);
@@ -1561,25 +2161,6 @@
         return notes;
       }
 
-      function pickGeneratedKindForSegment(seg, segIndex) {
-        const requestedTypes = Array.isArray(seg.platform_types) ? seg.platform_types : [];
-        const templateTypes = platformTypesByEnergy(seg.energy_state);
-        const rawKinds = (requestedTypes.length > 0 ? requestedTypes : templateTypes)
-          .map((platformType) => mapPlatformTypeToKind(platformType))
-          .filter((kind) => platformKindCycle.includes(kind));
-        const uniqueKinds = [...new Set(rawKinds)];
-        const nonStaticKinds = uniqueKinds.filter((kind) => kind !== 'segment');
-
-        const roll = deterministicUnit(generatedLayoutSeed + (segIndex + 1) * 97.137);
-        if (roll < 0.1) return null; // blank
-        if (roll < 0.5) return 'segment'; // static
-        if (nonStaticKinds.length === 0) return 'segment';
-
-        const share = 0.5 / nonStaticKinds.length;
-        const bucket = Math.min(nonStaticKinds.length - 1, Math.floor((roll - 0.5) / share));
-        return nonStaticKinds[bucket];
-      }
-
       function buildRuntimePlatforms() {
         const sortedRaw = [...model.segments].sort((a, b) => a.index - b.index);
         const sorted =
@@ -1602,13 +2183,39 @@
         const startLeft = playerStartX + platformWidth / 2;
         let cursorPlatform = 0;
 
+        const generatorSegments = sorted.map((seg) => {
+          const energyState = ['low', 'medium', 'high'].includes(String(seg.energy_state)) ? String(seg.energy_state) : 'medium';
+          const requestedTypes = Array.isArray(seg.platform_types) ? seg.platform_types : [];
+          const templateTypes = platformTypesByEnergy(energyState);
+          const platformTypes = [...new Set((requestedTypes.length > 0 ? requestedTypes : templateTypes).map((platformType) => String(platformType).trim()).filter(Boolean))];
+          return {
+            energyState,
+            platformTypes,
+            rhythmDensity: Number.isFinite(Number(seg.rhythm_density))
+              ? Math.max(0, Math.min(1, Number(seg.rhythm_density)))
+              : 0.5
+          };
+        });
+        const generatedKinds = generatePlatformKindSequence(generatorSegments, generatedLayoutSeed, {
+          enableEnergyGate: true,
+          maxStaticRun: 3,
+          maxTimedRun: 2,
+          minSegmentsBetweenLaunches: 4,
+          forbidPairs: [
+            ['beat', 'beat'],
+            ['beat', 'alternateBeat'],
+            ['alternateBeat', 'beat'],
+            ['alternateBeat', 'alternateBeat']
+          ]
+        });
+
         for (let i = 0; i < sorted.length; i++) {
           const seg = sorted[i];
           const minV = clampNumber(Math.floor(Number(seg.vertical_range[0] || 0)), 0, 4);
           const maxV = clampNumber(Math.floor(Number(seg.vertical_range[1] || 0)), 0, 4);
           const lowV = Math.min(minV, maxV);
           const highV = Math.max(minV, maxV);
-          const selectedKind = pickGeneratedKindForSegment(seg, i);
+          const selectedKind = generatedKinds[i];
           const level = deterministicInt((i + 1) * 5000 + 97, lowV, highV);
           const y = snapWorldY(Math.round(415 - level * 32));
           if (selectedKind) {
@@ -1673,11 +2280,17 @@
             Number.isFinite(rawInterval) && rawInterval > 0
               ? Math.max(500, Math.min(30000, Math.floor(rawInterval)))
               : 0;
-          if (patrolCount <= 0 && flyingSpawnIntervalMs <= 0) continue;
+          const rawRockInterval = Number(seg.falling_rock_spawn_interval_ms);
+          const fallingRockSpawnIntervalMs =
+            Number.isFinite(rawRockInterval) && rawRockInterval > 0
+              ? Math.max(500, Math.min(30000, Math.floor(rawRockInterval)))
+              : 0;
+          if (patrolCount <= 0 && flyingSpawnIntervalMs <= 0 && fallingRockSpawnIntervalMs <= 0) continue;
           result.push({
             segmentIndex: i,
             patrolCount,
-            flyingSpawnIntervalMs
+            flyingSpawnIntervalMs,
+            fallingRockSpawnIntervalMs
           });
         }
         return result;
@@ -1749,18 +2362,6 @@
         const runtimeAudioQualityMode = ['performance', 'balanced', 'high'].includes(String(runtimeAudioQualityModeInput.value))
           ? String(runtimeAudioQualityModeInput.value)
           : 'balanced';
-        const runtimeAudioQuality = {
-          maxPolyphony: parseOptionalNumber(runtimeAudioPolyphonyInput.value, 2, 12, true),
-          schedulerLookaheadMs: parseOptionalNumber(runtimeAudioLookaheadMsInput.value, 8, 60, true),
-          schedulerLeadMs: parseOptionalNumber(runtimeAudioLeadMsInput.value, 4, 40, true),
-          saturationAmount: parseOptionalNumber(runtimeAudioSaturationInput.value, 0, 0.4, false),
-          synthStyle: ['game', 'editorLike'].includes(String(runtimeAudioSynthStyleInput.value))
-            ? String(runtimeAudioSynthStyleInput.value)
-            : undefined
-        };
-        const runtimeAudioQualityFiltered = Object.fromEntries(
-          Object.entries(runtimeAudioQuality).filter(([, value]) => value !== undefined)
-        );
         const segmentEnemies = buildRuntimeSegmentEnemies();
         const segments = [...model.segments]
           .sort((a, b) => Number(a.index) - Number(b.index))
@@ -1784,6 +2385,11 @@
               const rawInterval = Number(seg.flying_spawn_interval_ms);
               if (!Number.isFinite(rawInterval) || rawInterval <= 0) return 0;
               return Math.max(500, Math.min(30000, Math.floor(rawInterval)));
+            })(),
+            falling_rock_spawn_interval_ms: (() => {
+              const rawInterval = Number(seg.falling_rock_spawn_interval_ms);
+              if (!Number.isFinite(rawInterval) || rawInterval <= 0) return 0;
+              return Math.max(500, Math.min(30000, Math.floor(rawInterval)));
             })()
           }));
         const midiFile =
@@ -1792,7 +2398,6 @@
           midiPlayback: midiPlaybackModel,
           tempoMap,
           audioQualityMode: runtimeAudioQualityMode,
-          ...(Object.keys(runtimeAudioQualityFiltered).length > 0 ? { audioQuality: runtimeAudioQualityFiltered } : {}),
           gridColumns,
           notes,
           platforms,
@@ -1838,15 +2443,18 @@
         throw lastError instanceof Error ? lastError : new Error('Error while saving to Levels');
       }
 
-      function resizeMinimapCanvas() {
-        if (!minimap || !minimapContainer) return;
-        const style = window.getComputedStyle(minimapContainer);
-        const leftPadding = Number.parseFloat(style.paddingLeft) || 0;
-        const rightPadding = Number.parseFloat(style.paddingRight) || 0;
-        const targetWidth = Math.max(320, Math.floor(minimapContainer.clientWidth - leftPadding - rightPadding));
-        const targetHeight = 180;
-        if (minimap.width !== targetWidth) minimap.width = targetWidth;
-        if (minimap.height !== targetHeight) minimap.height = targetHeight;
+      function downloadLevelJsonLocal(filename, data) {
+        const safeName = typeof filename === 'string' && filename.trim() ? filename.trim() : 'level.runtime.json';
+        const jsonText = JSON.stringify(data, null, 2);
+        const blob = new Blob([jsonText], { type: 'application/json;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = safeName;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
       }
 
       function resizeLayoutEditorCanvas() {
@@ -1860,84 +2468,12 @@
         if (layoutEditorCanvas.height !== targetHeight) layoutEditorCanvas.height = targetHeight;
       }
 
-      function renderMinimap() {
-        if (!mapCtx) return;
-        resizeMinimapCanvas();
-        const w = minimap.width;
-        const h = minimap.height;
-
-        mapCtx.clearRect(0, 0, w, h);
-        mapCtx.fillStyle = EDITOR_COLORS.canvasBackground;
-        mapCtx.fillRect(0, 0, w, h);
-
-        mapCtx.strokeStyle = EDITOR_COLORS.canvasGrid;
-        mapCtx.lineWidth = 1;
-        for (let i = 0; i <= 4; i++) {
-          const y = 14 + i * ((h - 28) / 4);
-          mapCtx.beginPath();
-          mapCtx.moveTo(6, y);
-          mapCtx.lineTo(w - 6, y);
-          mapCtx.stroke();
-        }
-
-        const segments = [...model.segments].sort((a, b) => a.index - b.index);
-        if (segments.length === 0) {
-          mapCtx.fillStyle = EDITOR_COLORS.canvasMuted;
-          mapCtx.font = '12px monospace';
-          mapCtx.fillText('No segments: load or create data', 52, h / 2);
-          return;
-        }
-
-        const totalBeats = Math.max(1, segments.reduce((acc, s) => acc + Math.max(1, Number(s.duration_beats) || 1), 0));
-        let cursorX = 8;
-        let previousBpm = null;
-
-        for (let i = 0; i < segments.length; i++) {
-          const seg = segments[i];
-          const segBeats = Math.max(1, Number(seg.duration_beats) || 1);
-          const width = Math.max(6, ((w - 16) * segBeats) / totalBeats);
-          const minV = Number(seg.vertical_range[0] || 0);
-          const maxV = Number(seg.vertical_range[1] || 1);
-          const bpm = getSegmentBpm(seg);
-          const maxHeightUnits = 4;
-          const top = 14 + (Math.max(0, maxHeightUnits - maxV) / maxHeightUnits) * (h - 28);
-          const bottom = 14 + (Math.max(0, maxHeightUnits - minV) / maxHeightUnits) * (h - 28);
-          const segHeight = Math.max(6, bottom - top);
-
-          if (i > 0 && previousBpm !== bpm) {
-            mapCtx.strokeStyle = '#ffb703';
-            mapCtx.lineWidth = 2;
-            mapCtx.beginPath();
-            mapCtx.moveTo(cursorX, 10);
-            mapCtx.lineTo(cursorX, h - 10);
-            mapCtx.stroke();
-            mapCtx.fillStyle = '#ffb703';
-            mapCtx.font = '10px monospace';
-            mapCtx.fillText(`${bpm}`, Math.min(w - 28, cursorX + 3), 18);
-          }
-
-          mapCtx.fillStyle = energyColor(seg.energy_state);
-          mapCtx.fillRect(cursorX, top, width - 2, segHeight);
-
-          mapCtx.fillStyle = EDITOR_COLORS.canvasLabel;
-          mapCtx.font = '10px monospace';
-          mapCtx.fillText(String(seg.index), cursorX + 2, Math.max(12, top - 2));
-
-          if ((seg.platform_types || []).includes('ghost')) {
-            mapCtx.strokeStyle = EDITOR_COLORS.canvasGhostStroke;
-            mapCtx.strokeRect(cursorX + 1, top + 1, width - 4, segHeight - 2);
-          }
-
-          cursorX += width;
-          previousBpm = bpm;
-        }
-      }
-
       function renderLayoutEditor() {
         if (!layoutCtx || !layoutEditorCanvas) return;
         resizeLayoutEditorCanvas();
         clampLayoutCamera();
         const platforms = getEditablePlatforms();
+        normalizeSelectionAfterMutation(platforms);
         const cameraX = layoutEditorState.cameraX;
         const width = layoutEditorCanvas.width;
         const height = layoutEditorCanvas.height;
@@ -2003,7 +2539,9 @@
           layoutCtx.fillText(`${zone.bpm}`, zoneCanvasX + 4, 14);
         }
 
-        platforms.forEach((platform, idx) => {
+        const drawPlatformAt = (idx) => {
+          const platform = platforms[idx];
+          if (!platform) return;
           const x = Number(platform.x);
           const y = Number(platform.y);
           const w = Number(platform.width);
@@ -2013,17 +2551,84 @@
           const bottom = layoutCanvasYFromWorld(y + h / 2);
           const drawH = Math.max(6, bottom - top);
           const fill = platformColor(platform.kind);
+          const isSelected = layoutEditorState.selectedIndices.has(idx);
           layoutCtx.fillStyle = fill;
-          layoutCtx.globalAlpha = layoutEditorState.selectedIndex === idx ? 0.95 : 0.8;
+          layoutCtx.globalAlpha = isSelected ? 0.95 : 0.8;
           layoutCtx.fillRect(left, top, w, drawH);
           layoutCtx.globalAlpha = 1;
-          layoutCtx.strokeStyle = layoutEditorState.selectedIndex === idx ? EDITOR_COLORS.canvasSelection : EDITOR_COLORS.canvasBorder;
-          layoutCtx.lineWidth = layoutEditorState.selectedIndex === idx ? 2 : 1;
+          layoutCtx.strokeStyle = isSelected ? EDITOR_COLORS.canvasSelection : EDITOR_COLORS.canvasBorder;
+          layoutCtx.lineWidth = isSelected ? 2 : 1;
           layoutCtx.strokeRect(left, top, w, drawH);
+          const launchAngle = launchAngleForKind(platform.kind);
+          if (launchAngle !== null) {
+            const centerX = left + w / 2;
+            const centerY = top + drawH / 2;
+            const lineLength = Math.max(10, Math.min(30, w * 0.5));
+            const radians = (launchAngle * Math.PI) / 180;
+            const dx = Math.cos(radians) * lineLength * 0.5;
+            const dy = Math.sin(radians) * lineLength * 0.5;
+            layoutCtx.strokeStyle = isSelected ? EDITOR_COLORS.canvasSelection : EDITOR_COLORS.platformLaunchGuide;
+            layoutCtx.lineWidth = 2;
+            layoutCtx.beginPath();
+            layoutCtx.moveTo(centerX - dx, centerY + dy);
+            layoutCtx.lineTo(centerX + dx, centerY - dy);
+            layoutCtx.stroke();
+          }
           layoutCtx.fillStyle = EDITOR_COLORS.canvasLabel;
           layoutCtx.font = '11px monospace';
           layoutCtx.fillText(kindToEditorLabel(platform.kind), left + 4, Math.max(12, top - 4));
-        });
+        };
+        const staticIndices = [];
+        const nonStaticIndices = [];
+        for (let i = 0; i < platforms.length; i++) {
+          const kind = String(platforms[i]?.kind || '');
+          if (kind === 'segment') staticIndices.push(i);
+          else nonStaticIndices.push(i);
+        }
+        for (const idx of staticIndices) drawPlatformAt(idx);
+        for (const idx of nonStaticIndices) drawPlatformAt(idx);
+
+        if (layoutEditorState.boxSelecting) {
+          const leftWorld = Math.min(layoutEditorState.boxStartWorldX, layoutEditorState.boxEndWorldX);
+          const rightWorld = Math.max(layoutEditorState.boxStartWorldX, layoutEditorState.boxEndWorldX);
+          const topWorld = Math.min(layoutEditorState.boxStartWorldY, layoutEditorState.boxEndWorldY);
+          const bottomWorld = Math.max(layoutEditorState.boxStartWorldY, layoutEditorState.boxEndWorldY);
+          const left = leftWorld - cameraX;
+          const right = rightWorld - cameraX;
+          const top = layoutCanvasYFromWorld(topWorld);
+          const bottom = layoutCanvasYFromWorld(bottomWorld);
+          const boxWidth = Math.max(1, right - left);
+          const boxHeight = Math.max(1, bottom - top);
+          layoutCtx.fillStyle = 'rgba(76, 201, 240, 0.2)';
+          layoutCtx.fillRect(left, top, boxWidth, boxHeight);
+          layoutCtx.strokeStyle = EDITOR_COLORS.canvasSelection;
+          layoutCtx.lineWidth = 1;
+          layoutCtx.strokeRect(left + 0.5, top + 0.5, Math.max(0, boxWidth - 1), Math.max(0, boxHeight - 1));
+        }
+
+        if (layoutPreviewState.enabled) {
+          const playerCanvasX = layoutPreviewState.x - cameraX;
+          const playerTop = layoutCanvasYFromWorld(layoutPreviewState.y - PREVIEW_PLAYER_HEIGHT / 2);
+          const playerBottom = layoutCanvasYFromWorld(layoutPreviewState.y + PREVIEW_PLAYER_HEIGHT / 2);
+          const drawHeight = Math.max(6, playerBottom - playerTop);
+          const drawWidth = PREVIEW_PLAYER_WIDTH;
+          const playerLeft = playerCanvasX - drawWidth / 2;
+          layoutCtx.fillStyle = EDITOR_COLORS.previewPlayer;
+          layoutCtx.fillRect(playerLeft, playerTop, drawWidth, drawHeight);
+          layoutCtx.strokeStyle = EDITOR_COLORS.canvasBorder;
+          layoutCtx.lineWidth = 1;
+          layoutCtx.strokeRect(playerLeft, playerTop, drawWidth, drawHeight);
+
+          const beatPhase = layoutPreviewState.metronome ? layoutPreviewState.metronome.beatProgressAt(performance.now()) : 0;
+          const pulse = Math.exp(-beatPhase * 9);
+          const heartScale = 1 + pulse * 0.35;
+          const heartSize = PREVIEW_PLAYER_HEART_SIZE * heartScale;
+          const heartSide = layoutPreviewState.facing === 'forward' ? -1 : 1;
+          const heartX = playerCanvasX + Math.abs(PREVIEW_PLAYER_HEART_OFFSET_X) * heartSide;
+          const heartY = layoutCanvasYFromWorld(layoutPreviewState.y + PREVIEW_PLAYER_HEART_OFFSET_Y);
+          layoutCtx.fillStyle = EDITOR_COLORS.previewPlayerHeart;
+          layoutCtx.fillRect(heartX - heartSize / 2, heartY - heartSize / 2, heartSize, heartSize);
+        }
 
         const midiCursorWorldX = getLayoutMidiCursorWorldX();
         if (Number.isFinite(midiCursorWorldX)) {
@@ -2044,43 +2649,50 @@
 
         layoutCtx.fillStyle = EDITOR_COLORS.canvasMuted;
         layoutCtx.font = '12px monospace';
+        const previewTelemetry = layoutPreviewState.enabled
+          ? `preview: on x=${Math.round(layoutPreviewState.x)} y=${Math.round(layoutPreviewState.y)} bpm=${layoutPreviewState.currentBpm.toFixed(1)}->${layoutPreviewState.targetBpm.toFixed(1)}`
+          : 'preview: off';
         layoutCtx.fillText(
           `X: ${Math.round(cameraX)} / ${Math.max(0, worldWidth - width)} | platforms: ${platforms.length} | bpm: ${activeTempo.bpm} | mode: ${
             Array.isArray(customRuntimePlatforms) ? 'manual layout' : 'generated from segments'
-          }`,
+          } | ${previewTelemetry}`,
           10,
           height - 10
         );
         if (layoutTempoInfo) {
           layoutTempoInfo.textContent = `Current zone BPM: ${activeTempo.bpm} (column ${activeTempo.startColumn})`;
         }
+        updateLayoutPreviewUi(activeTempo);
       }
 
       function render() {
         rowsEl.innerHTML = '';
-        model.segments.forEach((segment, i) => {
+        const currentPlatforms = getEditablePlatforms();
+        normalizeSelectionAfterMutation(currentPlatforms);
+        const selectedIndices = getSelectedIndicesSorted(currentPlatforms);
+        selectedIndices.forEach((platformIndex) => {
+          const platform = currentPlatforms[platformIndex];
+          const kindLabel = kindToEditorLabel(platform.kind);
+          const segmentBinding = getSegmentBindingForPlatformIndex(platformIndex, currentPlatforms);
+          const segmentEnemy = segmentBinding ? segmentBinding.segment : null;
+          const enemyInputsDisabled = segmentEnemy ? '' : 'disabled';
+          const patrolValue = segmentEnemy ? Math.max(0, Math.floor(Number(segmentEnemy.patrol_enemies) || 0)) : '';
+          const flyingValue = segmentEnemy ? intervalMsToSeconds(segmentEnemy.flying_spawn_interval_ms) : '';
+          const fallingRockValue = segmentEnemy ? intervalMsToSeconds(segmentEnemy.falling_rock_spawn_interval_ms) : '';
+          const kindOptions = editorKindOptions
+            .map((kind) => `<option value="${kind}" ${kind === kindLabel ? 'selected' : ''}>${kind}</option>`)
+            .join('');
           const tr = document.createElement('tr');
-          const badgeClass = segment.energy_state === 'low' ? 'low' : segment.energy_state === 'medium' ? 'medium' : 'high';
           tr.innerHTML = `
-            <td>${segment.index}</td>
-            <td><input class="size-75" type="number" min="20" max="300" step="1" value="${getSegmentBpm(segment)}" data-k="bpm" data-i="${i}" /></td>
             <td>
-              <select data-k="energy_state" data-i="${i}">
-                <option ${segment.energy_state === 'low' ? 'selected' : ''}>low</option>
-                <option ${segment.energy_state === 'medium' ? 'selected' : ''}>medium</option>
-                <option ${segment.energy_state === 'high' ? 'selected' : ''}>high</option>
+              <select data-k="kind" data-platform-index="${platformIndex}">
+                ${kindOptions}
               </select>
             </td>
-            <td><input type="text" value="${segment.platform_types.join(',')}" data-k="platform_types" data-i="${i}" /></td>
-            <td><input class="size-75" type="number" value="${segment.vertical_range[0]}" data-k="vertical_min" data-i="${i}" /></td>
-            <td><input class="size-75" type="number" value="${segment.vertical_range[1]}" data-k="vertical_max" data-i="${i}" /></td>
-            <td><input class="size-75" type="number" min="0" step="1" value="${Math.max(0, Math.floor(Number(segment.patrol_enemies) || 0))}" data-k="patrol_enemies" data-i="${i}" /></td>
-            <td><input class="size-75" type="number" min="0" max="30" step="0.1" value="${(() => {
-              const rawInterval = Number(segment.flying_spawn_interval_ms);
-              if (!Number.isFinite(rawInterval) || rawInterval <= 0) return '0';
-              return (Math.max(500, Math.min(30000, Math.floor(rawInterval))) / 1000).toFixed(1);
-            })()}" data-k="flying_spawn_interval_s" data-i="${i}" /></td>
-            <td><button data-k="delete" data-i="${i}">Delete</button></td>
+            <td><input class="size-75" type="number" min="0" step="1" value="${patrolValue}" data-k="patrol_enemies" data-platform-index="${platformIndex}" ${enemyInputsDisabled} /></td>
+            <td><input class="size-75" type="number" min="0" step="0.1" value="${flyingValue}" data-k="flying_spawn_interval_s" data-platform-index="${platformIndex}" ${enemyInputsDisabled} /></td>
+            <td><input class="size-75" type="number" min="0" step="0.1" value="${fallingRockValue}" data-k="falling_rock_spawn_interval_s" data-platform-index="${platformIndex}" ${enemyInputsDisabled} /></td>
+            <td><button data-k="delete-platform" data-platform-index="${platformIndex}">Delete</button></td>
           `;
           rowsEl.appendChild(tr);
         });
@@ -2089,13 +2701,11 @@
           acc[s.energy_state] = (acc[s.energy_state] || 0) + 1;
           return acc;
         }, {});
-        const currentPlatforms = getEditablePlatforms();
         setRuntimeGridColumns(deriveGridColumnsFromPlatforms(currentPlatforms));
         const tempoZones = buildTempoMapFromSegments(runtimeGridColumns);
         summaryEl.textContent = `Total segments: ${model.segments.length} | low: ${counts.low || 0}, medium: ${counts.medium || 0}, high: ${
           counts.high || 0
-        } | tempo zones: ${tempoZones.length}`;
-        renderMinimap();
+        } | selected platforms: ${selectedIndices.length} | clipboard: ${platformClipboard.length} | tempo zones: ${tempoZones.length}`;
         renderLayoutEditor();
       }
 
@@ -2127,6 +2737,11 @@
               const rawInterval = Number.isFinite(+s.flying_spawn_interval_ms) ? +s.flying_spawn_interval_ms : 0;
               if (!Number.isFinite(rawInterval) || rawInterval <= 0) return 0;
               return Math.max(500, Math.min(30000, Math.floor(rawInterval)));
+            })(),
+            falling_rock_spawn_interval_ms: (() => {
+              const rawInterval = Number.isFinite(+s.falling_rock_spawn_interval_ms) ? +s.falling_rock_spawn_interval_ms : 0;
+              if (!Number.isFinite(rawInterval) || rawInterval <= 0) return 0;
+              return Math.max(500, Math.min(30000, Math.floor(rawInterval)));
             })()
           }))
         };
@@ -2134,10 +2749,6 @@
 
       document.getElementById('backToGameStart').onclick = () => {
         if (typeof window !== 'undefined') window.location.href = '/';
-      };
-
-      document.getElementById('openMidiComposer').onclick = () => {
-        if (typeof window !== 'undefined') window.location.href = '/daw.html';
       };
 
       document.getElementById('exportRuntime').onclick = async () => {
@@ -2154,16 +2765,20 @@
         }
       };
 
-      document.getElementById('openMidiFile').onclick = () => {
-        midiInput.click();
+      document.getElementById('downloadLevel').onclick = () => {
+        try {
+          const runtime = buildRuntimeModel();
+          const base = sanitizeBaseName(levelBaseNameInput.value);
+          const fileName = `${base}.runtime.json`;
+          downloadLevelJsonLocal(fileName, runtime);
+          alert(`Level downloaded as ${fileName}`);
+        } catch (err) {
+          alert(err.message || 'Error while downloading level');
+        }
       };
 
-      document.getElementById('loadDawPattern').onclick = () => {
-        try {
-          loadDawPatternFromStorage();
-        } catch (err) {
-          alert(err.message || 'Unable to load DAW pattern');
-        }
+      document.getElementById('openMidiFile').onclick = () => {
+        midiInput.click();
       };
 
       midiInput.onchange = async (ev) => {
@@ -2244,24 +2859,11 @@
         renderLayoutEditor();
       };
 
-      document.getElementById('layoutRegenerate').onclick = () => {
-        generatedLayoutSeed = Date.now() + Math.floor(Math.random() * 1000000);
-        customRuntimePlatforms = null;
-        layoutEditorState.selectedIndex = -1;
-        layoutEditorState.dragging = false;
-        renderLayoutEditor();
-      };
-
-      document.getElementById('layoutDeleteSelected').onclick = () => {
-        const idx = Number(layoutEditorState.selectedIndex);
-        if (!Number.isInteger(idx) || idx < 0) return;
-        const mutable = ensureCustomRuntimePlatforms();
-        if (idx >= mutable.length) return;
-        mutable.splice(idx, 1);
-        layoutEditorState.selectedIndex = -1;
-        layoutEditorState.dragging = false;
-        renderLayoutEditor();
-      };
+      if (layoutPreviewToggle) {
+        layoutPreviewToggle.onclick = () => {
+          setLayoutPreviewEnabled(!layoutPreviewState.enabled);
+        };
+      }
 
       qualityModeSelect.onchange = () => {
         if (midiPlayback.notes.length) {
@@ -2276,55 +2878,135 @@
         render();
       });
 
-      rowsEl.addEventListener('input', (ev) => {
-        const t = ev.target;
-        const i = Number(t.dataset.i);
-        const key = t.dataset.k;
-        if (!Number.isInteger(i) || !key || !model.segments[i]) return;
-        const s = model.segments[i];
+      function handleSelectedPlatformTableEdit(ev) {
+        const target = ev.target instanceof Element ? ev.target : null;
+        if (!target) return;
+        const platformIndex = Number(target.dataset.platformIndex);
+        const key = String(target.dataset.k || '');
+        if (!Number.isInteger(platformIndex) || platformIndex < 0 || !key) return;
+        const mutable = ensureCustomRuntimePlatforms();
+        if (platformIndex >= mutable.length) return;
+        const platform = mutable[platformIndex];
+        if (!platform) return;
 
-        if (key === 'platform_types') s.platform_types = t.value.split(',').map((v) => v.trim()).filter(Boolean);
-        if (key === 'bpm') s.bpm = clampBpm(t.value, Number(runtimeBpmInput.value) || 120);
-        if (key === 'vertical_min') s.vertical_range[0] = Number(t.value);
-        if (key === 'vertical_max') s.vertical_range[1] = Number(t.value);
-        if (key === 'energy_state') {
-          s.energy_state = t.value;
-          const defaults = enemyDefaultsByEnergy(s.energy_state);
-          s.patrol_enemies = defaults.patrol;
-          s.flying_spawn_interval_ms = defaults.flyingSpawnIntervalMs;
+        if (key === 'kind') {
+          const runtimeKind = mapPlatformTypeToKind(target.value);
+          const defaults = platformDefaultsByKind(runtimeKind);
+          platform.kind = runtimeKind;
+          if (!Number.isFinite(Number(platform.width)) || Number(platform.width) < 10) platform.width = defaults.width;
+          if (!Number.isFinite(Number(platform.height)) || Number(platform.height) < 8) platform.height = defaults.height;
         }
-        if (key === 'patrol_enemies') s.patrol_enemies = Math.max(0, Math.floor(Number(t.value) || 0));
-        if (key === 'flying_spawn_interval_s') {
-          const rawSeconds = Number(t.value);
-          if (!Number.isFinite(rawSeconds) || rawSeconds <= 0) s.flying_spawn_interval_ms = 0;
-          else s.flying_spawn_interval_ms = Math.max(500, Math.min(30000, Math.round(rawSeconds * 1000)));
+        if (key === 'x') platform.x = snapWorldX(Number(target.value));
+        if (key === 'y') platform.y = clampNumber(snapWorldY(Number(target.value)), 120, 440);
+        if (key === 'width') platform.width = Math.max(10, Math.round(Number(target.value) || PLATFORM_WIDTH));
+        if (key === 'height') platform.height = Math.max(8, Math.round(Number(target.value) || PLATFORM_BLOCK_HEIGHT));
+        if (key === 'patrol_enemies' || key === 'flying_spawn_interval_s' || key === 'falling_rock_spawn_interval_s') {
+          const segmentBinding = getSegmentBindingForPlatformIndex(platformIndex, mutable);
+          if (segmentBinding && segmentBinding.segment) {
+            const segment = segmentBinding.segment;
+            if (key === 'patrol_enemies') {
+              segment.patrol_enemies = Math.max(0, Math.floor(Number(target.value) || 0));
+            }
+            if (key === 'flying_spawn_interval_s') {
+              segment.flying_spawn_interval_ms = secondsToIntervalMs(target.value);
+            }
+            if (key === 'falling_rock_spawn_interval_s') {
+              segment.falling_rock_spawn_interval_ms = secondsToIntervalMs(target.value);
+            }
+          }
         }
 
         render();
-      });
+      }
+
+      rowsEl.addEventListener('input', handleSelectedPlatformTableEdit);
+      rowsEl.addEventListener('change', handleSelectedPlatformTableEdit);
 
       rowsEl.addEventListener('click', (ev) => {
-        const btn = ev.target.closest('button[data-k="delete"]');
+        const target = ev.target instanceof Element ? ev.target : null;
+        if (!target) return;
+        const btn = target.closest('button[data-k="delete-platform"]');
         if (!btn) return;
-        const i = Number(btn.dataset.i);
-        if (!Number.isInteger(i)) return;
-        model.segments.splice(i, 1);
+        const platformIndex = Number(btn.dataset.platformIndex);
+        if (!Number.isInteger(platformIndex)) return;
+        if (!removePlatformsByIndices([platformIndex], { clearSelection: false })) return;
+        closeLayoutContextMenu();
         render();
       });
 
       window.addEventListener('keydown', (ev) => {
+        if (layoutPreviewState.enabled && !isEditableDomTarget(ev.target)) {
+          let handledPreviewKey = false;
+          if (isLayoutPreviewLeftKey(ev.key)) {
+            layoutPreviewState.input.left = true;
+            handledPreviewKey = true;
+          } else if (isLayoutPreviewRightKey(ev.key)) {
+            layoutPreviewState.input.right = true;
+            handledPreviewKey = true;
+          } else if (isLayoutPreviewJumpKey(ev.key)) {
+            if (!ev.repeat) layoutPreviewState.input.jumpPressedEdge = true;
+            handledPreviewKey = true;
+          }
+          if (handledPreviewKey) {
+            ev.preventDefault();
+            return;
+          }
+        }
+
+        if (layoutEditorState.contextMenuOpen && ev.key === 'Escape') {
+          closeLayoutContextMenu();
+          ev.preventDefault();
+          renderLayoutEditor();
+          return;
+        }
+
+        if (isEditableDomTarget(ev.target)) return;
+
+        if (ev.ctrlKey || ev.metaKey) {
+          const normalized = String(ev.key || '').toLowerCase();
+          if (normalized === 'c') {
+            copySelectedPlatformsToClipboard();
+            ev.preventDefault();
+            render();
+            return;
+          }
+          if (normalized === 'v') {
+            const didPaste = pasteClipboardAtPointer();
+            closeLayoutContextMenu();
+            ev.preventDefault();
+            if (didPaste) render();
+            return;
+          }
+        }
+
         if (ev.key !== 'Delete' && ev.key !== 'Backspace') return;
-        const tag = String(document.activeElement?.tagName || '').toLowerCase();
-        if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
-        const idx = Number(layoutEditorState.selectedIndex);
-        if (!Number.isInteger(idx) || idx < 0) return;
-        const mutable = ensureCustomRuntimePlatforms();
-        if (idx >= mutable.length) return;
-        mutable.splice(idx, 1);
-        layoutEditorState.selectedIndex = -1;
-        layoutEditorState.dragging = false;
-        ev.preventDefault();
-        renderLayoutEditor();
+        if (removePlatformsByIndices(getSelectedIndicesSorted(), { clearSelection: true })) {
+          closeLayoutContextMenu();
+          ev.preventDefault();
+          render();
+        }
+      });
+
+      window.addEventListener('keyup', (ev) => {
+        if (!layoutPreviewState.enabled || isEditableDomTarget(ev.target)) return;
+        let handledPreviewKey = false;
+        if (isLayoutPreviewLeftKey(ev.key)) {
+          layoutPreviewState.input.left = false;
+          handledPreviewKey = true;
+        } else if (isLayoutPreviewRightKey(ev.key)) {
+          layoutPreviewState.input.right = false;
+          handledPreviewKey = true;
+        } else if (isLayoutPreviewJumpKey(ev.key)) {
+          handledPreviewKey = true;
+        }
+        if (handledPreviewKey) ev.preventDefault();
+      });
+
+      window.addEventListener('blur', () => {
+        clearLayoutPreviewInputState();
+        layoutEditorState.pointerInsideCanvas = false;
+        stopLayoutSelectionInteractions();
+        closeLayoutContextMenu();
       });
 
       if (layoutEditorCanvas) {
@@ -2332,91 +3014,155 @@
           ev.preventDefault();
         });
 
+        const finalizeBoxSelection = () => {
+          if (!layoutEditorState.boxSelecting) return false;
+          const active = getEditablePlatforms();
+          const left = Math.min(layoutEditorState.boxStartWorldX, layoutEditorState.boxEndWorldX);
+          const right = Math.max(layoutEditorState.boxStartWorldX, layoutEditorState.boxEndWorldX);
+          const top = Math.min(layoutEditorState.boxStartWorldY, layoutEditorState.boxEndWorldY);
+          const bottom = Math.max(layoutEditorState.boxStartWorldY, layoutEditorState.boxEndWorldY);
+          layoutEditorState.boxSelecting = false;
+          const movedEnough = Math.abs(right - left) >= 3 || Math.abs(bottom - top) >= 3;
+          clearSelection();
+          if (!movedEnough) return true;
+          for (let idx = 0; idx < active.length; idx++) {
+            const bounds = getPlatformBounds(active[idx]);
+            const intersects = !(bounds.right < left || bounds.left > right || bounds.bottom < top || bounds.top > bottom);
+            if (intersects) layoutEditorState.selectedIndices.add(idx);
+          }
+          normalizeSelectionAfterMutation(active);
+          return true;
+        };
+
         layoutEditorCanvas.addEventListener('mousedown', (ev) => {
-          const point = getLayoutCanvasPoint(ev);
+          const point = updateLayoutPointerStateFromEvent(ev);
           const worldX = layoutEditorState.cameraX + point.x;
           const worldY = layoutWorldYFromCanvas(point.y);
+          const toggleMode = ev.ctrlKey || ev.metaKey;
+
+          if (ev.button !== 2) closeLayoutContextMenu();
 
           if (ev.button === 0) {
             const active = getEditablePlatforms();
             const hit = findPlatformIndexAtWorld(active, worldX, worldY);
-            layoutEditorState.selectedIndex = hit;
-            if (hit >= 0) {
-              const mutable = ensureCustomRuntimePlatforms();
-              const selected = mutable[hit];
-              layoutEditorState.dragging = true;
-              layoutEditorState.dragOffsetX = worldX - Number(selected.x);
-              layoutEditorState.dragOffsetY = worldY - Number(selected.y);
-            } else {
-              layoutEditorState.dragging = false;
+            if (toggleMode) {
+              stopLayoutSelectionInteractions();
+              if (hit >= 0) toggleSelection(hit);
+              normalizeSelectionAfterMutation(active);
+              render();
+              return;
             }
-            renderLayoutEditor();
+            if (hit >= 0) {
+              if (!layoutEditorState.selectedIndices.has(hit)) setSingleSelection(hit);
+              stopLayoutSelectionInteractions();
+              beginGroupDrag(worldX, worldY);
+            } else {
+              stopLayoutSelectionInteractions();
+              beginBoxSelection(worldX, worldY);
+            }
+            render();
             return;
           }
 
           if (ev.button === 2) {
-            const mutable = ensureCustomRuntimePlatforms();
-            const hit = findPlatformIndexAtWorld(mutable, worldX, worldY);
+            stopLayoutSelectionInteractions();
+            const active = getEditablePlatforms();
+            const hit = findPlatformIndexAtWorld(active, worldX, worldY);
+            let createMode = false;
             if (hit >= 0) {
-              const current = mutable[hit];
-              const nextKind = cyclePlatformKind(current.kind);
-              const defaults = platformDefaultsByKind(nextKind);
-              current.kind = nextKind;
-              if (!Number.isFinite(Number(current.width)) || Number(current.width) < 10) current.width = defaults.width;
-              if (!Number.isFinite(Number(current.height)) || Number(current.height) < 8) current.height = defaults.height;
-              layoutEditorState.selectedIndex = hit;
+              if (!layoutEditorState.selectedIndices.has(hit)) setSingleSelection(hit);
             } else {
-              const kind = 'segment';
-              const defaults = platformDefaultsByKind(kind);
-              mutable.push({
-                kind,
-                x: snapWorldX(worldX),
-                y: clampNumber(snapWorldY(worldY), 120, 440),
-                width: defaults.width,
-                height: defaults.height
-              });
-              layoutEditorState.selectedIndex = mutable.length - 1;
+              clearSelection();
+              createMode = true;
             }
-            renderLayoutEditor();
+            openLayoutContextMenu(ev.clientX, ev.clientY, worldX, worldY, createMode);
+            render();
           }
         });
 
         layoutEditorCanvas.addEventListener('mousemove', (ev) => {
-          if (!layoutEditorState.dragging) return;
-          const mutable = ensureCustomRuntimePlatforms();
-          const idx = layoutEditorState.selectedIndex;
-          if (!Number.isInteger(idx) || idx < 0 || idx >= mutable.length) return;
-          const point = getLayoutCanvasPoint(ev);
-          const worldX = layoutEditorState.cameraX + point.x - layoutEditorState.dragOffsetX;
-          const worldY = layoutWorldYFromCanvas(point.y) - layoutEditorState.dragOffsetY;
-          mutable[idx].x = snapWorldX(worldX);
-          mutable[idx].y = clampNumber(snapWorldY(Math.round(worldY)), 120, 440);
-          renderLayoutEditor();
+          const point = updateLayoutPointerStateFromEvent(ev);
+          const worldX = layoutEditorState.cameraX + point.x;
+          const worldY = layoutWorldYFromCanvas(point.y);
+
+          if (layoutEditorState.draggingGroup) {
+            const mutable = ensureCustomRuntimePlatforms();
+            const deltaX = worldX - layoutEditorState.dragAnchorWorldX;
+            const deltaY = worldY - layoutEditorState.dragAnchorWorldY;
+            for (const row of layoutEditorState.dragStartSnapshot) {
+              if (!Number.isInteger(row.idx) || row.idx < 0 || row.idx >= mutable.length) continue;
+              mutable[row.idx].x = snapWorldX(Number(row.x) + deltaX);
+              mutable[row.idx].y = clampNumber(snapWorldY(Number(row.y) + deltaY), 120, 440);
+            }
+            render();
+            return;
+          }
+
+          if (layoutEditorState.boxSelecting) {
+            layoutEditorState.boxEndWorldX = worldX;
+            layoutEditorState.boxEndWorldY = worldY;
+            renderLayoutEditor();
+          }
         });
 
-        const stopDrag = () => {
-          layoutEditorState.dragging = false;
+        const stopDragOrSelection = () => {
+          const hadDrag = layoutEditorState.draggingGroup;
+          const hadBox = finalizeBoxSelection();
+          layoutEditorState.draggingGroup = false;
+          layoutEditorState.dragStartSnapshot = [];
+          if (hadDrag || hadBox) render();
         };
-        layoutEditorCanvas.addEventListener('mouseup', stopDrag);
-        layoutEditorCanvas.addEventListener('mouseleave', stopDrag);
+        layoutEditorCanvas.addEventListener('mouseup', stopDragOrSelection);
+        layoutEditorCanvas.addEventListener('mouseleave', () => {
+          layoutEditorState.pointerInsideCanvas = false;
+          stopDragOrSelection();
+        });
       }
 
+      if (layoutContextMenu) {
+        layoutContextMenu.addEventListener('click', (ev) => {
+          const target = ev.target instanceof Element ? ev.target : null;
+          if (!target) return;
+          const kindBtn = target.closest('button[data-kind]');
+          if (!kindBtn) return;
+          const selectedKind = String(kindBtn.dataset.kind || '').trim();
+          if (!selectedKind) return;
+          if (layoutEditorState.contextMenuCreateMode) createPlatformFromContextMenu(selectedKind);
+          else applyKindToSelection(selectedKind);
+          closeLayoutContextMenu();
+          render();
+        });
+      }
+
+      window.addEventListener('mousedown', (ev) => {
+        if (!layoutEditorState.contextMenuOpen || !layoutContextMenu) return;
+        const target = ev.target instanceof Node ? ev.target : null;
+        if (target && layoutContextMenu.contains(target)) return;
+        if (target && layoutEditorCanvas && layoutEditorCanvas.contains(target)) return;
+        closeLayoutContextMenu();
+        renderLayoutEditor();
+      });
+
       window.addEventListener('resize', () => {
-        resizeMinimapCanvas();
-        renderMinimap();
         resizeLayoutEditorCanvas();
         renderLayoutEditor();
       });
 
-      refreshMidiFolderList();
-      refreshLevelsFolderList();
-      try {
-        const source = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('source') : '';
-        if (source === 'daw') loadDawPatternFromStorage();
-      } catch {
-        // Ignore query parsing/storage errors.
+      async function bootstrapEditor() {
+        await refreshMidiFolderList();
+        await refreshLevelsFolderList();
+        try {
+          render();
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'unknown render error';
+          setMidiStatus(`editor render error: ${message}`);
+        }
       }
-      render();
+
+      bootstrapEditor().catch((err) => {
+        const message = err instanceof Error ? err.message : 'unknown initialization error';
+        setMidiStatus(`editor initialization error: ${message}`);
+      });
     </script>
   </body>
 </html>

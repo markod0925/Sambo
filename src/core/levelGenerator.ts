@@ -5,10 +5,241 @@ export interface AnalysisData {
   energy_curve: number[];
 }
 
+export type RuntimePlatformKind = Exclude<Segment['platformTypes'][number], 'static'> | 'segment';
+
+export interface KindSequenceRules {
+  enableEnergyGate?: boolean;
+  maxStaticRun?: number;
+  maxTimedRun?: number;
+  minSegmentsBetweenLaunches?: number;
+  forbidPairs?: Array<[RuntimePlatformKind, RuntimePlatformKind]>;
+}
+
+export interface PatternSegmentInput {
+  energyState: EnergyState;
+  platformTypes: Segment['platformTypes'];
+  rhythmDensity: number;
+}
+
+export const defaultKindSequenceRules: Required<KindSequenceRules> = {
+  enableEnergyGate: true,
+  maxStaticRun: 3,
+  maxTimedRun: 2,
+  minSegmentsBetweenLaunches: 4,
+  forbidPairs: [
+    ['beat', 'beat'],
+    ['beat', 'alternateBeat'],
+    ['alternateBeat', 'beat'],
+    ['alternateBeat', 'alternateBeat']
+  ]
+};
+
+const allRuntimeKinds: RuntimePlatformKind[] = [
+  'segment',
+  'beat',
+  'alternateBeat',
+  'ghost',
+  'reverseGhost',
+  'elevator',
+  'shuttle',
+  'cross',
+  'spring',
+  'hazard',
+  'launch30',
+  'launch60'
+];
+
+const timedKinds = new Set<RuntimePlatformKind>(['beat', 'alternateBeat', 'ghost', 'reverseGhost']);
+const launchKinds = new Set<RuntimePlatformKind>(['launch30', 'launch60']);
+
+const energyGateKinds: Record<EnergyState, Set<RuntimePlatformKind>> = {
+  low: new Set<RuntimePlatformKind>(['segment', 'beat', 'alternateBeat', 'elevator']),
+  medium: new Set<RuntimePlatformKind>([
+    'segment',
+    'beat',
+    'alternateBeat',
+    'ghost',
+    'reverseGhost',
+    'elevator',
+    'shuttle',
+    'cross',
+    'spring'
+  ]),
+  high: new Set<RuntimePlatformKind>(allRuntimeKinds)
+};
+
 export function classifyEnergy(value: number): EnergyState {
   if (value < 0.33) return 'low';
   if (value < 0.66) return 'medium';
   return 'high';
+}
+
+function mapPlatformTypeToRuntimeKind(platformType: Segment['platformTypes'][number]): RuntimePlatformKind {
+  if (platformType === 'static') return 'segment';
+  if (allRuntimeKinds.includes(platformType)) return platformType;
+  return 'segment';
+}
+
+function deterministicUnit(seed: number): number {
+  const x = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+function clampUnit(value: number): number {
+  const n = Number.isFinite(value) ? value : 0.5;
+  return Math.max(0, Math.min(1, n));
+}
+
+function trailingRunLength<T>(items: T[], predicate: (item: T) => boolean): number {
+  let count = 0;
+  for (let i = items.length - 1; i >= 0; i--) {
+    if (!predicate(items[i])) break;
+    count += 1;
+  }
+  return count;
+}
+
+function weightedChoice<T>(candidates: T[], getWeight: (candidate: T) => number, roll: number): T {
+  if (candidates.length === 1) return candidates[0];
+  const weights = candidates.map((candidate) => Math.max(0.0001, getWeight(candidate)));
+  const total = weights.reduce((acc, w) => acc + w, 0);
+  let target = clampUnit(roll) * total;
+  for (let i = 0; i < candidates.length; i++) {
+    target -= weights[i];
+    if (target <= 0) return candidates[i];
+  }
+  return candidates[candidates.length - 1];
+}
+
+function kindWeight(kind: RuntimePlatformKind | null, seg: PatternSegmentInput): number {
+  const density = clampUnit(seg.rhythmDensity);
+  if (kind === null) {
+    return 0.03 + (1 - density) * 0.1;
+  }
+  if (kind === 'segment') {
+    return 0.5 + (1 - density) * 0.6;
+  }
+
+  let weight = 0.7 + density * 1.1;
+  if (seg.energyState === 'high') weight *= 1.2;
+  if (seg.energyState === 'low') weight *= 0.75;
+  if (timedKinds.has(kind)) weight *= 1 + density * 0.25;
+  return weight;
+}
+
+function toUniqueKinds(platformTypes: Segment['platformTypes']): RuntimePlatformKind[] {
+  const mappedKinds = platformTypes.map((platformType) => mapPlatformTypeToRuntimeKind(platformType));
+  const unique = new Set<RuntimePlatformKind>(mappedKinds);
+  unique.add('segment');
+  return [...unique];
+}
+
+function applyEnergyGate(kinds: Array<RuntimePlatformKind | null>, seg: PatternSegmentInput): Array<RuntimePlatformKind | null> {
+  const allowed = energyGateKinds[seg.energyState];
+  return kinds.filter((kind) => kind === null || allowed.has(kind));
+}
+
+function applyPairForbids(
+  kinds: Array<RuntimePlatformKind | null>,
+  history: Array<RuntimePlatformKind | null>,
+  rules: Required<KindSequenceRules>
+): Array<RuntimePlatformKind | null> {
+  const previous = history.length > 0 ? history[history.length - 1] : null;
+  if (previous === null) return kinds;
+  let filtered = kinds;
+  for (const [fromKind, toKind] of rules.forbidPairs) {
+    if (previous !== fromKind) continue;
+    filtered = filtered.filter((kind) => kind !== toKind);
+  }
+  return filtered;
+}
+
+function countSegmentsSinceLastLaunch(history: Array<RuntimePlatformKind | null>): number {
+  let segmentsSinceLastLaunch = 0;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const kind = history[i];
+    if (kind !== null && launchKinds.has(kind)) return segmentsSinceLastLaunch;
+    if (kind === 'segment') segmentsSinceLastLaunch += 1;
+  }
+  return Number.POSITIVE_INFINITY;
+}
+
+function applyLaunchSpacingRule(
+  kinds: Array<RuntimePlatformKind | null>,
+  history: Array<RuntimePlatformKind | null>,
+  rules: Required<KindSequenceRules>
+): Array<RuntimePlatformKind | null> {
+  if (rules.minSegmentsBetweenLaunches <= 0) return kinds;
+  const segmentsSinceLastLaunch = countSegmentsSinceLastLaunch(history);
+  if (!Number.isFinite(segmentsSinceLastLaunch) || segmentsSinceLastLaunch >= rules.minSegmentsBetweenLaunches) return kinds;
+  return kinds.filter((kind) => kind === null || !launchKinds.has(kind));
+}
+
+function applyMaxRunRules(
+  kinds: Array<RuntimePlatformKind | null>,
+  history: Array<RuntimePlatformKind | null>,
+  rules: Required<KindSequenceRules>
+): Array<RuntimePlatformKind | null> {
+  let filtered = kinds;
+  const staticRun = trailingRunLength(history, (kind) => kind === 'segment');
+  const hasNonStaticAlternative = kinds.some((kind) => kind !== null && kind !== 'segment');
+  if (staticRun >= rules.maxStaticRun && hasNonStaticAlternative) {
+    filtered = filtered.filter((kind) => kind !== 'segment');
+  }
+
+  const timedRun = trailingRunLength(history, (kind) => kind !== null && timedKinds.has(kind));
+  if (timedRun >= rules.maxTimedRun) {
+    filtered = filtered.filter((kind) => kind === null || !timedKinds.has(kind));
+  }
+  return filtered;
+}
+
+function resolveKindRules(rules: KindSequenceRules | undefined): Required<KindSequenceRules> {
+  return {
+    enableEnergyGate: rules?.enableEnergyGate ?? defaultKindSequenceRules.enableEnergyGate,
+    maxStaticRun: Math.max(1, Math.floor(rules?.maxStaticRun ?? defaultKindSequenceRules.maxStaticRun)),
+    maxTimedRun: Math.max(1, Math.floor(rules?.maxTimedRun ?? defaultKindSequenceRules.maxTimedRun)),
+    minSegmentsBetweenLaunches: Math.max(
+      0,
+      Math.floor(rules?.minSegmentsBetweenLaunches ?? defaultKindSequenceRules.minSegmentsBetweenLaunches)
+    ),
+    forbidPairs: Array.isArray(rules?.forbidPairs) && rules!.forbidPairs.length > 0 ? rules!.forbidPairs : defaultKindSequenceRules.forbidPairs
+  };
+}
+
+export function generatePlatformKindSequence(
+  segments: PatternSegmentInput[],
+  seed = 1,
+  rules: KindSequenceRules = defaultKindSequenceRules
+): Array<RuntimePlatformKind | null> {
+  const resolvedRules = resolveKindRules(rules);
+  const history: Array<RuntimePlatformKind | null> = [];
+  const result: Array<RuntimePlatformKind | null> = [];
+
+  for (let i = 0; i < segments.length; i++) {
+    const segment = segments[i];
+    const baseKinds = toUniqueKinds(segment.platformTypes);
+    let candidates: Array<RuntimePlatformKind | null> = [...baseKinds, null];
+
+    if (resolvedRules.enableEnergyGate) {
+      candidates = applyEnergyGate(candidates, segment);
+    }
+    candidates = applyPairForbids(candidates, history, resolvedRules);
+    candidates = applyLaunchSpacingRule(candidates, history, resolvedRules);
+    candidates = applyMaxRunRules(candidates, history, resolvedRules);
+
+    if (candidates.length === 0) {
+      const energyAllowed = resolvedRules.enableEnergyGate ? applyEnergyGate(baseKinds, segment) : baseKinds;
+      candidates = energyAllowed.length > 0 ? [...energyAllowed] : ['segment'];
+    }
+
+    const roll = deterministicUnit(seed + (i + 1) * 97.137);
+    const picked = weightedChoice(candidates, (kind) => kindWeight(kind, segment), roll);
+    result.push(picked);
+    history.push(picked);
+  }
+
+  return result;
 }
 
 export function generateSegments(analysis: AnalysisData, windowSize = 4): Segment[] {
@@ -27,7 +258,7 @@ function templateForEnergy(energy: EnergyState): Segment {
     return {
       durationBeats: 8,
       energyState: energy,
-      platformTypes: ['static', 'beat', 'alternateBeat'],
+      platformTypes: ['static', 'beat', 'alternateBeat', 'elevator'],
       verticalRange: [0, 1],
       rhythmDensity: 0.25
     };
@@ -37,7 +268,7 @@ function templateForEnergy(energy: EnergyState): Segment {
     return {
       durationBeats: 8,
       energyState: energy,
-      platformTypes: ['static', 'beat', 'alternateBeat', 'ghost', 'reverseGhost'],
+      platformTypes: ['static', 'beat', 'alternateBeat', 'ghost', 'reverseGhost', 'elevator'],
       verticalRange: [0, 2],
       rhythmDensity: 0.5
     };

@@ -1,21 +1,22 @@
 import { BeatSnapMover } from '../core/beatMovement.js';
 import { Metronome } from '../core/metronome.js';
 import { normalizeMidiTickModel, parseMidiToTickModel, tickToSeconds, upperBoundByEndTick, upperBoundByStartTick } from '../core/midi.js';
-import { getBeatPlatformState, getCrossOffsetSteps, getElevatorOffsetSteps, getShuttleOffsetSteps, isAlternateBeatPlatformSolid } from '../core/platforms.js';
+import { getBeatPlatformState, getCrossOffsetSteps, getElevatorOffsetSteps, getShuttleOffsetSteps, isAlternateBeatPlatformSolid, isHazardPlatformDanger } from '../core/platforms.js';
 import { defaultIntensityConfig } from '../core/intensity.js';
 import { HARMONIC_BAND_COUNT, HARMONIC_INTENSITY_SMOOTH_TAU_SECONDS, HARMONIC_PC_SMOOTH_TAU_SECONDS, clearPitchClassBins, fillPitchClassBinsFromPitchCounts, smoothPitchClassBinsInPlace, smoothScalarExponential } from '../core/harmonicBands.js';
 import { resolveAudioQualitySettings } from '../core/audioQuality.js';
-import { DEFAULT_TEMPO_SMOOTHING_BPM_PER_SECOND, DEFAULT_REFERENCE_BPM, getTempoAtColumn, normalizeTempoMap, scaleIntervalByTempo, scaleSpeedByTempo, stepTempoToward } from '../core/tempo.js';
+import { clampBpm, DEFAULT_TEMPO_SMOOTHING_BPM_PER_SECOND, DEFAULT_REFERENCE_BPM, getTempoAtColumn, normalizeTempoMap, scaleIntervalByTempo, scaleSpeedByTempo, stepTempoToward } from '../core/tempo.js';
 import { buildGridEventKey, computeLatenessMs, computeScheduledAtSec, deriveForwardSpeedSignal, isAudioUnderrun, planForwardGridEvents } from '../core/predictivePlayback.js';
 import { getLevelByOneBasedIndex, LEVELS } from '../data/levels.js';
 import { resolveIntent } from '../core/input.js';
-import { applyDamage, resolveEnemyCollision, updateFlyingEnemy, updatePatrolEnemy } from '../core/enemies.js';
+import { applyDamage, resolveEnemyCollision, updateFallingRockEnemy, updateFlyingEnemy, updatePatrolEnemy } from '../core/enemies.js';
 import { HARMONIC_BANDS_PIPELINE_KEY, HarmonicBandsPipeline } from './render/HarmonicBandsPipeline.js';
 const BEST_TIME_STORAGE_PREFIX = 'sambo.level';
 const ENEMY_TIME_BONUS_MS = 200;
 const BASE_PATROL_SPEED = 45;
 const BASE_FLYING_SPEED_X = 90;
 const BASE_FLYING_HOMING_RATE = 45;
+const BASE_FALLING_ROCK_SPEED_Y = 120;
 const PLAYER_STEP_SUBDIVISIONS = 4;
 const PLAYER_SPEED_MULTIPLIER = 2.2;
 const PLAYER_SNAP_STEP_X = 16 * PLAYER_SPEED_MULTIPLIER;
@@ -29,6 +30,9 @@ const PATROL_ENEMY_WIDTH = 15;
 const PATROL_ENEMY_HEIGHT = 12;
 const FLYING_ENEMY_WIDTH = 15;
 const FLYING_ENEMY_HEIGHT = 10;
+const FALLING_ROCK_RADIUS = 7;
+const ENEMY_COLLISION_BOX_SCALE = 0.9;
+const PATROL_SPAWN_CLEARANCE_PX = 1;
 const PLAYER_CAMERA_ZOOM = 2;
 const PLAYER_CAMERA_FOLLOW_OFFSET_Y = 50;
 const VOICE_RETRIGGER_WINDOW_MS = 90;
@@ -39,6 +43,7 @@ const AUDIO_EVENT_KEY_TTL_MS = 2400;
 const BASE_JUMP_VELOCITY = -560;
 const SPRING_JUMP_HEIGHT_MULTIPLIER = 2;
 const SPRING_JUMP_VELOCITY = BASE_JUMP_VELOCITY * Math.sqrt(SPRING_JUMP_HEIGHT_MULTIPLIER);
+const LAUNCH_PLATFORM_SPEED_MULTIPLIER = 25.2;
 const PLAYER_JUMP_STRETCH_MAX_SPEED = Math.abs(SPRING_JUMP_VELOCITY) * 1.05;
 const PLAYER_JUMP_STRETCH_MAX = 0.34;
 const PLAYER_JUMP_SQUEEZE_COUPLING = 0.7;
@@ -49,7 +54,15 @@ const PLAYER_STOMP_JELLY_MIN = 0.10;
 const PLAYER_STOMP_JELLY_MAX = 0.20;
 const PLAYER_LANDING_JELLY_FREQUENCY_HZ = 8.2;
 const PLAYER_LANDING_JELLY_DAMPING = 7.8;
-const CONTROL_HINT_TEXT = 'A/D or Arrows: move | W/Space/Up: jump.';
+const CONTROL_HINT_TEXT = 'A/D or Arrows: move | W/Space/Up: jump x2 | double tap Left/Right: dash (3s cooldown).';
+const PLAYER_MAX_AIR_JUMPS = 1;
+const DASH_DOUBLE_TAP_WINDOW_MS = 240;
+const DASH_DURATION_MS = 150;
+const DASH_SPEED_PX_PER_SEC = 620;
+const DASH_COOLDOWN_MS = 3000;
+const PLAYER_AIRBORNE_LATERAL_SPEED_MULTIPLIER = 1.2;
+const DASH_GHOST_INTERVAL_MS = 30;
+const DASH_GHOST_LIFETIME_MS = 180;
 const HARMONIC_PITCH_CLASS_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const HUD_FONT = 'monospace';
 const DEPTH_BACKGROUND = 1;
@@ -87,15 +100,31 @@ const COLORS = {
     springFill: 0x2dc653,
     springPulseFill: 0x52b788,
     springBorder: 0x95d5b2,
+    hazardNeutralFill: 0x4f2a37,
+    hazardNeutralBorder: 0x754866,
+    hazardShockFill: 0xa4161a,
+    hazardShockBorder: 0xff4d6d,
+    launchFill: 0x2f6fd3,
+    launchBorder: 0x4cc9f0,
+    launchGuide: 0xcdefff,
     patrolFill: 0xa4161a,
     patrolBorder: 0x660708,
     flyingFill: 0x9d0208,
     flyingBorder: 0xff4d6d,
+    fallingRockFill: 0xc1121f,
+    fallingRockBorder: 0xff4d6d,
+    enemyPulseBorderGray: 0x6b707c,
+    enemyPulseBorderRed: 0xff4d6d,
     damageFlash: 0xff6b6b,
     moonLow: 0xb0b7c3,
     moonWarm: 0xf4d35e,
     moonCool: 0x4cc9f0
 };
+const DIFFICULTY_PROFILES = [
+    { mode: 'easy', bpmMultiplier: 0.85, lives: 10, fallBehavior: 'respawnNearestSegment', fallRespawnLifeCost: 0 },
+    { mode: 'normal', bpmMultiplier: 1.0, lives: 5, fallBehavior: 'respawnNearestSegment', fallRespawnLifeCost: 1 },
+    { mode: 'hard', bpmMultiplier: 1.5, lives: 5, fallBehavior: 'death', fallRespawnLifeCost: 0 }
+];
 export class GameScene extends Phaser.Scene {
     metronome;
     mover;
@@ -119,6 +148,8 @@ export class GameScene extends Phaser.Scene {
     shuttlePlatforms = [];
     crossPlatforms = [];
     springPlatforms = [];
+    hazardPlatforms = [];
+    launchPlatforms = [];
     segmentPlatforms = [];
     darknessOverlay;
     gameOverBackdrop;
@@ -131,11 +162,13 @@ export class GameScene extends Phaser.Scene {
     pauseTitleText;
     continueButton;
     pauseBackToMenuButton;
-    quitButton;
+    pauseRestartButton;
     endStateTitle = 'GAME OVER';
     patrolEnemies = [];
     flyingEnemies = [];
+    fallingRockEnemies = [];
     lives = 5;
+    maxLives = 5;
     isGameOver = false;
     isPaused = false;
     damageCooldownMs = 0;
@@ -145,6 +178,13 @@ export class GameScene extends Phaser.Scene {
     playerHeartFacing = 'forward';
     playerLandingJellyAmplitude = 0;
     playerLandingJellyPhase = 0;
+    remainingAirJumps = PLAYER_MAX_AIR_JUMPS;
+    dashDirection = 'idle';
+    dashActiveUntilMs = 0;
+    dashCooldownUntilMs = 0;
+    lastForwardTapMs = Number.NEGATIVE_INFINITY;
+    lastBackwardTapMs = Number.NEGATIVE_INFINITY;
+    nextDashGhostAtMs = 0;
     ghostPlatformLatchedSolid = false;
     reverseGhostPlatformLatchedSolid = true;
     cursors;
@@ -183,6 +223,9 @@ export class GameScene extends Phaser.Scene {
     availableLevelNames = ['level_1.runtime.json'];
     isPreviewMode = false;
     masterVolume = 0.5;
+    difficultyBpmMultiplier = 1;
+    fallBehavior = 'respawnNearestSegment';
+    fallRespawnLifeCost = 0;
     nextPreviewToggleMs = 0;
     nextPreviewJumpMs = 0;
     previewDirection = 'forward';
@@ -235,7 +278,7 @@ export class GameScene extends Phaser.Scene {
     debugLastOnCount = 0;
     debugLastOffCount = 0;
     debugAudioMode = 'legacy';
-    debugAudioDeClickStrict = false;
+    debugAudioDeClickStrict = true;
     debugShowPlaybackSpeedMetrics = true;
     debugExpectedBeatsPerSec = 0;
     debugActualBeatsPerSec = 0;
@@ -338,6 +381,32 @@ export class GameScene extends Phaser.Scene {
                     .setStrokeStyle(2, COLORS.springBorder, 0.9)
                     .setDepth(DEPTH_ENVIRONMENT);
                 this.springPlatforms.push(spring);
+            }
+            else if (platform.kind === 'hazard') {
+                const hazard = this.add
+                    .rectangle(this.snapXToGrid(platform.x), this.snapYToGrid(platform.y), this.snapLengthToGrid(platform.width), this.platformBlockHeight, COLORS.hazardNeutralFill, 0.9)
+                    .setStrokeStyle(2, COLORS.hazardNeutralBorder, 0.9)
+                    .setDepth(DEPTH_ENVIRONMENT);
+                this.hazardPlatforms.push({ shape: hazard });
+            }
+            else if (platform.kind === 'launch30' || platform.kind === 'launch60') {
+                const angleDeg = platform.kind === 'launch30' ? 30 : 60;
+                const x = this.snapXToGrid(platform.x);
+                const y = this.snapYToGrid(platform.y);
+                const width = this.snapLengthToGrid(platform.width);
+                const launch = this.add
+                    .rectangle(x, y, width, this.platformBlockHeight, COLORS.launchFill, 0.9)
+                    .setStrokeStyle(2, COLORS.launchBorder, 0.9)
+                    .setDepth(DEPTH_ENVIRONMENT);
+                const lineLength = Math.max(12, width * 0.5);
+                const radians = Phaser.Math.DegToRad(angleDeg);
+                const dx = Math.cos(radians) * lineLength * 0.5;
+                const dy = Math.sin(radians) * lineLength * 0.5;
+                const guide = this.add
+                    .line(x, y, -dx, dy, dx, -dy, COLORS.launchGuide, 0.95)
+                    .setLineWidth(2, 2)
+                    .setDepth(DEPTH_ENVIRONMENT + 0.05);
+                this.launchPlatforms.push({ kind: platform.kind, angleDeg, shape: launch, guide });
             }
         }
         const initialNow = performance.now();
@@ -447,6 +516,8 @@ export class GameScene extends Phaser.Scene {
         this.updateTempoFromPlayerPosition(now, deltaSeconds);
         this.updateTimerLabel(now);
         let intent;
+        let leftTap = false;
+        let rightTap = false;
         if (this.isPreviewMode) {
             intent = this.getPreviewIntent(now);
         }
@@ -454,48 +525,91 @@ export class GameScene extends Phaser.Scene {
             const jumpPressed = Phaser.Input.Keyboard.JustDown(this.keys.SPACE) ||
                 Phaser.Input.Keyboard.JustDown(this.keys.W) ||
                 Phaser.Input.Keyboard.JustDown(this.keys.UP);
+            leftTap = Phaser.Input.Keyboard.JustDown(this.keys.LEFT) || Phaser.Input.Keyboard.JustDown(this.keys.A);
+            rightTap = Phaser.Input.Keyboard.JustDown(this.keys.RIGHT) || Phaser.Input.Keyboard.JustDown(this.keys.D);
             intent = resolveIntent({
                 left: this.keys.A.isDown || this.keys.LEFT.isDown || this.cursors.left.isDown,
                 right: this.keys.D.isDown || this.keys.RIGHT.isDown || this.cursors.right.isDown,
                 jumpPressed
             });
         }
-        const canQueueStep = intent.direction !== 'idle' &&
-            this.mover.queuedCount === 0 &&
-            !this.mover.currentStep;
-        if (canQueueStep) {
-            this.mover.enqueue(intent.direction);
+        if (!this.isPreviewMode) {
+            if (leftTap)
+                this.registerDashTap('backward', now);
+            if (rightTap)
+                this.registerDashTap('forward', now);
         }
-        const stepBeforeMovement = this.mover.currentStep;
-        const movement = this.mover.update(now);
+        const dashActive = this.isDashActive(now);
+        if (!dashActive && this.dashDirection !== 'idle')
+            this.dashDirection = 'idle';
+        const beatInBar = this.metronome.beatInBarAt(now);
+        const beatState = getBeatPlatformState(beatInBar);
+        const alternateBeatSolid = isAlternateBeatPlatformSolid(beatInBar);
+        const hazardDanger = isHazardPlatformDanger(beatInBar);
+        const beatSolid = beatState !== 'gone';
+        const ghostSolidBeforeHorizontal = this.ghostPlatformLatchedSolid;
+        const reverseGhostSolidBeforeHorizontal = this.reverseGhostPlatformLatchedSolid;
+        const airborneBeforeHorizontal = !this.isPlayerGrounded(beatSolid, alternateBeatSolid, ghostSolidBeforeHorizontal, reverseGhostSolidBeforeHorizontal, true);
+        const airborneLateralBoostActive = !dashActive && intent.direction !== 'idle' && (airborneBeforeHorizontal || intent.jump);
+        this.mover.setSpeedMultiplier(airborneLateralBoostActive ? PLAYER_AIRBORNE_LATERAL_SPEED_MULTIPLIER : 1);
         const previousPlayerX = this.player.x;
-        const targetX = this.playerStartX + movement.x;
-        const clampedX = Phaser.Math.Clamp(targetX, this.minPlayerX, this.maxPlayerX);
-        if (clampedX !== targetX) {
-            this.mover.stopAt(clampedX - this.playerStartX);
-            this.currentDirection = 'idle';
+        let movedX = 0;
+        let effectiveVelocityX = 0;
+        let wasClampedByBounds = false;
+        if (dashActive) {
+            const dashSign = this.dashDirection === 'forward' ? 1 : -1;
+            const dashTargetX = this.player.x + dashSign * DASH_SPEED_PX_PER_SEC * deltaSeconds;
+            const dashClampedX = Phaser.Math.Clamp(dashTargetX, this.minPlayerX, this.maxPlayerX);
+            wasClampedByBounds = dashClampedX !== dashTargetX;
+            this.player.x = dashClampedX;
+            movedX = this.player.x - previousPlayerX;
+            effectiveVelocityX = deltaSeconds > 0 ? movedX / deltaSeconds : 0;
+            if (wasClampedByBounds)
+                this.cancelDash();
+            if (movedX > this.movementEpsilon)
+                this.currentDirection = 'forward';
+            else if (movedX < -this.movementEpsilon)
+                this.currentDirection = 'backward';
+            else
+                this.currentDirection = 'idle';
+            this.mover.stopAt(this.player.x - this.playerStartX);
+            this.spawnDashGhost(now);
         }
-        this.player.x = clampedX;
-        const movedX = this.player.x - previousPlayerX;
+        else {
+            this.mover.setDirection(intent.direction);
+            const movement = this.mover.update(now);
+            const targetX = this.playerStartX + movement.x;
+            const clampedX = Phaser.Math.Clamp(targetX, this.minPlayerX, this.maxPlayerX);
+            wasClampedByBounds = clampedX !== targetX;
+            if (wasClampedByBounds) {
+                this.mover.stopAt(clampedX - this.playerStartX);
+            }
+            this.player.x = clampedX;
+            movedX = this.player.x - previousPlayerX;
+            effectiveVelocityX = this.mover.velocityPxPerSec;
+            if (wasClampedByBounds)
+                this.currentDirection = 'idle';
+            else if (effectiveVelocityX > this.movementEpsilon)
+                this.currentDirection = 'forward';
+            else if (effectiveVelocityX < -this.movementEpsilon)
+                this.currentDirection = 'backward';
+            else if (intent.direction !== 'idle')
+                this.currentDirection = intent.direction;
+            else
+                this.currentDirection = 'idle';
+        }
         this.updatePlaybackSpeedDebugMetrics(deltaSeconds, movedX);
-        if (movedX > this.movementEpsilon)
-            this.currentDirection = 'forward';
-        else if (movedX < -this.movementEpsilon)
-            this.currentDirection = 'backward';
-        else if (this.mover.currentStep)
-            this.currentDirection = this.mover.currentStep.direction;
-        else
-            this.currentDirection = 'idle';
         const tickNow = this.midiTickModel ? this.getTickFromWorldX(this.player.x) : 0;
         if (this.midiTickModel)
             this.updateHarmonicTracker(tickNow);
         else
             this.clearHarmonicTracker();
-        if (intent.direction === 'forward')
+        if (this.currentDirection === 'forward')
             this.forwardHoldMs += delta;
         else
             this.forwardHoldMs = 0;
-        if (!this.mover.currentStep && intent.direction === 'idle') {
+        const isHorizontalIdle = Math.abs(effectiveVelocityX) <= this.movementEpsilon;
+        if (isHorizontalIdle && intent.direction === 'idle') {
             if (this.idleVoiceReleaseAtMs <= 0)
                 this.idleVoiceReleaseAtMs = now + FORWARD_IDLE_GRACE_MS;
             const longEnoughIdle = now >= this.idleVoiceReleaseAtMs;
@@ -513,30 +627,13 @@ export class GameScene extends Phaser.Scene {
             this.updateMidiTickPlayback();
         }
         else {
-            if (movement.arrived) {
-                const previousGridIndex = this.getGridIndexFromX(previousPlayerX);
-                const gridIndex = this.getGridIndexFromX(this.player.x);
-                if (gridIndex !== previousGridIndex) {
-                    const targetTimeMs = movement.direction === 'forward' && stepBeforeMovement?.direction === 'forward'
-                        ? stepBeforeMovement.arrivalTime
-                        : now;
-                    const eventKey = buildGridEventKey(movement.direction, gridIndex, targetTimeMs);
-                    this.enqueueGridAudioEvent({
-                        gridIndex,
-                        direction: movement.direction,
-                        targetTimeMs,
-                        source: 'arrival',
-                        eventKey
-                    });
-                    if (movement.direction === 'forward' && stepBeforeMovement?.direction === 'forward') {
-                        this.rememberForwardStepDuration(stepBeforeMovement.arrivalTime - stepBeforeMovement.startTime);
-                    }
-                }
-            }
-            if (intent.direction === 'backward') {
+            this.queueLegacyAudioForCrossedGridColumns(previousPlayerX, this.player.x, now - delta, delta);
+            if (!dashActive && this.currentDirection === 'forward')
+                this.rememberForwardStepDuration(this.mover.estimatedGridCellDurationMs);
+            if (dashActive || intent.direction === 'backward') {
                 this.purgeForwardPredictionEvents();
             }
-            else if (intent.direction === 'forward') {
+            else if (intent.direction === 'forward' || this.currentDirection === 'forward') {
                 this.queueForwardPredictedEvents(now);
             }
         }
@@ -548,9 +645,6 @@ export class GameScene extends Phaser.Scene {
             this.reverseGhostPlatformLatchedSolid = false;
         else if (movedX > this.movementEpsilon)
             this.reverseGhostPlatformLatchedSolid = true;
-        const beatInBar = this.metronome.beatInBarAt(now);
-        const beatState = getBeatPlatformState(beatInBar);
-        const alternateBeatSolid = isAlternateBeatPlatformSolid(beatInBar);
         this.handleBeatPulse(beatInBar);
         const wasStandingOnElevator = this.isStandingOnAnyElevator();
         const wasStandingOnShuttle = this.isStandingOnAnyShuttle();
@@ -577,36 +671,52 @@ export class GameScene extends Phaser.Scene {
                 this.verticalVelocity = Math.min(0, this.verticalVelocity);
             }
         }
-        const beatSolid = beatState !== 'gone';
         const ghostSolid = this.ghostPlatformLatchedSolid;
         const reverseGhostSolid = this.reverseGhostPlatformLatchedSolid;
         const groundedBeforeJump = this.isPlayerGrounded(beatSolid, alternateBeatSolid, ghostSolid, reverseGhostSolid, true);
         if (groundedBeforeJump) {
             this.lastGroundedAtMs = now;
             this.lastGroundedOnSpring = this.isStandingOnAnySpring();
+            this.remainingAirJumps = PLAYER_MAX_AIR_JUMPS;
         }
         const canUseCoyoteJump = now - this.lastGroundedAtMs <= this.coyoteJumpWindowMs;
-        if (intent.jump && (groundedBeforeJump || canUseCoyoteJump)) {
-            const jumpFromSpring = groundedBeforeJump ? this.isStandingOnAnySpring() : this.lastGroundedOnSpring;
-            this.verticalVelocity = jumpFromSpring ? SPRING_JUMP_VELOCITY : BASE_JUMP_VELOCITY;
+        if (intent.jump) {
+            if (groundedBeforeJump || canUseCoyoteJump) {
+                const jumpFromSpring = groundedBeforeJump ? this.isStandingOnAnySpring() : this.lastGroundedOnSpring;
+                this.verticalVelocity = jumpFromSpring ? SPRING_JUMP_VELOCITY : BASE_JUMP_VELOCITY;
+            }
+            else if (this.remainingAirJumps > 0) {
+                this.verticalVelocity = BASE_JUMP_VELOCITY;
+                this.remainingAirJumps -= 1;
+            }
         }
         const previousPlayerY = this.playerY;
         this.verticalVelocity += 1400 * deltaSeconds;
         const preCollisionVerticalVelocity = this.verticalVelocity;
         this.playerY += this.verticalVelocity * deltaSeconds;
-        this.resolveVerticalCollisions(previousPlayerY, beatSolid, alternateBeatSolid, ghostSolid, reverseGhostSolid, true);
+        const landedLaunchPlatform = this.resolveVerticalCollisions(previousPlayerY, beatSolid, alternateBeatSolid, ghostSolid, reverseGhostSolid, true);
         const groundedAfterPhysics = this.isPlayerGrounded(beatSolid, alternateBeatSolid, ghostSolid, reverseGhostSolid, true);
         if (!groundedBeforeJump && groundedAfterPhysics && preCollisionVerticalVelocity > PLAYER_LANDING_JELLY_MIN_IMPACT_SPEED) {
             this.triggerPlayerLandingJelly(preCollisionVerticalVelocity);
         }
+        if (landedLaunchPlatform) {
+            this.applyLaunchImpulse(landedLaunchPlatform);
+        }
         if (this.playerY > 620) {
-            this.triggerGameOver();
+            this.handlePlayerFallOut(now);
             return;
         }
         this.triggerSegmentEnemyPlansAt(this.player.x);
-        this.updatePatrolEnemies(deltaSeconds);
+        this.processSegmentEnemySpawnQueues(now);
+        this.updatePatrolEnemies(now, deltaSeconds);
         this.updateFlyingEnemies(now, deltaSeconds);
+        this.updateFallingRockEnemies(now, deltaSeconds);
+        this.handleHazardPlatformDamage(now, hazardDanger);
+        if (this.isGameOver)
+            return;
         this.handleEnemyCollisions(now);
+        if (this.isGameOver)
+            return;
         this.handleMoonCollision();
         this.updateIntensityFromMovement(deltaSeconds, movedX);
         this.applyBrightnessFromIntensity();
@@ -617,6 +727,8 @@ export class GameScene extends Phaser.Scene {
         this.applyAlternateBeatPlatformVisual(alternateBeatSolid);
         this.applyMobilePlatformVisual();
         this.applySpringPlatformVisual(now);
+        this.applyHazardPlatformVisual(hazardDanger, now);
+        this.applyLaunchPlatformVisual(now);
         for (const ghostPlatform of this.ghostPlatforms) {
             if (ghostSolid) {
                 ghostPlatform.setFillStyle(COLORS.ghostActiveFill, 0.85);
@@ -644,6 +756,69 @@ export class GameScene extends Phaser.Scene {
         this.applyWorldVisibilityClamp();
         this.infoText.setText(CONTROL_HINT_TEXT);
         this.updateDebugOverlay();
+    }
+    registerDashTap(direction, nowMs) {
+        const lastTapMs = direction === 'forward' ? this.lastForwardTapMs : this.lastBackwardTapMs;
+        const withinWindow = nowMs - lastTapMs <= DASH_DOUBLE_TAP_WINDOW_MS;
+        if (withinWindow) {
+            this.tryStartDash(direction, nowMs);
+            if (direction === 'forward')
+                this.lastForwardTapMs = Number.NEGATIVE_INFINITY;
+            else
+                this.lastBackwardTapMs = Number.NEGATIVE_INFINITY;
+            return;
+        }
+        if (direction === 'forward')
+            this.lastForwardTapMs = nowMs;
+        else
+            this.lastBackwardTapMs = nowMs;
+    }
+    tryStartDash(direction, nowMs) {
+        if (nowMs < this.dashCooldownUntilMs)
+            return;
+        if (this.isDashActive(nowMs))
+            return;
+        this.dashDirection = direction;
+        this.dashActiveUntilMs = nowMs + DASH_DURATION_MS;
+        this.dashCooldownUntilMs = nowMs + DASH_COOLDOWN_MS;
+        this.nextDashGhostAtMs = nowMs;
+        this.mover.stopAt(this.player.x - this.playerStartX);
+    }
+    cancelDash() {
+        this.dashDirection = 'idle';
+        this.dashActiveUntilMs = 0;
+        this.nextDashGhostAtMs = 0;
+    }
+    isDashActive(nowMs) {
+        if (this.dashDirection !== 'forward' && this.dashDirection !== 'backward')
+            return false;
+        return nowMs < this.dashActiveUntilMs;
+    }
+    spawnDashGhost(nowMs) {
+        if (!this.isDashActive(nowMs))
+            return;
+        if (nowMs < this.nextDashGhostAtMs)
+            return;
+        const dashColor = this.dashDirection === 'forward' ? COLORS.beatSolidFill : COLORS.moonCool;
+        const bodyGhost = this.add
+            .rectangle(this.player.x, this.player.y, PLAYER_WIDTH, PLAYER_HEIGHT, dashColor, 0.22)
+            .setDepth(DEPTH_PLAYER - 0.2)
+            .setScale(this.player.scaleX, this.player.scaleY);
+        const heartGhost = this.add
+            .rectangle(this.playerHeart.x, this.playerHeart.y, PLAYER_HEART_SIZE, PLAYER_HEART_SIZE, COLORS.playerHeart, 0.22)
+            .setDepth(DEPTH_PLAYER - 0.1)
+            .setScale(this.playerHeart.scaleX, this.playerHeart.scaleY);
+        this.tweens.add({
+            targets: [bodyGhost, heartGhost],
+            alpha: 0,
+            duration: DASH_GHOST_LIFETIME_MS,
+            ease: 'Quad.easeOut',
+            onComplete: () => {
+                bodyGhost.destroy();
+                heartGhost.destroy();
+            }
+        });
+        this.nextDashGhostAtMs = nowMs + DASH_GHOST_INTERVAL_MS;
     }
     handleSceneShutdown() {
         this.stopAudioScheduler();
@@ -823,6 +998,10 @@ export class GameScene extends Phaser.Scene {
             return safeLeft;
         return null;
     }
+    getPatrolSpawnY(platformTopY) {
+        const safePlatformTopY = Number.isFinite(platformTopY) ? platformTopY : this.groundY - this.platformBlockHeight * 0.5;
+        return safePlatformTopY - PATROL_ENEMY_HEIGHT * 0.5 - PATROL_SPAWN_CLEARANCE_PX;
+    }
     spawnPatrolEnemy(x, y, minX, maxX) {
         const safeX = this.resolveSpawnSafeX(x, minX, maxX);
         if (safeX === null)
@@ -899,8 +1078,52 @@ export class GameScene extends Phaser.Scene {
             }
         });
     }
-    updatePatrolEnemies(deltaSeconds) {
-        const nowSeconds = this.time.now / 1000;
+    spawnFallingRockEnemyAt(x, y) {
+        const minX = -80;
+        const maxX = this.worldWidth + 80;
+        const safeX = this.resolveSpawnSafeX(x, minX, maxX);
+        if (safeX === null)
+            return;
+        const sprite = this.add
+            .circle(safeX, y, FALLING_ROCK_RADIUS, COLORS.fallingRockFill, 0.94)
+            .setStrokeStyle(2, COLORS.fallingRockBorder, 0.9)
+            .setDepth(DEPTH_ENEMY);
+        this.fallingRockEnemies.push({
+            sprite,
+            alive: true,
+            baseSpeedY: BASE_FALLING_ROCK_SPEED_Y,
+            state: {
+                x: safeX,
+                y,
+                speedY: this.scaleEnemySpeed(BASE_FALLING_ROCK_SPEED_Y, this.currentBpm),
+                active: true
+            }
+        });
+    }
+    mixColor(colorA, colorB, t) {
+        const clamped = Phaser.Math.Clamp(t, 0, 1);
+        const aR = (colorA >> 16) & 0xff;
+        const aG = (colorA >> 8) & 0xff;
+        const aB = colorA & 0xff;
+        const bR = (colorB >> 16) & 0xff;
+        const bG = (colorB >> 8) & 0xff;
+        const bB = colorB & 0xff;
+        const r = Math.round(aR + (bR - aR) * clamped);
+        const g = Math.round(aG + (bG - aG) * clamped);
+        const b = Math.round(aB + (bB - aB) * clamped);
+        return (r << 16) | (g << 8) | b;
+    }
+    getEnemyBorderPulseStyle(nowMs) {
+        const beatPhase = this.metronome.beatProgressAt(nowMs);
+        const antiPhasePulse = (Math.cos(beatPhase * Math.PI * 2 + Math.PI) + 1) * 0.5;
+        return {
+            color: this.mixColor(COLORS.enemyPulseBorderGray, COLORS.enemyPulseBorderRed, antiPhasePulse),
+            alpha: 0.62 + antiPhasePulse * 0.34
+        };
+    }
+    updatePatrolEnemies(nowMs, deltaSeconds) {
+        const nowSeconds = nowMs / 1000;
+        const enemyBorder = this.getEnemyBorderPulseStyle(nowMs);
         for (const enemy of this.patrolEnemies) {
             if (!enemy.alive)
                 continue;
@@ -909,7 +1132,7 @@ export class GameScene extends Phaser.Scene {
             enemy.sprite.x = enemy.state.x;
             const fill = enemy.state.direction < 0 ? 0xc1121f : COLORS.patrolFill;
             enemy.sprite.setFillStyle(fill, 0.95);
-            enemy.sprite.setStrokeStyle(2, COLORS.patrolBorder, 0.9);
+            enemy.sprite.setStrokeStyle(2, enemyBorder.color, enemyBorder.alpha);
             const squashPhase = nowSeconds * 8 + enemy.state.x * 0.05;
             const squashWave = (Math.sin(squashPhase) + 1) / 2;
             const scaleY = this.patrolSquashBaseScaleY + squashWave * this.patrolSquashAmplitude;
@@ -917,8 +1140,8 @@ export class GameScene extends Phaser.Scene {
         }
     }
     updateFlyingEnemies(nowMs, deltaSeconds) {
-        this.processSegmentFlyingSpawnQueue(nowMs);
         const nowSeconds = nowMs / 1000;
+        const enemyBorder = this.getEnemyBorderPulseStyle(nowMs);
         for (const enemy of this.flyingEnemies) {
             if (!enemy.alive)
                 continue;
@@ -931,7 +1154,27 @@ export class GameScene extends Phaser.Scene {
             const stretchWave = (Math.sin(stretchPhase) + 1) / 2;
             const scaleX = this.flyingStretchBaseScaleX + stretchWave * this.flyingStretchAmplitude;
             enemy.sprite.setScale(scaleX, 1);
-            enemy.sprite.setStrokeStyle(2, COLORS.flyingBorder, 0.78 + stretchWave * 0.15);
+            const borderAlpha = Phaser.Math.Clamp(enemyBorder.alpha + stretchWave * 0.08, 0, 1);
+            enemy.sprite.setStrokeStyle(2, enemyBorder.color, borderAlpha);
+            if (!enemy.state.active) {
+                enemy.alive = false;
+                enemy.sprite.destroy();
+            }
+        }
+    }
+    updateFallingRockEnemies(nowMs, deltaSeconds) {
+        const beatPulse = Math.exp(-this.metronome.beatProgressAt(nowMs) * 8.8);
+        const enemyBorder = this.getEnemyBorderPulseStyle(nowMs);
+        for (const enemy of this.fallingRockEnemies) {
+            if (!enemy.alive)
+                continue;
+            enemy.state.speedY = this.scaleEnemySpeed(enemy.baseSpeedY, this.currentBpm);
+            enemy.state = updateFallingRockEnemy(enemy.state, deltaSeconds, 620);
+            enemy.sprite.x = enemy.state.x;
+            enemy.sprite.y = enemy.state.y;
+            const rockScale = 0.92 + beatPulse * 0.28;
+            enemy.sprite.setScale(rockScale);
+            enemy.sprite.setStrokeStyle(2, enemyBorder.color, enemyBorder.alpha);
             if (!enemy.state.active) {
                 enemy.alive = false;
                 enemy.sprite.destroy();
@@ -947,17 +1190,20 @@ export class GameScene extends Phaser.Scene {
         };
         const allEnemies = [
             ...this.patrolEnemies.map((e) => ({ type: 'patrol', enemy: e })),
-            ...this.flyingEnemies.map((e) => ({ type: 'flying', enemy: e }))
+            ...this.flyingEnemies.map((e) => ({ type: 'flying', enemy: e })),
+            ...this.fallingRockEnemies.map((e) => ({ type: 'fallingRock', enemy: e }))
         ];
         for (const entry of allEnemies) {
             const enemy = entry.enemy;
             if (!enemy.alive)
                 continue;
+            const hitboxWidth = Number(enemy.sprite.width) * ENEMY_COLLISION_BOX_SCALE;
+            const hitboxHeight = Number(enemy.sprite.height) * ENEMY_COLLISION_BOX_SCALE;
             const enemyRect = {
-                x: enemy.sprite.x - enemy.sprite.width / 2,
-                y: enemy.sprite.y - enemy.sprite.height / 2,
-                width: enemy.sprite.width,
-                height: enemy.sprite.height
+                x: enemy.sprite.x - hitboxWidth / 2,
+                y: enemy.sprite.y - hitboxHeight / 2,
+                width: hitboxWidth,
+                height: hitboxHeight
             };
             const collision = resolveEnemyCollision(playerRect, enemyRect, this.verticalVelocity);
             if (collision.stomp) {
@@ -978,49 +1224,81 @@ export class GameScene extends Phaser.Scene {
                 this.verticalVelocity = -420;
                 continue;
             }
-            if (collision.damage && nowMs >= this.damageCooldownMs) {
-                if (this.isPreviewMode)
-                    continue;
-                this.lives = applyDamage(this.lives, 1);
-                this.damageCooldownMs = nowMs + 850;
-                this.player.setFillStyle(COLORS.damageFlash, 1);
-                this.time.delayedCall(220, () => this.player.setFillStyle(COLORS.player, 1));
-                this.updateLivesLabel();
-                if (this.lives === 0) {
-                    this.triggerGameOver();
+            if (collision.damage && this.applyPlayerDamage(nowMs, 1)) {
+                if (this.isGameOver)
                     return;
-                }
             }
         }
     }
-    processSegmentFlyingSpawnQueue(nowMs) {
+    applyPlayerDamage(nowMs, amount) {
+        if (this.isPreviewMode)
+            return false;
+        if (!Number.isFinite(nowMs) || nowMs < this.damageCooldownMs)
+            return false;
+        this.lives = applyDamage(this.lives, amount);
+        this.damageCooldownMs = nowMs + 850;
+        this.player.setFillStyle(COLORS.damageFlash, 1);
+        this.time.delayedCall(220, () => this.player.setFillStyle(COLORS.player, 1));
+        this.updateLivesLabel();
+        if (this.lives === 0) {
+            this.triggerGameOver();
+        }
+        return true;
+    }
+    handleHazardPlatformDamage(nowMs, hazardDanger) {
+        if (!hazardDanger)
+            return;
+        if (nowMs < this.damageCooldownMs)
+            return;
+        for (const hazardPlatform of this.hazardPlatforms) {
+            if (!this.isStandingOnPlatform(hazardPlatform.shape, true))
+                continue;
+            this.applyPlayerDamage(nowMs, 1);
+            return;
+        }
+    }
+    processSegmentEnemySpawnQueues(nowMs) {
         if (!this.useSegmentEnemySpawns || this.segmentEnemyPlans.length === 0)
             return;
         for (const plan of this.segmentEnemyPlans) {
-            if (!plan.triggered || plan.pendingFlyingSpawns <= 0)
+            if (!plan.triggered)
                 continue;
-            if (nowMs < plan.nextFlyingSpawnMs)
-                continue;
-            const laneLeft = Math.max(120, plan.leftX + 14);
-            const laneRight = Math.min(this.worldWidth - 120, plan.rightX - 14);
-            const midX = (laneLeft + laneRight) * 0.5;
-            const offset = 70 + (plan.flyingCount - plan.pendingFlyingSpawns) * 28;
-            const cameraRightEdge = this.cameras.main.worldView.right;
-            const offscreenRightX = cameraRightEdge + 48;
-            const spawnX = Math.max(offscreenRightX, Math.max(midX + 20, plan.rightX + offset));
-            const spawnY = Phaser.Math.Between(160, 330);
-            this.spawnFlyingEnemyAt(spawnX, spawnY);
-            plan.pendingFlyingSpawns -= 1;
-            const planBpm = this.getBpmForWorldX(plan.triggerX);
-            const spacing = plan.flyingSpawnIntervalMs > 0
-                ? Math.max(250, this.scaleSpawnIntervalMs(plan.flyingSpawnIntervalMs, planBpm))
-                : Math.max(250, this.scaleSpawnIntervalMs(1200, planBpm));
-            plan.nextFlyingSpawnMs = nowMs + spacing;
+            if (plan.pendingFlyingSpawns > 0 && nowMs >= plan.nextFlyingSpawnMs) {
+                const laneLeft = Math.max(120, plan.leftX + 14);
+                const laneRight = Math.min(this.worldWidth - 120, plan.rightX - 14);
+                const midX = (laneLeft + laneRight) * 0.5;
+                const offset = 70 + (plan.flyingCount - plan.pendingFlyingSpawns) * 28;
+                const cameraRightEdge = this.cameras.main.worldView.right;
+                const offscreenRightX = cameraRightEdge + 48;
+                const spawnX = Math.max(offscreenRightX, Math.max(midX + 20, plan.rightX + offset));
+                const spawnY = Phaser.Math.Between(160, 330);
+                this.spawnFlyingEnemyAt(spawnX, spawnY);
+                plan.pendingFlyingSpawns -= 1;
+                const planBpm = this.getBpmForWorldX(plan.triggerX);
+                const spacing = plan.flyingSpawnIntervalMs > 0
+                    ? Math.max(250, this.scaleSpawnIntervalMs(plan.flyingSpawnIntervalMs, planBpm))
+                    : Math.max(250, this.scaleSpawnIntervalMs(1200, planBpm));
+                plan.nextFlyingSpawnMs = nowMs + spacing;
+            }
+            if (plan.pendingFallingRockSpawns > 0 && nowMs >= plan.nextFallingRockSpawnMs) {
+                const laneLeft = Math.max(120, plan.leftX + 10);
+                const laneRight = Math.min(this.worldWidth - 120, plan.rightX - 10);
+                const laneWidth = Math.max(0, laneRight - laneLeft);
+                const spawnX = laneWidth > 0 ? laneLeft + laneWidth * Phaser.Math.FloatBetween(0.2, 0.8) : (plan.leftX + plan.rightX) / 2;
+                const spawnY = this.cameras.main.worldView.top - 48;
+                this.spawnFallingRockEnemyAt(spawnX, spawnY);
+                plan.pendingFallingRockSpawns -= 1;
+                const planBpm = this.getBpmForWorldX(plan.triggerX);
+                const spacing = plan.fallingRockSpawnIntervalMs > 0
+                    ? Math.max(250, this.scaleSpawnIntervalMs(plan.fallingRockSpawnIntervalMs, planBpm))
+                    : Math.max(250, this.scaleSpawnIntervalMs(1200, planBpm));
+                plan.nextFallingRockSpawnMs = nowMs + spacing;
+            }
         }
     }
     updateLivesLabel() {
-        const hearts = Array.from({ length: 5 }, (_, i) => (i < this.lives ? '❤' : '·')).join(' ');
-        this.livesText.setText(`Lives: ${hearts} (${this.lives}/5)`);
+        const hearts = Array.from({ length: this.maxLives }, (_, i) => (i < this.lives ? '❤' : '·')).join(' ');
+        this.livesText.setText(`Lives: ${hearts} (${this.lives}/${this.maxLives})`);
     }
     updateScoreLabel() {
         if (!this.scoreText)
@@ -1032,10 +1310,17 @@ export class GameScene extends Phaser.Scene {
     updateDebugOverlay() {
         if (!this.debugText)
             return;
+        const nowMs = performance.now();
         const modeLabel = this.debugAudioMode === 'midi' ? 'MIDI Tick' : 'Legacy';
         const channels = this.midiSelectedChannelCount;
         const voices = this.activeVoices.size;
-        const stepState = this.mover.currentStep ? 'moving' : 'idle';
+        const dashActive = this.isDashActive(nowMs);
+        const stepVelocity = dashActive
+            ? (this.dashDirection === 'forward' ? DASH_SPEED_PX_PER_SEC : -DASH_SPEED_PX_PER_SEC)
+            : this.mover.velocityPxPerSec;
+        const stepState = Math.abs(stepVelocity) > this.movementEpsilon ? 'moving' : 'idle';
+        const dashCooldownSeconds = Math.max(0, (this.dashCooldownUntilMs - nowMs) / 1000);
+        const dashState = dashActive ? 'active' : dashCooldownSeconds > 0 ? `${dashCooldownSeconds.toFixed(1)}s` : 'ready';
         const speedMetrics = this.debugShowPlaybackSpeedMetrics
             ? `Playback Speed: expected=${this.debugExpectedBeatsPerSec.toFixed(3)} beats/s actual=${this.debugActualBeatsPerSec.toFixed(3)} beats/s err=${this.debugPlaybackSpeedErrorPct.toFixed(1)}% (F10 hide)`
             : 'Playback Speed: hidden (F10 show)';
@@ -1044,7 +1329,7 @@ export class GameScene extends Phaser.Scene {
             `Tempo: bpm=${this.currentBpm.toFixed(1)} target=${this.targetBpm.toFixed(1)} rate=${this.tempoSmoothingBpmPerSecond}/s zone=${this.currentTempoZoneIndex}${this.pendingTempoChange ? ' (pending)' : ''}`,
             speedMetrics,
             `Scheduler: q=${this.queuedGridAudioEvents.length} predQ=${this.predictionKeys.size} late=${this.audioLatenessAvgMs.toFixed(1)}ms max=${this.audioLatenessMaxMs.toFixed(1)}ms underrun=${this.audioUnderrunCount}`,
-            `Grid: col=${this.debugLastGridColumn} dir=${this.debugLastDirection} step=${stepState} tick=${Math.round(this.playheadTick)}`,
+            `Grid: col=${this.debugLastGridColumn} dir=${this.debugLastDirection} step=${stepState} dash=${dashState} tick=${Math.round(this.playheadTick)}`,
             `Events: on=${this.debugLastOnCount} off=${this.debugLastOffCount} voices=${voices}`,
             this.getHarmonicDebugSummary(),
             `Alpha: level=${this.debugLevelAlpha.toFixed(2)} player=${this.debugPlayerAlpha.toFixed(2)} moon=${this.debugMoonAlpha.toFixed(2)} halo=${this.debugMoonHaloAlpha.toFixed(2)} dark=${this.debugDarknessAlpha.toFixed(2)}`
@@ -1169,6 +1454,48 @@ export class GameScene extends Phaser.Scene {
             springPlatform.setAlpha(0.84 + pulse * 0.12);
         }
     }
+    applyHazardPlatformVisual(hazardDanger, nowMs) {
+        if (this.hazardPlatforms.length === 0)
+            return;
+        const beatPulse = Math.exp(-this.metronome.beatProgressAt(nowMs) * 6.5);
+        for (const hazardPlatform of this.hazardPlatforms) {
+            if (hazardDanger) {
+                const fillAlpha = 0.78 + beatPulse * 0.18;
+                const strokeAlpha = 0.82 + beatPulse * 0.16;
+                hazardPlatform.shape.setFillStyle(COLORS.hazardShockFill, fillAlpha);
+                hazardPlatform.shape.setStrokeStyle(2, COLORS.hazardShockBorder, strokeAlpha);
+                hazardPlatform.shape.setAlpha(0.95);
+            }
+            else {
+                hazardPlatform.shape.setFillStyle(COLORS.hazardNeutralFill, 0.9);
+                hazardPlatform.shape.setStrokeStyle(2, COLORS.hazardNeutralBorder, 0.9);
+                hazardPlatform.shape.setAlpha(0.9);
+            }
+        }
+    }
+    applyLaunchPlatformVisual(nowMs) {
+        if (this.launchPlatforms.length === 0)
+            return;
+        const pulse = (Math.sin(nowMs / 220) + 1) * 0.5;
+        const fillAlpha = 0.84 + pulse * 0.08;
+        const strokeAlpha = 0.86 + pulse * 0.1;
+        const guideAlpha = 0.82 + pulse * 0.14;
+        for (const launchPlatform of this.launchPlatforms) {
+            launchPlatform.shape.setFillStyle(COLORS.launchFill, fillAlpha);
+            launchPlatform.shape.setStrokeStyle(2, COLORS.launchBorder, strokeAlpha);
+            launchPlatform.shape.setAlpha(0.93);
+            launchPlatform.guide.setStrokeStyle(2, COLORS.launchGuide, guideAlpha);
+            launchPlatform.guide.setAlpha(0.95);
+        }
+    }
+    applyLaunchImpulse(platform) {
+        const radians = Phaser.Math.DegToRad(platform.angleDeg);
+        const launchSpeed = this.mover.maxSpeedPxPerSec * LAUNCH_PLATFORM_SPEED_MULTIPLIER;
+        const launchVx = Math.cos(radians) * launchSpeed;
+        const launchVy = -Math.sin(radians) * launchSpeed;
+        this.mover.setVelocityPxPerSec(launchVx);
+        this.verticalVelocity = launchVy;
+    }
     applyMobilePlatformVisual() {
         if (this.elevatorPlatforms.length + this.shuttlePlatforms.length + this.crossPlatforms.length === 0)
             return;
@@ -1285,6 +1612,36 @@ export class GameScene extends Phaser.Scene {
         const relative = Math.round((playerX - this.minPlayerX) / step);
         return Phaser.Math.Clamp(relative, 0, this.gridColumns - 1);
     }
+    getGridWorldXForIndex(gridIndex) {
+        const clampedIndex = Phaser.Math.Clamp(Math.floor(gridIndex), 0, Math.max(0, this.gridColumns - 1));
+        return this.minPlayerX + clampedIndex * WORLD_GRID_STEP;
+    }
+    queueLegacyAudioForCrossedGridColumns(previousPlayerX, currentPlayerX, frameStartMs, frameDeltaMs) {
+        const deltaX = currentPlayerX - previousPlayerX;
+        if (Math.abs(deltaX) <= this.movementEpsilon)
+            return;
+        const previousGridIndex = this.getGridIndexFromX(previousPlayerX);
+        const currentGridIndex = this.getGridIndexFromX(currentPlayerX);
+        if (previousGridIndex === currentGridIndex)
+            return;
+        const direction = deltaX > 0 ? 'forward' : 'backward';
+        const step = direction === 'forward' ? 1 : -1;
+        const safeFrameStartMs = Number.isFinite(frameStartMs) ? frameStartMs : performance.now();
+        const safeFrameDeltaMs = Math.max(0, Number.isFinite(frameDeltaMs) ? frameDeltaMs : 0);
+        for (let gridIndex = previousGridIndex + step; step > 0 ? gridIndex <= currentGridIndex : gridIndex >= currentGridIndex; gridIndex += step) {
+            const crossingX = this.getGridWorldXForIndex(gridIndex);
+            const ratio = Phaser.Math.Clamp((crossingX - previousPlayerX) / deltaX, 0, 1);
+            const targetTimeMs = safeFrameStartMs + ratio * safeFrameDeltaMs;
+            const eventKey = buildGridEventKey(direction, gridIndex, targetTimeMs);
+            this.enqueueGridAudioEvent({
+                gridIndex,
+                direction,
+                targetTimeMs,
+                source: 'arrival',
+                eventKey
+            });
+        }
+    }
     resolveGridColumnsFromLevel() {
         const explicit = Number(this.currentLevel.gridColumns);
         if (Number.isFinite(explicit) && explicit > 0) {
@@ -1318,7 +1675,7 @@ export class GameScene extends Phaser.Scene {
         const spanFromLevel = Math.max(1, this.playheadX1 - this.playheadX0);
         const ppq = Math.max(1, this.midiTickModel.ppq);
         const songEndTick = Math.max(0, this.midiTickModel.songEndTick);
-        const unitsPerBeat = Math.max(1, this.mover.stepSize * (this.metronome.subdivision / Math.max(1, PLAYER_STEP_SUBDIVISIONS)));
+        const unitsPerBeat = Math.max(1, PLAYER_SNAP_STEP_X);
         const calibratedTickPerUnit = ppq / unitsPerBeat;
         const levelTickPerUnit = songEndTick > 0 ? songEndTick / spanFromLevel : calibratedTickPerUnit;
         const mismatchRatio = calibratedTickPerUnit > 0 ? Math.abs(levelTickPerUnit - calibratedTickPerUnit) / calibratedTickPerUnit : 0;
@@ -1357,14 +1714,19 @@ export class GameScene extends Phaser.Scene {
         const mapped = relative * this.tickPerUnit * speedMultiplier;
         return Phaser.Math.Clamp(mapped, 0, this.midiTickModel.songEndTick);
     }
+    applyDifficultyBpmMultiplier(baseBpm) {
+        const safeBase = clampBpm(baseBpm, DEFAULT_REFERENCE_BPM);
+        const safeMultiplier = Number.isFinite(this.difficultyBpmMultiplier) && this.difficultyBpmMultiplier > 0 ? this.difficultyBpmMultiplier : 1;
+        return clampBpm(safeBase * safeMultiplier, safeBase);
+    }
     getBpmAtTick(tick) {
         if (!this.midiTickModel || this.midiTickModel.tempoPoints.length === 0) {
-            return this.tempoMap[0]?.bpm ?? DEFAULT_REFERENCE_BPM;
+            return this.applyDifficultyBpmMultiplier(this.tempoMap[0]?.bpm ?? DEFAULT_REFERENCE_BPM);
         }
         const tempoIndex = this.getTempoPointIndexAtTick(tick);
         const usPerQuarter = this.midiTickModel.tempoPoints[tempoIndex]?.usPerQuarter ?? 500_000;
         const bpm = Math.round(60_000_000 / Math.max(1, usPerQuarter));
-        return Phaser.Math.Clamp(bpm, 20, 300);
+        return this.applyDifficultyBpmMultiplier(bpm);
     }
     getTempoZoneIndexForColumn(column) {
         const safeColumn = Math.max(0, Math.floor(Number(column) || 0));
@@ -1377,7 +1739,7 @@ export class GameScene extends Phaser.Scene {
         return picked;
     }
     getBpmForColumn(column) {
-        return getTempoAtColumn(this.tempoMap, column).bpm;
+        return this.applyDifficultyBpmMultiplier(getTempoAtColumn(this.tempoMap, column).bpm);
     }
     getBpmForWorldX(worldX) {
         if (this.midiTickModel) {
@@ -1396,7 +1758,9 @@ export class GameScene extends Phaser.Scene {
         const zoneIndex = this.midiTickModel
             ? this.getTempoPointIndexAtTick(tempoTick)
             : this.getTempoZoneIndexForColumn(this.getGridIndexFromX(this.player.x));
-        const desiredBpm = this.midiTickModel ? this.getBpmAtTick(tempoTick) : this.tempoMap[zoneIndex]?.bpm ?? this.currentBpm;
+        const desiredBpm = this.midiTickModel
+            ? this.getBpmAtTick(tempoTick)
+            : this.applyDifficultyBpmMultiplier(this.tempoMap[zoneIndex]?.bpm ?? this.currentBpm);
         if (zoneIndex !== this.currentTempoZoneIndex || desiredBpm !== this.targetBpm) {
             const pendingMatches = this.pendingTempoChange &&
                 this.pendingTempoChange.zoneIndex === zoneIndex &&
@@ -1569,7 +1933,7 @@ export class GameScene extends Phaser.Scene {
             return;
         const tickNow = this.getTickFromWorldX(this.player.x);
         this.playheadTick = tickNow;
-        const isMovementIdle = this.currentDirection === 'idle' && !this.mover.currentStep;
+        const isMovementIdle = this.currentDirection === 'idle' && Math.abs(this.mover.velocityPxPerSec) <= this.movementEpsilon;
         if (isMovementIdle) {
             if (this.lastMidiScrubDirection === 'backward') {
                 this.panicAllNotesOff();
@@ -1669,6 +2033,14 @@ export class GameScene extends Phaser.Scene {
             if (this.isStandingOnPlatform(springPlatform, true))
                 return true;
         }
+        for (const hazardPlatform of this.hazardPlatforms) {
+            if (this.isStandingOnPlatform(hazardPlatform.shape, true))
+                return true;
+        }
+        for (const launchPlatform of this.launchPlatforms) {
+            if (this.isStandingOnPlatform(launchPlatform.shape, true))
+                return true;
+        }
         for (const platform of this.segmentPlatforms) {
             if (this.isStandingOnPlatform(platform.shape, platform.solid))
                 return true;
@@ -1726,7 +2098,8 @@ export class GameScene extends Phaser.Scene {
         const playerLeft = this.player.x - playerHalfWidth;
         const playerRight = this.player.x + playerHalfWidth;
         let landingY = null;
-        const tryLandOnPlatform = (platform, solid) => {
+        let landedLaunchPlatform = null;
+        const tryLandOnPlatform = (platform, solid, launchPlatform = null) => {
             if (!solid)
                 return;
             const platformHalfWidth = platform.width / 2;
@@ -1738,8 +2111,10 @@ export class GameScene extends Phaser.Scene {
             if (!overlapsX || !crossingTop)
                 return;
             const candidateY = platformTop - playerHalfHeight;
-            if (landingY === null || candidateY < landingY)
+            if (landingY === null || candidateY < landingY) {
                 landingY = candidateY;
+                landedLaunchPlatform = launchPlatform;
+            }
         };
         for (const platform of this.segmentPlatforms) {
             tryLandOnPlatform(platform.shape, platform.solid);
@@ -1768,11 +2143,18 @@ export class GameScene extends Phaser.Scene {
         for (const springPlatform of this.springPlatforms) {
             tryLandOnPlatform(springPlatform, true);
         }
+        for (const hazardPlatform of this.hazardPlatforms) {
+            tryLandOnPlatform(hazardPlatform.shape, true);
+        }
+        for (const launchPlatform of this.launchPlatforms) {
+            tryLandOnPlatform(launchPlatform.shape, true, launchPlatform);
+        }
         if (landingY !== null) {
             this.playerY = landingY;
             this.verticalVelocity = 0;
         }
         this.player.y = this.playerY;
+        return landedLaunchPlatform;
     }
     applyBrightnessFromIntensity() {
         const visibility = this.getIntensityVisibility();
@@ -1819,6 +2201,13 @@ export class GameScene extends Phaser.Scene {
         for (const springPlatform of this.springPlatforms) {
             springPlatform.setAlpha(springPlatform.alpha * worldVisibility);
         }
+        for (const hazardPlatform of this.hazardPlatforms) {
+            hazardPlatform.shape.setAlpha(hazardPlatform.shape.alpha * worldVisibility);
+        }
+        for (const launchPlatform of this.launchPlatforms) {
+            launchPlatform.shape.setAlpha(launchPlatform.shape.alpha * worldVisibility);
+            launchPlatform.guide.setAlpha(launchPlatform.guide.alpha * worldVisibility);
+        }
         for (const enemy of this.patrolEnemies) {
             if (!enemy.alive)
                 continue;
@@ -1828,6 +2217,11 @@ export class GameScene extends Phaser.Scene {
             if (!enemy.alive)
                 continue;
             enemy.sprite.setAlpha(0.24 + worldVisibility * 0.71);
+        }
+        for (const enemy of this.fallingRockEnemies) {
+            if (!enemy.alive)
+                continue;
+            enemy.sprite.setAlpha(0.26 + worldVisibility * 0.69);
         }
         this.player.setAlpha(characterVisibility);
         this.playerHeart.setAlpha(this.playerHeartBaseAlpha * characterVisibility);
@@ -2003,7 +2397,7 @@ export class GameScene extends Phaser.Scene {
             .setInteractive({ useHandCursor: true });
         this.configureScreenUi(this.restartButton);
         this.nextLevelButton = this.add
-            .text(480, 390, 'Next Level', {
+            .text(480, 375, 'Next Level', {
             color: '#05070f',
             backgroundColor: '#4cc9f0',
             fontFamily: HUD_FONT,
@@ -2017,9 +2411,9 @@ export class GameScene extends Phaser.Scene {
             .setInteractive({ useHandCursor: true });
         this.configureScreenUi(this.nextLevelButton);
         this.backToMenuButton = this.add
-            .text(480, 430, 'Back To Start', {
-            color: '#05070f',
-            backgroundColor: '#d7e2ff',
+            .text(480, 420, 'Back to Start Screen', {
+            color: '#ffe5e5',
+            backgroundColor: '#a4161a',
             fontFamily: HUD_FONT,
             fontSize: '20px',
             padding: { left: 12, right: 12, top: 7, bottom: 7 }
@@ -2034,6 +2428,7 @@ export class GameScene extends Phaser.Scene {
             levelIndex: this.currentLevelOneBasedIndex,
             mode: 'play',
             volume: this.masterVolume,
+            difficultyBpmMultiplier: this.difficultyBpmMultiplier,
             levels: this.availableLevels,
             levelNames: this.availableLevelNames
         }));
@@ -2042,6 +2437,7 @@ export class GameScene extends Phaser.Scene {
             this.scene.start('start', {
                 levelIndex: this.currentLevelOneBasedIndex,
                 volume: this.masterVolume,
+                difficultyBpmMultiplier: this.difficultyBpmMultiplier,
                 levels: this.availableLevels,
                 levelNames: this.availableLevelNames
             });
@@ -2080,9 +2476,9 @@ export class GameScene extends Phaser.Scene {
             .setInteractive({ useHandCursor: true });
         this.configureScreenUi(this.continueButton);
         this.pauseBackToMenuButton = this.add
-            .text(480, 355, 'Back to Start Screen', {
-            color: '#05070f',
-            backgroundColor: '#d7e2ff',
+            .text(480, 410, 'Back to Start Screen', {
+            color: '#ffe5e5',
+            backgroundColor: '#a4161a',
             fontFamily: HUD_FONT,
             fontSize: '22px',
             padding: { left: 12, right: 12, top: 7, bottom: 7 }
@@ -2093,10 +2489,10 @@ export class GameScene extends Phaser.Scene {
             .setScrollFactor(0)
             .setInteractive({ useHandCursor: true });
         this.configureScreenUi(this.pauseBackToMenuButton);
-        this.quitButton = this.add
-            .text(480, 410, 'Quit', {
+        this.pauseRestartButton = this.add
+            .text(480, 355, 'Restart', {
             color: '#05070f',
-            backgroundColor: '#ff6b6b',
+            backgroundColor: '#4cc9f0',
             fontFamily: HUD_FONT,
             fontSize: '22px',
             padding: { left: 12, right: 12, top: 7, bottom: 7 }
@@ -2106,22 +2502,25 @@ export class GameScene extends Phaser.Scene {
             .setDepth(31)
             .setScrollFactor(0)
             .setInteractive({ useHandCursor: true });
-        this.configureScreenUi(this.quitButton);
+        this.configureScreenUi(this.pauseRestartButton);
         this.continueButton.on('pointerdown', () => this.resumeFromPause());
         this.pauseBackToMenuButton.on('pointerdown', () => {
             this.scene.start('start', {
                 levelIndex: this.currentLevelOneBasedIndex,
                 volume: this.masterVolume,
+                difficultyBpmMultiplier: this.difficultyBpmMultiplier,
                 levels: this.availableLevels,
                 levelNames: this.availableLevelNames
             });
         });
-        this.quitButton.on('pointerdown', () => {
-            if (typeof window !== 'undefined') {
-                window.close();
-                window.location.href = 'about:blank';
-            }
-        });
+        this.pauseRestartButton.on('pointerdown', () => this.scene.restart({
+            levelIndex: this.currentLevelOneBasedIndex,
+            mode: 'play',
+            volume: this.masterVolume,
+            difficultyBpmMultiplier: this.difficultyBpmMultiplier,
+            levels: this.availableLevels,
+            levelNames: this.availableLevelNames
+        }));
     }
     pauseGameplay() {
         if (this.isGameOver || this.isPreviewMode)
@@ -2134,7 +2533,7 @@ export class GameScene extends Phaser.Scene {
         this.pauseTitleText.setVisible(true);
         this.continueButton.setVisible(true);
         this.pauseBackToMenuButton.setVisible(true);
-        this.quitButton.setVisible(true);
+        this.pauseRestartButton.setVisible(true);
     }
     resumeFromPause() {
         if (!this.isPaused)
@@ -2144,12 +2543,12 @@ export class GameScene extends Phaser.Scene {
         this.pauseTitleText.setVisible(false);
         this.continueButton.setVisible(false);
         this.pauseBackToMenuButton.setVisible(false);
-        this.quitButton.setVisible(false);
+        this.pauseRestartButton.setVisible(false);
     }
     initializeGridBounds() {
         const minX = this.player.width / 2;
         const maxX = this.worldWidth - this.player.width / 2;
-        const step = this.mover.stepSize;
+        const step = WORLD_GRID_STEP;
         const minSteps = Math.ceil((minX - this.playerStartX) / step);
         const maxSteps = Math.floor((maxX - this.playerStartX) / step);
         this.minPlayerX = this.playerStartX + minSteps * step;
@@ -2191,7 +2590,7 @@ export class GameScene extends Phaser.Scene {
         this.gameOverDetailsText.setVisible(false);
         this.restartButton.setY(300);
         this.nextLevelButton.setVisible(false);
-        this.backToMenuButton.setY(355);
+        this.backToMenuButton.setY(340);
         this.backToMenuButton.setVisible(true);
         this.gameOverBackdrop.setVisible(true);
         this.gameOverText.setVisible(true);
@@ -2229,9 +2628,9 @@ export class GameScene extends Phaser.Scene {
         this.gameOverDetailsText.setVisible(true);
         this.restartButton.setY(345);
         const hasNextLevel = this.currentLevelOneBasedIndex < this.availableLevels.length;
-        this.nextLevelButton.setY(390);
+        this.nextLevelButton.setY(375);
         this.nextLevelButton.setVisible(hasNextLevel);
-        this.backToMenuButton.setY(hasNextLevel ? 435 : 390);
+        this.backToMenuButton.setY(hasNextLevel ? 420 : 375);
         this.backToMenuButton.setVisible(true);
         this.gameOverBackdrop.setVisible(true);
         this.gameOverText.setVisible(true);
@@ -2272,11 +2671,12 @@ export class GameScene extends Phaser.Scene {
         this.audioSchedulerLeadMs = this.audioQuality.schedulerLeadMs;
         this.pendingTempoChange = null;
         this.metronome = new Metronome(this.currentBpm, 4);
-        this.mover = new BeatSnapMover(this.metronome, PLAYER_SNAP_STEP_X, PLAYER_STEP_SUBDIVISIONS);
+        this.mover = new BeatSnapMover(this.metronome, PLAYER_SNAP_STEP_X, PLAYER_STEP_SUBDIVISIONS, WORLD_GRID_STEP);
         this.segmentPlatforms = [];
         this.patrolEnemies = [];
         this.flyingEnemies = [];
-        this.lives = 5;
+        this.fallingRockEnemies = [];
+        this.lives = this.maxLives;
         this.isGameOver = false;
         this.isPaused = false;
         this.endStateTitle = 'GAME OVER';
@@ -2309,12 +2709,21 @@ export class GameScene extends Phaser.Scene {
         this.shuttlePlatforms = [];
         this.crossPlatforms = [];
         this.springPlatforms = [];
+        this.hazardPlatforms = [];
+        this.launchPlatforms = [];
         this.intensity = 1.0;
         this.resetHarmonicState();
         this.currentDirection = 'idle';
         this.playerHeartFacing = 'forward';
         this.playerLandingJellyAmplitude = 0;
         this.playerLandingJellyPhase = 0;
+        this.remainingAirJumps = PLAYER_MAX_AIR_JUMPS;
+        this.dashDirection = 'idle';
+        this.dashActiveUntilMs = 0;
+        this.dashCooldownUntilMs = 0;
+        this.lastForwardTapMs = Number.NEGATIVE_INFINITY;
+        this.lastBackwardTapMs = Number.NEGATIVE_INFINITY;
+        this.nextDashGhostAtMs = 0;
         this.ghostPlatformLatchedSolid = false;
         this.reverseGhostPlatformLatchedSolid = true;
         this.gridColumns = this.resolveGridColumnsFromLevel();
@@ -2336,7 +2745,7 @@ export class GameScene extends Phaser.Scene {
         this.debugLastOnCount = 0;
         this.debugLastOffCount = 0;
         this.debugAudioMode = 'legacy';
-        this.debugAudioDeClickStrict = false;
+        this.debugAudioDeClickStrict = true;
         this.debugShowPlaybackSpeedMetrics = true;
         this.debugExpectedBeatsPerSec = 0;
         this.debugActualBeatsPerSec = 0;
@@ -2416,32 +2825,20 @@ export class GameScene extends Phaser.Scene {
         }
         this.avgForwardStepDurationMs = this.avgForwardStepDurationMs * 0.75 + stepDurationMs * 0.25;
     }
-    getNextForwardArrivalMs(nowMs) {
-        let target = this.metronome.nextSubdivisionAt(nowMs);
-        if (target <= nowMs)
-            target += this.metronome.subdivisionIntervalMs;
-        target += this.metronome.subdivisionIntervalMs * (PLAYER_STEP_SUBDIVISIONS - 1);
-        return target;
-    }
     queueForwardPredictedEvents(nowMs) {
         if (this.isPreviewMode || this.masterVolume <= 0)
             return;
-        if (this.mover.stepSize < WORLD_GRID_STEP)
-            return;
-        const activeStep = this.mover.currentStep;
-        const activeStepDurationMs = activeStep && activeStep.direction === 'forward' ? activeStep.arrivalTime - activeStep.startTime : null;
+        const estimatedDurationMs = this.currentDirection === 'forward' ? this.mover.estimatedGridCellDurationMs : null;
         const speedSignal = deriveForwardSpeedSignal({
             inputDirection: 'forward',
-            activeStepDirection: activeStep?.direction ?? null,
-            activeStepDurationMs,
+            activeStepDirection: this.currentDirection === 'backward' ? 'backward' : null,
+            activeStepDurationMs: estimatedDurationMs,
             averageStepDurationMs: this.avgForwardStepDurationMs > 0 ? this.avgForwardStepDurationMs : null
         });
         if (!speedSignal.coherentForward || speedSignal.lookaheadSteps <= 0)
             return;
-        const fromColumn = activeStep && activeStep.direction === 'forward'
-            ? this.getGridIndexFromX(this.playerStartX + activeStep.fromX)
-            : this.getGridIndexFromX(this.player.x);
-        const firstTargetTimeMs = activeStep && activeStep.direction === 'forward' ? activeStep.arrivalTime : this.getNextForwardArrivalMs(nowMs);
+        const fromColumn = this.getGridIndexFromX(this.player.x);
+        const firstTargetTimeMs = nowMs + speedSignal.stepDurationMs;
         const planned = planForwardGridEvents({
             fromColumn,
             maxColumn: Math.max(0, this.gridColumns - 1),
@@ -3022,6 +3419,12 @@ export class GameScene extends Phaser.Scene {
         this.isPreviewMode = data.mode === 'preview';
         const requestedVolume = Number(data.volume);
         this.masterVolume = Number.isFinite(requestedVolume) ? Phaser.Math.Clamp(requestedVolume, 0, 1) : 0.5;
+        const requestedDifficultyMultiplier = Number(data.difficultyBpmMultiplier);
+        this.difficultyBpmMultiplier =
+            Number.isFinite(requestedDifficultyMultiplier) && requestedDifficultyMultiplier > 0
+                ? Phaser.Math.Clamp(requestedDifficultyMultiplier, 0.5, 2)
+                : 1;
+        this.applyDifficultySettings(this.difficultyBpmMultiplier);
         if (Array.isArray(data.levels) && data.levels.length > 0)
             this.availableLevels = data.levels;
         else
@@ -3099,6 +3502,73 @@ export class GameScene extends Phaser.Scene {
             console.warn('Unable to parse runtime MIDI file for level playback.', err);
         }
     }
+    applyDifficultySettings(multiplier) {
+        const profile = this.resolveDifficultyProfile(multiplier);
+        this.maxLives = profile.lives;
+        this.fallBehavior = profile.fallBehavior;
+        this.fallRespawnLifeCost = profile.fallRespawnLifeCost;
+    }
+    resolveDifficultyProfile(multiplier) {
+        const safeMultiplier = Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1;
+        let bestProfile = DIFFICULTY_PROFILES[1];
+        let bestDistance = Infinity;
+        for (const profile of DIFFICULTY_PROFILES) {
+            const distance = Math.abs(safeMultiplier - profile.bpmMultiplier);
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                bestProfile = profile;
+            }
+        }
+        return bestProfile;
+    }
+    handlePlayerFallOut(nowMs) {
+        const shouldDieOnFall = this.fallBehavior === 'death' && !this.isPreviewMode;
+        if (shouldDieOnFall) {
+            this.triggerGameOver();
+            return;
+        }
+        const didRespawn = this.respawnPlayerAtNearestSegment(nowMs);
+        if (!didRespawn && !this.isPreviewMode) {
+            this.triggerGameOver();
+            return;
+        }
+        if (!this.isPreviewMode && this.fallRespawnLifeCost > 0) {
+            this.applyFallRespawnLifePenalty(nowMs, this.fallRespawnLifeCost);
+        }
+    }
+    applyFallRespawnLifePenalty(nowMs, amount) {
+        const safeAmount = Math.max(0, Math.floor(Number(amount) || 0));
+        if (safeAmount <= 0)
+            return;
+        this.lives = applyDamage(this.lives, safeAmount);
+        this.damageCooldownMs = Math.max(this.damageCooldownMs, (Number.isFinite(nowMs) ? nowMs : performance.now()) + 850);
+        this.player.setFillStyle(COLORS.damageFlash, 1);
+        this.time.delayedCall(220, () => this.player.setFillStyle(COLORS.player, 1));
+        this.updateLivesLabel();
+        if (this.lives === 0)
+            this.triggerGameOver();
+    }
+    respawnPlayerAtNearestSegment(nowMs) {
+        const segments = [...this.segmentPlatforms.map((entry) => entry.shape)].filter(Boolean);
+        const nearest = segments
+            .map((shape) => ({ shape, dx: Math.abs(Number(shape.x) - Number(this.player.x)) }))
+            .sort((a, b) => a.dx - b.dx)[0]?.shape;
+        const target = nearest ?? this.segmentPlatforms[0]?.shape;
+        const playerHalfHeight = this.player.height / 2;
+        const top = target ? Number(target.y) - Number(target.height) / 2 : this.getInitialPlayerYFromPlatforms() + playerHalfHeight;
+        const targetX = target ? Number(target.x) : this.playerStartX;
+        const nextX = Phaser.Math.Clamp(targetX, this.minPlayerX, this.maxPlayerX);
+        this.player.x = nextX;
+        this.mover.stopAt(this.player.x - this.playerStartX);
+        this.playerY = top - playerHalfHeight;
+        this.player.y = this.playerY;
+        this.verticalVelocity = 0;
+        this.remainingAirJumps = PLAYER_MAX_AIR_JUMPS;
+        this.lastGroundedAtMs = nowMs;
+        this.lastGroundedOnSpring = false;
+        this.cancelDash();
+        return true;
+    }
     coerceArrayBuffer(raw) {
         if (raw instanceof ArrayBuffer)
             return raw;
@@ -3115,6 +3585,7 @@ export class GameScene extends Phaser.Scene {
             levelIndex: next,
             mode: 'play',
             volume: this.masterVolume,
+            difficultyBpmMultiplier: this.difficultyBpmMultiplier,
             levels: this.availableLevels,
             levelNames: this.availableLevelNames
         });
@@ -3155,7 +3626,7 @@ export class GameScene extends Phaser.Scene {
             const span = Math.max(52, Math.min(140, shape.width * 0.7));
             const minX = Math.max(120, x - span * 0.5);
             const maxX = Math.min(this.worldWidth - 120, x + span * 0.5);
-            const y = this.snapYToGrid(shape.y - shape.height / 2 - 12);
+            const y = this.getPatrolSpawnY(shape.y - shape.height / 2);
             this.spawnPatrolEnemy(x, y, minX, maxX);
         }
     }
@@ -3188,6 +3659,12 @@ export class GameScene extends Phaser.Scene {
                 if (!Number.isFinite(rawInterval) || rawInterval <= 0)
                     return 0;
                 return Math.max(500, Math.min(30000, Math.floor(rawInterval)));
+            })(),
+            fallingRockSpawnIntervalMs: (() => {
+                const rawInterval = Number(row?.fallingRockSpawnIntervalMs);
+                if (!Number.isFinite(rawInterval) || rawInterval <= 0)
+                    return 0;
+                return Math.max(500, Math.min(30000, Math.floor(rawInterval)));
             })()
         }))
             .filter((row) => Number.isFinite(row.sourceIdx));
@@ -3197,6 +3674,7 @@ export class GameScene extends Phaser.Scene {
             : 0;
         const patrolAssigned = new Array(segments.length).fill(0);
         const flyingBySegment = new Map();
+        const fallingRockBySegment = new Map();
         const pickSpreadSegment = (preferredIdx) => {
             let bestIdx = preferredIdx;
             let bestScore = Number.POSITIVE_INFINITY;
@@ -3234,6 +3712,12 @@ export class GameScene extends Phaser.Scene {
                     }
                 }
             }
+            if (row.fallingRockSpawnIntervalMs > 0) {
+                const prevRockInterval = fallingRockBySegment.get(baseIndex);
+                fallingRockBySegment.set(baseIndex, prevRockInterval && prevRockInterval > 0
+                    ? Math.min(prevRockInterval, row.fallingRockSpawnIntervalMs)
+                    : row.fallingRockSpawnIntervalMs);
+            }
         }
         const plans = [];
         for (let segmentIndex = 0; segmentIndex < segments.length; segmentIndex++) {
@@ -3244,7 +3728,8 @@ export class GameScene extends Phaser.Scene {
             const flyingMeta = flyingBySegment.get(segmentIndex);
             const flyingCount = flyingMeta?.flyingCount ?? 0;
             const flyingSpawnIntervalMs = flyingMeta?.flyingSpawnIntervalMs ?? 0;
-            if (patrolCount + flyingCount <= 0 && flyingSpawnIntervalMs <= 0)
+            const fallingRockSpawnIntervalMs = fallingRockBySegment.get(segmentIndex) ?? 0;
+            if (patrolCount + flyingCount <= 0 && flyingSpawnIntervalMs <= 0 && fallingRockSpawnIntervalMs <= 0)
                 continue;
             plans.push({
                 segmentIndex,
@@ -3255,8 +3740,11 @@ export class GameScene extends Phaser.Scene {
                 patrolCount,
                 flyingCount,
                 flyingSpawnIntervalMs,
+                fallingRockSpawnIntervalMs,
                 pendingFlyingSpawns: 0,
                 nextFlyingSpawnMs: 0,
+                pendingFallingRockSpawns: 0,
+                nextFallingRockSpawnMs: 0,
                 triggered: false
             });
         }
@@ -3266,12 +3754,14 @@ export class GameScene extends Phaser.Scene {
                 sourceIdx: row.sourceIdx,
                 mappedSegmentIdx: toSegmentIndex(row.sourceIdx),
                 patrolCount: row.patrolCount,
-                flyingSpawnIntervalMs: row.flyingSpawnIntervalMs
+                flyingSpawnIntervalMs: row.flyingSpawnIntervalMs,
+                fallingRockSpawnIntervalMs: row.fallingRockSpawnIntervalMs
             }));
             const planRows = this.segmentEnemyPlans.map((plan) => ({
                 segmentIndex: plan.segmentIndex,
                 patrolCount: plan.patrolCount,
                 flyingSpawnIntervalMs: plan.flyingSpawnIntervalMs,
+                fallingRockSpawnIntervalMs: plan.fallingRockSpawnIntervalMs,
                 triggerX: Math.round(plan.triggerX)
             }));
             console.groupCollapsed('[EnemyDebug] segment enemy plans');
@@ -3290,6 +3780,7 @@ export class GameScene extends Phaser.Scene {
             if (Number.isFinite(playerX) && playerX + this.player.width / 2 < plan.triggerX)
                 continue;
             this.queueFlyingForPlan(plan);
+            this.queueFallingRockForPlan(plan);
             plan.triggered = true;
         }
     }
@@ -3320,12 +3811,16 @@ export class GameScene extends Phaser.Scene {
             const span = Math.max(52, Math.min(140, (laneRight - laneLeft) * 0.5));
             const minX = Math.max(120, x - span * 0.5);
             const maxX = Math.min(this.worldWidth - 120, x + span * 0.5);
-            this.spawnPatrolEnemy(x, this.snapYToGrid(plan.platformTopY - PATROL_ENEMY_HEIGHT / 2), minX, maxX);
+            this.spawnPatrolEnemy(x, this.getPatrolSpawnY(plan.platformTopY), minX, maxX);
         }
     }
     queueFlyingForPlan(plan) {
         plan.pendingFlyingSpawns = Math.max(plan.flyingCount, plan.flyingSpawnIntervalMs > 0 ? 1 : 0);
         plan.nextFlyingSpawnMs = performance.now();
+    }
+    queueFallingRockForPlan(plan) {
+        plan.pendingFallingRockSpawns = plan.fallingRockSpawnIntervalMs > 0 ? 1 : 0;
+        plan.nextFallingRockSpawnMs = performance.now();
     }
     isEnemyPlanDebugEnabled() {
         try {
@@ -3342,11 +3837,15 @@ export class GameScene extends Phaser.Scene {
         const playerHalfHeight = PLAYER_HEIGHT / 2;
         const step = WORLD_GRID_STEP;
         const targetX = this.playerStartX;
-        const candidates = this.segmentPlatforms
-            .map((platform) => platform.shape)
+        const candidates = [
+            ...this.segmentPlatforms.map((platform) => platform.shape),
+            ...this.springPlatforms,
+            ...this.hazardPlatforms.map((platform) => platform.shape),
+            ...this.launchPlatforms.map((platform) => platform.shape)
+        ]
             .filter((shape) => Math.abs(shape.x - targetX) <= step * 3)
             .sort((a, b) => Math.abs(a.x - targetX) - Math.abs(b.x - targetX));
-        const picked = candidates[0] ?? this.segmentPlatforms[0]?.shape;
+        const picked = candidates[0] ?? this.segmentPlatforms[0]?.shape ?? this.launchPlatforms[0]?.shape;
         if (!picked)
             return this.groundY;
         const top = picked.y - picked.height / 2;

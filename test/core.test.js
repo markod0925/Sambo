@@ -46,11 +46,12 @@ import {
   getElevatorOffsetSteps,
   getShuttleOffsetSteps,
   isAlternateBeatPlatformSolid,
+  isHazardPlatformDanger,
   isGhostPlatformSolid
 } from '../dist/src/core/platforms.js';
-import { classifyEnergy, generateSegments } from '../dist/src/core/levelGenerator.js';
+import { classifyEnergy, generatePlatformKindSequence, generateSegments } from '../dist/src/core/levelGenerator.js';
 import { resolveIntent } from '../dist/src/core/input.js';
-import { applyDamage, resolveEnemyCollision, updateFlyingEnemy, updatePatrolEnemy } from '../dist/src/core/enemies.js';
+import { applyDamage, resolveEnemyCollision, updateFallingRockEnemy, updateFlyingEnemy, updatePatrolEnemy } from '../dist/src/core/enemies.js';
 
 test('metronome subdivision alignment works', () => {
   const metro = new Metronome(120, 4);
@@ -125,39 +126,71 @@ test('harmonic smoothing moves toward target bins without allocations', () => {
   assert.ok(current[9] < 0.5);
 });
 
-test('beat snapped mover arrives exactly on subdivision', () => {
-  const metro = new Metronome(120, 4);
-  const mover = new BeatSnapMover(metro, 64);
+test('continuous mover accelerates under held input and exposes motion telemetry', () => {
+  const mover = new BeatSnapMover(new Metronome(120, 4), 64, 4, 32);
+  mover.setDirection('forward');
+  mover.update(0);
 
-  mover.enqueue('forward');
-  let move = mover.update(10);
-  assert.equal(move.arrived, false);
-  move = mover.update(70);
-  assert.equal(move.arrived, false);
-  assert.ok(move.x > 0 && move.x < 64);
-  move = mover.update(125);
-  assert.equal(move.arrived, true);
-  assert.equal(move.x, 64);
+  const first = mover.update(100);
+  assert.equal(first.arrived, false);
+  assert.ok(first.x > 0);
+  assert.ok(mover.velocityPxPerSec > 0);
+  assert.ok(mover.velocityPxPerSec < mover.maxSpeedPxPerSec);
+  assert.ok(mover.estimatedGridCellDurationMs > 0);
+
+  const second = mover.update(300);
+  assert.equal(second.arrived, false);
+  assert.ok(second.x > first.x);
+  assert.ok(Math.abs(mover.velocityPxPerSec - mover.maxSpeedPxPerSec) < 1e-9);
 });
 
-test('beat snapped mover moves faster at higher BPM while keeping beat arrival lock', () => {
-  const fastMover = new BeatSnapMover(new Metronome(120, 4), 64);
-  const slowMover = new BeatSnapMover(new Metronome(70, 4), 64);
+test('continuous mover decelerates with friction after releasing input', () => {
+  const mover = new BeatSnapMover(new Metronome(120, 4), 64, 4, 32);
+  mover.setDirection('forward');
+  mover.update(0);
+  mover.update(300);
+  const speedBeforeRelease = mover.velocityPxPerSec;
+  assert.ok(speedBeforeRelease > 0);
 
-  fastMover.enqueue('forward');
-  slowMover.enqueue('forward');
+  mover.setDirection('idle');
+  mover.update(350);
+  const speedShortlyAfterRelease = mover.velocityPxPerSec;
+  assert.ok(speedShortlyAfterRelease > 0);
+  assert.ok(speedShortlyAfterRelease < speedBeforeRelease);
+
+  mover.update(500);
+  assert.equal(mover.velocityPxPerSec, 0);
+});
+
+test('continuous mover scales inertia and speed with BPM', () => {
+  const fastMover = new BeatSnapMover(new Metronome(120, 4), 64, 4, 32);
+  const slowMover = new BeatSnapMover(new Metronome(70, 4), 64, 4, 32);
+
+  fastMover.setDirection('forward');
+  slowMover.setDirection('forward');
   fastMover.update(0);
   slowMover.update(0);
 
-  const fastMid = fastMover.update(100);
-  const slowMid = slowMover.update(100);
-  assert.ok(fastMid.x > slowMid.x);
-  assert.equal(fastMid.arrived, false);
-  assert.equal(slowMid.arrived, false);
+  const fastAt100 = fastMover.update(100);
+  const slowAt100 = slowMover.update(100);
+  assert.ok(fastAt100.x > slowAt100.x);
+  assert.ok(fastMover.velocityPxPerSec > slowMover.velocityPxPerSec);
+  assert.ok(fastMover.maxSpeedPxPerSec > slowMover.maxSpeedPxPerSec);
+});
 
-  const fastEnd = fastMover.update(125);
-  assert.equal(fastEnd.arrived, true);
-  assert.equal(fastEnd.x, 64);
+test('continuous mover beat assist nudges within bounded correction speed', () => {
+  const mover = new BeatSnapMover(new Metronome(120, 4), 64, 4, 32);
+  mover.stopAt(30);
+  mover.setDirection('forward');
+  mover.update(0);
+  const move = mover.update(5);
+
+  const expectedWithoutAssist = 30 + 3.2 * 0.005;
+  const assistShift = move.x - expectedWithoutAssist;
+  const maxAssistShift = 26 * 0.005;
+  assert.ok(assistShift >= 0);
+  assert.ok(assistShift <= maxAssistShift + 1e-6);
+  assert.ok(move.x < 30.5);
 });
 
 test('tempo scaling helpers map speed and interval to BPM', () => {
@@ -329,6 +362,11 @@ test('beat and ghost platform state transitions', () => {
   assert.equal(isAlternateBeatPlatformSolid(3), true);
   assert.equal(isAlternateBeatPlatformSolid(4), false);
 
+  assert.equal(isHazardPlatformDanger(1), false);
+  assert.equal(isHazardPlatformDanger(2), false);
+  assert.equal(isHazardPlatformDanger(3), false);
+  assert.equal(isHazardPlatformDanger(4), true);
+
   assert.equal(isGhostPlatformSolid('backward'), true);
   assert.equal(isGhostPlatformSolid('forward'), false);
 });
@@ -360,10 +398,11 @@ test('energy classification and segment generation follow templates', () => {
   assert.equal(classifyEnergy(0.5), 'medium');
   assert.equal(classifyEnergy(0.9), 'high');
 
-  const segments = generateSegments({ bpm: 120, energy_curve: [0.1, 0.2, 0.8, 0.9] }, 2);
-  assert.equal(segments.length, 2);
-  assert.deepEqual(segments[0].platformTypes, ['static', 'beat', 'alternateBeat']);
-  assert.deepEqual(segments[1].platformTypes, [
+  const segments = generateSegments({ bpm: 120, energy_curve: [0.1, 0.2, 0.5, 0.6, 0.8, 0.9] }, 2);
+  assert.equal(segments.length, 3);
+  assert.deepEqual(segments[0].platformTypes, ['static', 'beat', 'alternateBeat', 'elevator']);
+  assert.deepEqual(segments[1].platformTypes, ['static', 'beat', 'alternateBeat', 'ghost', 'reverseGhost', 'elevator']);
+  assert.deepEqual(segments[2].platformTypes, [
     'static',
     'beat',
     'alternateBeat',
@@ -374,6 +413,84 @@ test('energy classification and segment generation follow templates', () => {
     'cross',
     'spring'
   ]);
+});
+
+test('platform kind sequence applies energy gate to high-complexity kinds', () => {
+  const sequence = generatePlatformKindSequence(
+    [
+      { energyState: 'low', platformTypes: ['hazard', 'launch30', 'launch60'], rhythmDensity: 1 },
+      { energyState: 'medium', platformTypes: ['hazard', 'launch30'], rhythmDensity: 1 }
+    ],
+    42
+  );
+  for (const kind of sequence) {
+    assert.ok(kind === null || kind === 'segment');
+  }
+});
+
+test('platform kind sequence anti-stall avoids long static runs when alternatives exist', () => {
+  const sequence = generatePlatformKindSequence(
+    Array.from({ length: 18 }, () => ({
+      energyState: 'medium',
+      platformTypes: ['static', 'ghost'],
+      rhythmDensity: 0
+    })),
+    4
+  );
+  let staticRun = 0;
+  let maxStaticRun = 0;
+  for (const kind of sequence) {
+    if (kind === 'segment') {
+      staticRun += 1;
+      maxStaticRun = Math.max(maxStaticRun, staticRun);
+    } else {
+      staticRun = 0;
+    }
+  }
+  assert.ok(maxStaticRun <= 3);
+});
+
+test('platform kind sequence blocks consecutive beat/alternate transitions', () => {
+  const sequence = generatePlatformKindSequence(
+    Array.from({ length: 80 }, () => ({
+      energyState: 'high',
+      platformTypes: ['beat', 'alternateBeat'],
+      rhythmDensity: 1
+    })),
+    13
+  );
+  for (let i = 1; i < sequence.length; i++) {
+    const prev = sequence[i - 1];
+    const curr = sequence[i];
+    assert.ok(!(prev === 'beat' && curr === 'alternateBeat'));
+    assert.ok(!(prev === 'alternateBeat' && curr === 'beat'));
+    assert.ok(!(prev === 'alternateBeat' && curr === 'alternateBeat'));
+  }
+});
+
+test('platform kind sequence keeps at least 4 segments between launches', () => {
+  const sequence = generatePlatformKindSequence(
+    Array.from({ length: 120 }, () => ({
+      energyState: 'high',
+      platformTypes: ['static', 'launch30', 'launch60', 'ghost'],
+      rhythmDensity: 1
+    })),
+    19
+  );
+  const launchIndexes = [];
+  for (let i = 0; i < sequence.length; i++) {
+    if (sequence[i] === 'launch30' || sequence[i] === 'launch60') launchIndexes.push(i);
+  }
+  assert.ok(launchIndexes.length >= 2);
+  for (let i = 1; i < launchIndexes.length; i++) {
+    const start = launchIndexes[i - 1] + 1;
+    const end = launchIndexes[i];
+    let segmentCount = 0;
+    for (let j = start; j < end; j++) {
+      if (sequence[j] === 'segment') segmentCount += 1;
+    }
+    assert.ok(segmentCount >= 4);
+  }
 });
 
 test('input resolver supports movement and jump intent', () => {
@@ -416,6 +533,17 @@ test('flying enemy moves left, homes vertically, and deactivates offscreen', () 
 
   flying = updateFlyingEnemy(flying, 160, 2, -20);
   assert.equal(flying.active, false);
+});
+
+test('falling rock enemy drops vertically and deactivates offscreen', () => {
+  let rock = { x: 100, y: -40, speedY: 120, active: true };
+  rock = updateFallingRockEnemy(rock, 1, 620);
+  assert.equal(rock.x, 100);
+  assert.equal(rock.y, 80);
+  assert.equal(rock.active, true);
+
+  rock = updateFallingRockEnemy(rock, 5, 620);
+  assert.equal(rock.active, false);
 });
 
 function writeUint16(value) {

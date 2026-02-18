@@ -1,67 +1,151 @@
+const BASE_REFERENCE_BPM = 120;
+const BASE_ACCEL_PX_PER_SEC2 = 640;
+const BASE_FRICTION_PX_PER_SEC2 = 980;
+const REVERSE_BRAKE_MULTIPLIER = 1.4;
+const ASSIST_GRID_WINDOW_PX = 2.75;
+const ASSIST_SUBDIVISION_WINDOW_MS = 24;
+const ASSIST_MAX_CORRECTION_SPEED_PX_PER_SEC = 26;
+const MOTION_EPSILON = 1e-3;
+function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+}
+function approach(current, target, maxDelta) {
+    if (!Number.isFinite(current))
+        return target;
+    if (!Number.isFinite(target))
+        return current;
+    const delta = target - current;
+    if (Math.abs(delta) <= maxDelta)
+        return target;
+    return current + Math.sign(delta) * maxDelta;
+}
+function directionToSign(direction) {
+    if (direction === 'forward')
+        return 1;
+    if (direction === 'backward')
+        return -1;
+    return 0;
+}
 export class BeatSnapMover {
     metronome;
     cellSize;
-    queue = [];
-    activeStep = null;
     position = 0;
+    velocity = 0;
+    inputDirection = 'idle';
+    speedMultiplier = 1;
+    lastUpdateMs = null;
     subdivisionsPerStep;
-    constructor(metronome, cellSize = 48, subdivisionsPerStep = 1) {
+    assistGridSize;
+    constructor(metronome, cellSize = 48, subdivisionsPerStep = 1, assistGridSize = cellSize) {
         this.metronome = metronome;
         this.cellSize = cellSize;
         this.subdivisionsPerStep = Math.max(1, Math.floor(Number(subdivisionsPerStep) || 1));
+        this.assistGridSize = Math.max(1, Number(assistGridSize) || this.cellSize);
+    }
+    setDirection(direction) {
+        this.inputDirection = direction === 'forward' || direction === 'backward' ? direction : 'idle';
     }
     enqueue(direction) {
-        if (direction !== 'idle') {
-            this.queue.push(direction);
-        }
+        this.setDirection(direction);
     }
     get x() {
         return this.position;
     }
     get currentStep() {
-        return this.activeStep;
+        return null;
     }
     get queuedCount() {
-        return this.queue.length;
+        return 0;
     }
     get stepSize() {
         return this.cellSize;
     }
+    get velocityPxPerSec() {
+        return this.velocity;
+    }
+    get maxSpeedPxPerSec() {
+        const cadenceScale = this.metronome.subdivision / Math.max(1, this.subdivisionsPerStep);
+        return this.cellSize * (this.metronome.bpm / 60) * cadenceScale;
+    }
+    get estimatedGridCellDurationMs() {
+        const movingSpeed = Math.abs(this.velocity);
+        if (movingSpeed > MOTION_EPSILON) {
+            return (this.assistGridSize / movingSpeed) * 1000;
+        }
+        if (this.inputDirection !== 'idle') {
+            const referenceSpeed = Math.max(MOTION_EPSILON, this.maxSpeedPxPerSec * this.speedMultiplier);
+            return (this.assistGridSize / referenceSpeed) * 1000;
+        }
+        return 0;
+    }
     stopAt(position) {
         this.position = position;
-        this.activeStep = null;
-        this.queue = [];
+        this.velocity = 0;
+        this.inputDirection = 'idle';
+        this.lastUpdateMs = null;
+    }
+    setVelocityPxPerSec(velocity) {
+        if (!Number.isFinite(velocity))
+            return;
+        this.velocity = velocity;
+    }
+    setSpeedMultiplier(multiplier) {
+        if (!Number.isFinite(multiplier) || multiplier <= 0) {
+            this.speedMultiplier = 1;
+            return;
+        }
+        this.speedMultiplier = multiplier;
+    }
+    applyRhythmAssist(nowMs, deltaSeconds) {
+        if (Math.abs(this.velocity) <= MOTION_EPSILON)
+            return;
+        if (deltaSeconds <= 0)
+            return;
+        const nearestGrid = Math.round(this.position / this.assistGridSize) * this.assistGridSize;
+        const gridOffset = nearestGrid - this.position;
+        if (Math.abs(gridOffset) > ASSIST_GRID_WINDOW_PX)
+            return;
+        const nextSubdivisionMs = this.metronome.nextSubdivisionAt(nowMs);
+        const prevSubdivisionMs = nextSubdivisionMs - this.metronome.subdivisionIntervalMs;
+        const subdivisionDistanceMs = Math.min(Math.abs(nowMs - prevSubdivisionMs), Math.abs(nextSubdivisionMs - nowMs));
+        if (subdivisionDistanceMs > ASSIST_SUBDIVISION_WINDOW_MS)
+            return;
+        const maxCorrection = ASSIST_MAX_CORRECTION_SPEED_PX_PER_SEC * deltaSeconds;
+        this.position += clamp(gridOffset, -maxCorrection, maxCorrection);
+    }
+    resolveDirectionFromMotion() {
+        if (this.velocity > MOTION_EPSILON)
+            return 'forward';
+        if (this.velocity < -MOTION_EPSILON)
+            return 'backward';
+        return this.inputDirection === 'idle' ? 'idle' : this.inputDirection;
     }
     update(nowMs) {
-        if (!this.activeStep && this.queue.length > 0) {
-            const direction = this.queue.shift();
-            const fromX = this.position;
-            const toX = direction === 'forward' ? fromX + this.cellSize : fromX - this.cellSize;
-            this.activeStep = {
-                fromX,
-                toX,
-                startTime: nowMs,
-                arrivalTime: this.metronome.nextSubdivisionAt(nowMs),
-                direction
-            };
-            if (this.activeStep.arrivalTime === nowMs) {
-                this.activeStep.arrivalTime += this.metronome.subdivisionIntervalMs;
+        const safeNowMs = Number.isFinite(nowMs) ? nowMs : 0;
+        const previousUpdateMs = this.lastUpdateMs;
+        this.lastUpdateMs = safeNowMs;
+        const deltaSeconds = previousUpdateMs === null
+            ? 0
+            : Math.max(0, (Math.max(previousUpdateMs, safeNowMs) - previousUpdateMs) / 1000);
+        if (deltaSeconds > 0) {
+            const tempoScale = this.metronome.bpm / BASE_REFERENCE_BPM;
+            const maxSpeed = this.maxSpeedPxPerSec;
+            const boostedMaxSpeed = maxSpeed * this.speedMultiplier;
+            const accel = BASE_ACCEL_PX_PER_SEC2 * tempoScale;
+            const friction = BASE_FRICTION_PX_PER_SEC2 * tempoScale;
+            const inputSign = directionToSign(this.inputDirection);
+            if (inputSign === 0) {
+                this.velocity = approach(this.velocity, 0, friction * deltaSeconds);
             }
-            this.activeStep.arrivalTime += this.metronome.subdivisionIntervalMs * (this.subdivisionsPerStep - 1);
+            else {
+                const targetVelocity = inputSign * boostedMaxSpeed;
+                const reversing = this.velocity !== 0 && Math.sign(this.velocity) !== inputSign;
+                const brakingAccel = accel * (reversing ? REVERSE_BRAKE_MULTIPLIER : 1);
+                this.velocity = approach(this.velocity, targetVelocity, brakingAccel * deltaSeconds);
+            }
+            this.position += this.velocity * deltaSeconds;
+            this.applyRhythmAssist(safeNowMs, deltaSeconds);
         }
-        if (!this.activeStep) {
-            return { x: this.position, arrived: false, direction: 'idle' };
-        }
-        if (nowMs >= this.activeStep.arrivalTime) {
-            this.position = this.activeStep.toX;
-            const direction = this.activeStep.direction;
-            this.activeStep = null;
-            return { x: this.position, arrived: true, direction };
-        }
-        const travelMs = Math.max(1, this.activeStep.arrivalTime - this.activeStep.startTime);
-        const elapsedMs = Math.max(0, nowMs - this.activeStep.startTime);
-        const progress = Math.min(1, elapsedMs / travelMs);
-        this.position = this.activeStep.fromX + (this.activeStep.toX - this.activeStep.fromX) * progress;
-        return { x: this.position, arrived: false, direction: this.activeStep.direction };
+        return { x: this.position, arrived: false, direction: this.resolveDirectionFromMotion() };
     }
 }

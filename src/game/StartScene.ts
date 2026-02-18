@@ -3,7 +3,13 @@ import type { LevelDefinition } from '../data/exampleLevel.js';
 
 const BEST_TIME_STORAGE_PREFIX = 'sambo.level';
 const VOLUME_STORAGE_KEY = 'sambo.masterVolume';
+const DIFFICULTY_BPM_MULTIPLIER_STORAGE_KEY = 'sambo.difficultyBpmMultiplier';
 const FONT_UI = 'monospace';
+const DIFFICULTY_OPTIONS = [
+  { label: 'Easy', bpmMultiplier: 0.85 },
+  { label: 'Normal', bpmMultiplier: 1.0 },
+  { label: 'Hard', bpmMultiplier: 1.5 }
+] as const;
 const COLORS = {
   panelOverlay: 0x0c1322,
   text: '#d7e2ff',
@@ -33,8 +39,13 @@ export class StartScene extends Phaser.Scene {
   private sliderTrack!: any;
   private sliderFill!: any;
   private sliderHandle!: any;
+  private difficultyIndex = 1;
+  private difficultyLabel!: any;
+  private difficultyTrack!: any;
+  private difficultyFill!: any;
+  private difficultyHandle!: any;
   private loadingText!: any;
-  private readonly sliderWidth = 280;
+  private readonly sliderWidth = 220;
   private levelEntries: LevelEntry[] = [];
   private levels: LevelDefinition[] = [];
   private levelNames: string[] = [];
@@ -59,11 +70,15 @@ export class StartScene extends Phaser.Scene {
     const data = (this.scene.settings.data || {}) as {
       levelIndex?: number;
       volume?: number;
+      difficultyBpmMultiplier?: number;
       levels?: LevelDefinition[];
       levelNames?: string[];
     };
     this.cameras.main.setBackgroundColor('rgba(0,0,0,0)');
     this.volume = Number.isFinite(data.volume) ? Phaser.Math.Clamp(Number(data.volume), 0, 1) : this.loadVolume();
+    this.difficultyIndex = Number.isFinite(data.difficultyBpmMultiplier)
+      ? this.resolveDifficultyIndex(Number(data.difficultyBpmMultiplier))
+      : this.loadDifficultyIndex();
 
     this.add.rectangle(480, 270, 960, 540, COLORS.panelOverlay, 0.66).setDepth(5);
     this.add
@@ -96,15 +111,9 @@ export class StartScene extends Phaser.Scene {
       this.loadingText.setVisible(false);
       this.createLevelSelection();
       this.createVolumeSlider();
+      this.createDifficultySelector();
       this.createActions();
-      this.scene.launch('game', {
-        mode: 'preview',
-        levelIndex: this.selectedLevel,
-        volume: this.volume,
-        levels: this.levels,
-        levelNames: this.levelNames
-      });
-      this.scene.bringToTop('start');
+      this.relaunchPreview();
     });
   }
 
@@ -195,15 +204,7 @@ export class StartScene extends Phaser.Scene {
       row.on('pointerdown', () => {
         this.selectedLevel = level;
         this.refreshLevelButtons();
-        this.scene.stop('game');
-        this.scene.launch('game', {
-          mode: 'preview',
-          levelIndex: this.selectedLevel,
-          volume: this.volume,
-          levels: this.levels,
-          levelNames: this.levelNames
-        });
-        this.scene.bringToTop('start');
+        this.relaunchPreview();
       });
       this.levelButtons.push(row);
       this.levelListContainer.add(row);
@@ -312,6 +313,7 @@ export class StartScene extends Phaser.Scene {
   private createVolumeSlider(): void {
     const y = 54;
     const xCenter = 790;
+    const halfWidth = this.sliderWidth / 2;
     this.volumeLabel = this.add
       .text(xCenter, y - 24, `Volume: ${Math.round(this.volume * 100)}%`, {
         color: COLORS.text,
@@ -321,40 +323,147 @@ export class StartScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(6);
 
-    this.sliderTrack = this.add.rectangle(xCenter, y, 220, 8, COLORS.track, 0.95).setDepth(6);
-    this.sliderFill = this.add.rectangle(xCenter - 110, y, 0, 8, COLORS.trackFill, 0.95).setOrigin(0, 0.5).setDepth(6);
+    this.sliderTrack = this.add.rectangle(xCenter, y, this.sliderWidth, 8, COLORS.track, 0.95).setDepth(6);
+    this.sliderFill = this.add.rectangle(xCenter - halfWidth, y, 0, 8, COLORS.trackFill, 0.95).setOrigin(0, 0.5).setDepth(6);
     this.sliderHandle = this.add
       .circle(xCenter, y, 9, COLORS.handle, 0.95)
       .setDepth(6)
       .setInteractive({ draggable: true, useHandCursor: true });
 
     const setFromPointerX = (pointerX: number, playPreview = true): void => {
-      const left = xCenter - 110;
-      const right = xCenter + 110;
+      const left = xCenter - halfWidth;
+      const right = xCenter + halfWidth;
       const clamped = Phaser.Math.Clamp(pointerX, left, right);
-      this.volume = Phaser.Math.Clamp((clamped - left) / 220, 0, 1);
+      this.volume = Phaser.Math.Clamp((clamped - left) / this.sliderWidth, 0, 1);
       this.sliderHandle.x = clamped;
       this.sliderFill.width = clamped - left;
       this.volumeLabel.setText(`Volume: ${Math.round(this.volume * 100)}%`);
       if (playPreview) this.playVolumePreviewTone();
       this.saveVolume(this.volume);
       if (this.scene.isActive('game')) {
-        this.scene.stop('game');
-        this.scene.launch('game', {
-          mode: 'preview',
-          levelIndex: this.selectedLevel,
-          volume: this.volume,
-          levels: this.levels,
-          levelNames: this.levelNames
-        });
-        this.scene.bringToTop('start');
+        this.relaunchPreview();
       }
     };
 
     this.input.setDraggable(this.sliderHandle);
     this.sliderHandle.on('drag', (pointer: any) => setFromPointerX(pointer.x));
     this.sliderTrack.setInteractive({ useHandCursor: true }).on('pointerdown', (pointer: any) => setFromPointerX(pointer.x));
-    setFromPointerX(xCenter - 110 + 220 * this.volume, false);
+    setFromPointerX(xCenter - halfWidth + this.sliderWidth * this.volume, false);
+  }
+
+  private createDifficultySelector(): void {
+    const y = 108;
+    const xCenter = 790;
+    const halfWidth = this.sliderWidth / 2;
+    const left = xCenter - halfWidth;
+    const right = xCenter + halfWidth;
+    const difficultySteps = DIFFICULTY_OPTIONS.length - 1;
+    const stepWidth = difficultySteps > 0 ? this.sliderWidth / difficultySteps : this.sliderWidth;
+
+    this.difficultyLabel = this.add
+      .text(xCenter, y - 24, '', {
+        color: COLORS.text,
+        fontFamily: FONT_UI,
+        fontSize: '16px'
+      })
+      .setOrigin(0.5)
+      .setDepth(6);
+
+    this.difficultyTrack = this.add.rectangle(xCenter, y, this.sliderWidth, 8, COLORS.track, 0.95).setDepth(6);
+    this.difficultyFill = this.add
+      .rectangle(left, y, 0, 8, COLORS.trackFill, 0.95)
+      .setOrigin(0, 0.5)
+      .setDepth(6);
+    this.difficultyHandle = this.add
+      .circle(xCenter, y, 9, COLORS.handle, 0.95)
+      .setDepth(6)
+      .setInteractive({ draggable: true, useHandCursor: true });
+
+    for (let i = 0; i < DIFFICULTY_OPTIONS.length; i++) {
+      this.add
+        .text(left + stepWidth * i, y + 18, DIFFICULTY_OPTIONS[i].label, {
+          color: COLORS.textDim,
+          fontFamily: FONT_UI,
+          fontSize: '12px'
+        })
+        .setOrigin(0.5, 0)
+        .setDepth(6);
+    }
+
+    const setFromPointerX = (pointerX: number, relaunchPreview = true): void => {
+      const clamped = Phaser.Math.Clamp(pointerX, left, right);
+      const rawIndex = Math.round((clamped - left) / Math.max(1, stepWidth));
+      this.difficultyIndex = Phaser.Math.Clamp(rawIndex, 0, DIFFICULTY_OPTIONS.length - 1);
+      const snappedX = left + stepWidth * this.difficultyIndex;
+      this.difficultyHandle.x = snappedX;
+      this.difficultyFill.width = snappedX - left;
+      this.updateDifficultyLabel();
+      this.saveDifficultyMultiplier(this.currentDifficultyBpmMultiplier());
+      if (relaunchPreview && this.scene.isActive('game')) this.relaunchPreview();
+    };
+
+    this.input.setDraggable(this.difficultyHandle);
+    this.difficultyHandle.on('drag', (pointer: any) => setFromPointerX(pointer.x));
+    this.difficultyTrack
+      .setInteractive({ useHandCursor: true })
+      .on('pointerdown', (pointer: any) => setFromPointerX(pointer.x));
+    setFromPointerX(left + stepWidth * this.difficultyIndex, false);
+  }
+
+  private updateDifficultyLabel(): void {
+    const option = DIFFICULTY_OPTIONS[this.difficultyIndex] ?? DIFFICULTY_OPTIONS[1];
+    this.difficultyLabel.setText(`Difficulty: ${option.label} (${option.bpmMultiplier.toFixed(2)}x BPM)`);
+  }
+
+  private relaunchPreview(): void {
+    if (this.scene.isActive('game')) this.scene.stop('game');
+    this.scene.launch('game', {
+      mode: 'preview',
+      levelIndex: this.selectedLevel,
+      volume: this.volume,
+      difficultyBpmMultiplier: this.currentDifficultyBpmMultiplier(),
+      levels: this.levels,
+      levelNames: this.levelNames
+    });
+    this.scene.bringToTop('start');
+  }
+
+  private currentDifficultyBpmMultiplier(): number {
+    const option = DIFFICULTY_OPTIONS[this.difficultyIndex] ?? DIFFICULTY_OPTIONS[1];
+    return option.bpmMultiplier;
+  }
+
+  private resolveDifficultyIndex(multiplier: number): number {
+    if (!Number.isFinite(multiplier) || multiplier <= 0) return 1;
+    let bestIndex = 1;
+    let bestDistance = Infinity;
+    for (let i = 0; i < DIFFICULTY_OPTIONS.length; i++) {
+      const distance = Math.abs(DIFFICULTY_OPTIONS[i].bpmMultiplier - multiplier);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestIndex = i;
+      }
+    }
+    return bestIndex;
+  }
+
+  private loadDifficultyIndex(): number {
+    try {
+      if (typeof window === 'undefined' || !window.localStorage) return 1;
+      const raw = window.localStorage.getItem(DIFFICULTY_BPM_MULTIPLIER_STORAGE_KEY);
+      return this.resolveDifficultyIndex(Number(raw));
+    } catch {
+      return 1;
+    }
+  }
+
+  private saveDifficultyMultiplier(multiplier: number): void {
+    try {
+      if (typeof window === 'undefined' || !window.localStorage) return;
+      window.localStorage.setItem(DIFFICULTY_BPM_MULTIPLIER_STORAGE_KEY, String(multiplier));
+    } catch {
+      // Ignore storage failures.
+    }
   }
 
   private playVolumePreviewTone(): void {
@@ -420,6 +529,7 @@ export class StartScene extends Phaser.Scene {
         mode: 'play',
         levelIndex: this.selectedLevel,
         volume: this.volume,
+        difficultyBpmMultiplier: this.currentDifficultyBpmMultiplier(),
         levels: this.levels,
         levelNames: this.levelNames
       });
@@ -439,19 +549,6 @@ export class StartScene extends Phaser.Scene {
       if (typeof window !== 'undefined') window.location.href = '/editor.html';
     });
 
-    const midiComposerLink = this.add
-      .text(480, 524, 'Open MIDI Composer', {
-        color: COLORS.accentCool,
-        fontFamily: FONT_UI,
-        fontSize: '18px'
-      })
-      .setOrigin(0.5)
-      .setDepth(6)
-      .setInteractive({ useHandCursor: true });
-
-    midiComposerLink.on('pointerdown', () => {
-      if (typeof window !== 'undefined') window.location.href = '/daw.html';
-    });
   }
 
   private readBest(levelName: string): number | null {
