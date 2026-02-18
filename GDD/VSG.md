@@ -564,10 +564,25 @@ Editor controls should use the same hard-edged UI language used by runtime overl
   * no manual numeric/style override fields in editor runtime export UI
 * Editor playback-quality selector (MIDI parsing/playback) uses the same profile naming (`performance`, `balanced`, `high`) for consistency.
 * Left control panel groups controls into separate bordered boxes:
-  * `MIDI` box for MIDI browsing/loading, local MIDI selection, transport, quality, and MIDI status
+  * `MIDI` box for MIDI browsing/loading, `Upload your file` action, transport, quality, and MIDI status
   * `Levels` box for level browsing/loading only
   * `Level Save` remains its own dedicated box (not merged with MIDI/Levels controls), and contains the base-name input plus `Save in Levels` / `Download Level` actions
+  * `Debug` box is placed directly below `Level Save` and provides upload/conversion trace lines plus a `Clear debug log` action
 * `MIDI` and `Levels` file selectors use an icon refresh control (`U+1F5D8`) positioned to the left of the dropdown; refresh button height must match the adjacent dropdown height and remain visually flush (no vertical step).
+* `Upload your file` opens a centered modal with:
+  * dark backdrop overlay to preserve focus on upload flow
+  * panel title (`Upload your file`), supported-format hint (`MID, MIDI, WAV, MP3`), and concise status line
+  * two equal-width actions (`Choose file`, `Close`) matching existing hard-edged button style
+* Audio conversion progress uses a separate centered progress window:
+  * title (`Converting audio to MIDI`)
+  * live status line bound to conversion stage text
+  * percentage label and horizontal fill meter in cool accent (`#4CC9F0`)
+  * modal remains visible only while conversion job is active
+  * progress percentage must not stay visually stale during long conversion stages (heartbeat updates keep motion/readability)
+* Debug log presentation rules:
+  * scrollable dark panel with compact monospace lines and timestamps
+  * neutral lines use secondary text color, success lines use cool accent, errors use danger red
+  * latest log entry auto-scrolls into view
 
 Editor scrollbars must match runtime color families:
 

@@ -235,6 +235,89 @@
         background: var(--accent-cool);
         color: var(--ink);
       }
+      .upload-midi-modal[hidden] { display: none; }
+      .upload-midi-modal {
+        position: fixed;
+        inset: 0;
+        z-index: 120;
+        display: grid;
+        place-items: center;
+      }
+      .upload-midi-backdrop {
+        position: absolute;
+        inset: 0;
+        background: rgba(5, 7, 15, 0.72);
+      }
+      .upload-midi-panel {
+        position: relative;
+        width: min(420px, calc(100vw - 24px));
+        border: 1px solid var(--border-2);
+        background: var(--surface-2);
+        box-shadow: var(--shadow);
+        padding: 12px;
+      }
+      .upload-midi-panel h3 {
+        margin: 0 0 6px;
+        font-size: 14px;
+      }
+      .conversion-progress-modal[hidden] { display: none; }
+      .conversion-progress-modal {
+        position: fixed;
+        inset: 0;
+        z-index: 130;
+        display: grid;
+        place-items: center;
+      }
+      .conversion-progress-panel {
+        position: relative;
+        width: min(460px, calc(100vw - 24px));
+        border: 1px solid var(--border-2);
+        background: var(--surface-2);
+        box-shadow: var(--shadow);
+        padding: 12px;
+      }
+      .conversion-progress-panel h3 {
+        margin: 0 0 6px;
+        font-size: 14px;
+      }
+      .conversion-progress-meter {
+        margin-top: 8px;
+        width: 100%;
+        height: 10px;
+        border: 1px solid var(--border);
+        background: #0b0f1a;
+      }
+      .conversion-progress-fill {
+        height: 100%;
+        width: 0%;
+        background: var(--accent-cool);
+        transition: width 120ms linear;
+      }
+      .debug-log-panel {
+        margin-top: 8px;
+        max-height: 170px;
+        overflow: auto;
+        border: 1px solid var(--border);
+        background: #0b0f1a;
+        padding: 6px;
+        box-sizing: border-box;
+      }
+      .debug-log-line {
+        font-size: 11px;
+        line-height: 1.35;
+        color: var(--text-dim);
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .debug-log-line + .debug-log-line {
+        margin-top: 3px;
+      }
+      .debug-log-line.error {
+        color: var(--accent-danger);
+      }
+      .debug-log-line.success {
+        color: var(--accent-cool);
+      }
       button, input, select, textarea { font-family: inherit; }
     </style>
   </head>
@@ -253,9 +336,14 @@
             </select>
           </div>
           <button id="loadMidiFromFolder">Load MIDI file</button>
-          <input id="midiInput" class="hidden-file-input" type="file" accept=".mid,.midi,audio/midi,audio/x-midi" />
-          <button id="openMidiFile">Select local MIDI</button>
-          <p id="localMidiStatus" class="small">No local MIDI selected</p>
+          <input
+            id="midiInput"
+            class="hidden-file-input"
+            type="file"
+            accept=".mid,.midi,.wav,.mp3,audio/midi,audio/x-midi,audio/wav,audio/wave,audio/x-wav,audio/mpeg"
+          />
+          <button id="openMidiFile">Upload your file</button>
+          <p id="localMidiStatus" class="small">No uploaded file selected</p>
           <div class="button-row">
             <button id="playMidi" aria-label="Play MIDI" title="Play MIDI">&#9654;</button>
             <button id="stopMidi" aria-label="Stop MIDI" title="Stop MIDI">&#9632;</button>
@@ -298,6 +386,12 @@
             <button id="exportRuntime">Save in Levels</button>
             <button id="downloadLevel">Download Level</button>
           </div>
+        </section>
+        <section class="panel-box">
+          <h3>Debug</h3>
+          <p class="small">Upload and conversion diagnostics.</p>
+          <button id="clearDebugLog">Clear debug log</button>
+          <div id="debugLogPanel" class="debug-log-panel" aria-live="polite"></div>
         </section>
       </div>
       <div class="main">
@@ -365,6 +459,31 @@
       </div>
     </div>
 
+    <div id="uploadMidiModal" class="upload-midi-modal" hidden>
+      <div id="uploadMidiBackdrop" class="upload-midi-backdrop"></div>
+      <div class="upload-midi-panel" role="dialog" aria-modal="true" aria-labelledby="uploadMidiTitle">
+        <h3 id="uploadMidiTitle">Upload your file</h3>
+        <p class="small">Supported formats: MID, MIDI, WAV, MP3</p>
+        <p id="uploadMidiStatus" class="small">Choose a file to upload.</p>
+        <div class="button-row">
+          <button id="chooseMidiUploadFile">Choose file</button>
+          <button id="closeMidiUploadModal">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="conversionProgressModal" class="conversion-progress-modal" hidden>
+      <div class="upload-midi-backdrop"></div>
+      <div class="conversion-progress-panel" role="dialog" aria-modal="true" aria-labelledby="conversionProgressTitle">
+        <h3 id="conversionProgressTitle">Converting audio to MIDI</h3>
+        <p id="conversionProgressStatus" class="small">Preparing conversion...</p>
+        <p id="conversionProgressPercent" class="small">0%</p>
+        <div class="conversion-progress-meter">
+          <div id="conversionProgressFill" class="conversion-progress-fill"></div>
+        </div>
+      </div>
+    </div>
+
     <script type="module">
       import {
         normalizeMidiTickModel,
@@ -382,8 +501,17 @@
       const fileInput = document.getElementById('fileInput');
       const midiFolderSelect = document.getElementById('midiFolderSelect');
       const levelsFolderSelect = document.getElementById('levelsFolderSelect');
+      const debugLogPanelEl = document.getElementById('debugLogPanel');
+      const clearDebugLogBtn = document.getElementById('clearDebugLog');
       const levelBaseNameInput = document.getElementById('levelBaseName');
       const midiInput = document.getElementById('midiInput');
+      const uploadMidiModal = document.getElementById('uploadMidiModal');
+      const uploadMidiBackdrop = document.getElementById('uploadMidiBackdrop');
+      const uploadMidiStatusEl = document.getElementById('uploadMidiStatus');
+      const conversionProgressModal = document.getElementById('conversionProgressModal');
+      const conversionProgressStatusEl = document.getElementById('conversionProgressStatus');
+      const conversionProgressPercentEl = document.getElementById('conversionProgressPercent');
+      const conversionProgressFillEl = document.getElementById('conversionProgressFill');
       const localMidiStatusEl = document.getElementById('localMidiStatus');
       const midiStatusEl = document.getElementById('midiStatus');
       const runtimeBpmInput = document.getElementById('runtimeBpm');
@@ -651,6 +779,154 @@
 
       function setLocalMidiStatus(text) {
         localMidiStatusEl.textContent = text;
+      }
+
+      function appendDebugLog(message, level = 'info') {
+        if (!debugLogPanelEl) return;
+        const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false });
+        const line = document.createElement('div');
+        line.className = `debug-log-line ${level}`;
+        line.textContent = `[${timestamp}] ${String(message || '')}`;
+        debugLogPanelEl.appendChild(line);
+        while (debugLogPanelEl.children.length > 200) {
+          debugLogPanelEl.removeChild(debugLogPanelEl.firstChild);
+        }
+        debugLogPanelEl.scrollTop = debugLogPanelEl.scrollHeight;
+      }
+
+      function clearDebugLog() {
+        if (!debugLogPanelEl) return;
+        debugLogPanelEl.innerHTML = '';
+      }
+
+      function setUploadMidiStatus(text) {
+        if (!uploadMidiStatusEl) return;
+        uploadMidiStatusEl.textContent = text;
+      }
+
+      function setUploadMidiModalOpen(open) {
+        if (!uploadMidiModal) return;
+        uploadMidiModal.hidden = !open;
+      }
+
+      function setConversionProgressModalOpen(open) {
+        if (!conversionProgressModal) return;
+        conversionProgressModal.hidden = !open;
+      }
+
+      function setConversionProgress(statusText, progress01 = 0) {
+        const safeProgress = clampNumber(Number(progress01) || 0, 0, 1);
+        const percent = Math.round(safeProgress * 100);
+        if (conversionProgressStatusEl) conversionProgressStatusEl.textContent = statusText || 'Processing...';
+        if (conversionProgressPercentEl) conversionProgressPercentEl.textContent = `${percent}%`;
+        if (conversionProgressFillEl) conversionProgressFillEl.style.width = `${percent}%`;
+      }
+
+      function isAudioUploadFileName(fileName) {
+        const ext = String(fileName || '').toLowerCase().split('.').pop() || '';
+        return ext === 'wav' || ext === 'mp3';
+      }
+
+      async function pollUploadJobUntilDone(jobId) {
+        const safeJobId = String(jobId || '').trim();
+        if (!safeJobId) throw new Error('Missing upload job ID.');
+        let lastStage = '';
+        while (true) {
+          const response = await fetch(`/api/upload-midi-job?jobId=${encodeURIComponent(safeJobId)}`);
+          const rawText = await response.text().catch(() => '');
+          const payload = (() => {
+            try {
+              return rawText ? JSON.parse(rawText) : {};
+            } catch {
+              return {};
+            }
+          })();
+          if (!response.ok) {
+            const detail = payload.error || rawText || `Unable to read upload job (HTTP ${response.status})`;
+            throw new Error(detail);
+          }
+          const stage = typeof payload.stage === 'string' && payload.stage.trim() ? payload.stage.trim() : 'Processing...';
+          const progress = clampNumber(Number(payload.progress) || 0, 0, 1);
+          setConversionProgress(stage, progress);
+          if (stage !== lastStage) {
+            appendDebugLog(`Conversion stage: ${stage} (${Math.round(progress * 100)}%)`);
+            lastStage = stage;
+          }
+          if (payload.status === 'done') return payload;
+          if (payload.status === 'error') {
+            throw new Error(payload.error || 'Audio conversion failed.');
+          }
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+      }
+
+      async function uploadAndLoadMidiFile(file) {
+        const isAudio = isAudioUploadFileName(file?.name || '');
+        appendDebugLog(`Selected file: ${file.name} (${file.type || 'unknown type'}, ${file.size} bytes)`);
+        setUploadMidiStatus(isAudio ? 'Uploading and converting...' : 'Uploading...');
+        appendDebugLog(isAudio ? 'Uploading audio file and converting to MIDI...' : 'Uploading MIDI file...');
+        if (isAudio) {
+          setConversionProgressModalOpen(true);
+          setConversionProgress('Uploading audio file...', 0.02);
+        }
+        const formData = new FormData();
+        formData.append('upload', file, file.name);
+        appendDebugLog('POST /api/upload-midi');
+        const response = await fetch('/api/upload-midi', { method: 'POST', body: formData });
+        appendDebugLog(`Upload response: HTTP ${response.status}`);
+        const rawText = await response.text().catch(() => '');
+        const payload = (() => {
+          try {
+            return rawText ? JSON.parse(rawText) : {};
+          } catch {
+            return {};
+          }
+        })();
+        if (!response.ok) {
+          const detail = payload.error || rawText || `Upload failed (HTTP ${response.status})`;
+          appendDebugLog(`Upload failed: ${detail}`, 'error');
+          if (isAudio) setConversionProgress('Conversion failed.', 1);
+          throw new Error(detail);
+        }
+
+        let resolvedPayload = payload;
+        if (isAudio && response.status === 202) {
+          const jobId = typeof payload.jobId === 'string' ? payload.jobId.trim() : '';
+          if (!jobId) {
+            appendDebugLog('Upload accepted but jobId is missing.', 'error');
+            throw new Error('Upload accepted but conversion job ID is missing.');
+          }
+          appendDebugLog(`Conversion job started: ${jobId}`);
+          setConversionProgress(payload.stage || 'Converting audio to MIDI...', payload.progress || 0.05);
+          resolvedPayload = await pollUploadJobUntilDone(jobId);
+          appendDebugLog(`Conversion job completed: ${jobId}`, 'success');
+        }
+
+        if (!resolvedPayload || typeof resolvedPayload.fileName !== 'string' || !resolvedPayload.fileName.trim()) {
+          appendDebugLog('Upload response missing fileName.', 'error');
+          throw new Error('Upload completed but the server did not return a MIDI file name.');
+        }
+
+        const midiFileName = resolvedPayload.fileName.trim();
+        appendDebugLog(
+          resolvedPayload.converted
+            ? `Conversion completed. Saved as ${midiFileName}.`
+            : `Upload completed. Saved as ${midiFileName}.`,
+          'success'
+        );
+        await refreshMidiFolderList(midiFileName);
+        if (midiFolderFiles.includes(midiFileName)) midiFolderSelect.value = midiFileName;
+        appendDebugLog(`Loading ${midiFileName} from MIDI/ ...`);
+        await loadMidiFromProjectByName(midiFileName);
+        setLocalMidiStatus(`Uploaded and loaded: ${midiFileName}`);
+        setUploadMidiStatus(
+          resolvedPayload.converted ? `Converted and saved as ${midiFileName}.` : `Uploaded and saved as ${midiFileName}.`
+        );
+        appendDebugLog(`Loaded ${midiFileName} successfully.`, 'success');
+        if (isAudio) {
+          setConversionProgress('Conversion complete.', 1);
+          setTimeout(() => setConversionProgressModalOpen(false), 250);
+        }
       }
 
       function setRuntimeGridColumns(value) {
@@ -1395,7 +1671,8 @@
         return suggested;
       }
 
-      async function refreshMidiFolderList() {
+      async function refreshMidiFolderList(preferredSelection = '') {
+        const previousSelection = String(preferredSelection || midiFolderSelect.value || '').trim();
         try {
           const res = await fetch('/api/midi-files');
           if (!res.ok) {
@@ -1416,6 +1693,9 @@
               option.value = name;
               option.textContent = name;
               midiFolderSelect.appendChild(option);
+            }
+            if (previousSelection && midiFolderFiles.includes(previousSelection)) {
+              midiFolderSelect.value = previousSelection;
             }
           }
         } catch (err) {
@@ -1491,7 +1771,7 @@
         midiPlayback.durationSec = 0;
         midiPlayback.initialBpm = null;
         if (midiInput) midiInput.value = '';
-        setLocalMidiStatus('No local MIDI selected');
+        setLocalMidiStatus('No uploaded file selected');
         model.midi_file = null;
         setMidiStatus('no file loaded');
       }
@@ -1706,7 +1986,7 @@
 
       function buildDraftFromMidi() {
         if (!midiPlayback.notes.length || !midiPlayback.durationSec) {
-          throw new Error('Load a MIDI file first (from folder or local file)');
+          throw new Error('Load a MIDI file first (from folder or uploaded file)');
         }
 
         const bpm = clampBpm(Number(runtimeBpmInput.value) || 120);
@@ -2073,7 +2353,7 @@
         midiPlayback.durationSec = 0;
         midiPlayback.initialBpm = null;
         if (midiInput) midiInput.value = '';
-        setLocalMidiStatus('No local MIDI selected');
+        setLocalMidiStatus('No uploaded file selected');
 
         const tempoMap = normalizeTempoMap(rawLevel?.tempoMap, Number(runtimeBpmInput.value) || 120);
         const bpm = Number(tempoMap[0]?.bpm);
@@ -2778,20 +3058,61 @@
       };
 
       document.getElementById('openMidiFile').onclick = () => {
-        midiInput.click();
+        setUploadMidiStatus('Choose a file to upload.');
+        setUploadMidiModalOpen(true);
+        appendDebugLog('Upload popup opened.');
       };
+
+      document.getElementById('chooseMidiUploadFile').onclick = () => {
+        appendDebugLog('Opening system file picker...');
+        if (midiInput) midiInput.click();
+      };
+
+      document.getElementById('closeMidiUploadModal').onclick = () => {
+        setUploadMidiModalOpen(false);
+        appendDebugLog('Upload popup closed.');
+      };
+
+      if (uploadMidiBackdrop) {
+        uploadMidiBackdrop.onclick = () => {
+          setUploadMidiModalOpen(false);
+          appendDebugLog('Upload popup closed (backdrop click).');
+        };
+      }
+
+      document.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape' && uploadMidiModal && !uploadMidiModal.hidden) {
+          setUploadMidiModalOpen(false);
+          appendDebugLog('Upload popup closed (Escape).');
+        }
+      });
 
       midiInput.onchange = async (ev) => {
         const file = ev.target.files && ev.target.files[0];
-        if (!file) return;
-        setLocalMidiStatus(file.name);
+        if (!file) {
+          appendDebugLog('File selection canceled.');
+          return;
+        }
+        setUploadMidiModalOpen(false);
+        const isAudio = isAudioUploadFileName(file.name);
         try {
-          await handleLoadedMidi(file.name, await file.arrayBuffer());
+          await uploadAndLoadMidiFile(file);
         } catch (err) {
-          resetMidiState();
-          alert(err.message || 'MIDI parsing error');
+          setUploadMidiStatus('Upload failed.');
+          if (isAudio) setConversionProgressModalOpen(false);
+          appendDebugLog(err.message || 'Error while uploading file', 'error');
+          alert(err.message || 'Error while uploading file');
+        } finally {
+          if (midiInput) midiInput.value = '';
         }
       };
+
+      if (clearDebugLogBtn) {
+        clearDebugLogBtn.onclick = () => {
+          clearDebugLog();
+          appendDebugLog('Debug log cleared.');
+        };
+      }
 
       document.getElementById('refreshMidiFolder').onclick = () => {
         refreshMidiFolderList();
@@ -3149,8 +3470,10 @@
       });
 
       async function bootstrapEditor() {
+        appendDebugLog('Editor startup...');
         await refreshMidiFolderList();
         await refreshLevelsFolderList();
+        appendDebugLog('Editor ready. Upload supports MID/MIDI/WAV/MP3.');
         try {
           render();
         } catch (err) {

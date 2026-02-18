@@ -110,7 +110,13 @@ The repository includes a lightweight browser editor for `level_draft.json` file
 
 ### What you can do in the editor
 - Load a draft JSON (`{ "segments": [...], "midi_file": "track.mid" }`) from your machine.
-- Load a MIDI from project folder `MIDI/` (or from local file) and play/stop it directly in the editor.
+- Load a MIDI from project folder `MIDI/` and play/stop it directly in the editor.
+- Use `Upload your file` to upload `MID/MIDI/WAV/MP3` from a popup:
+  - `MID/MIDI` are saved in `MIDI/` and loaded automatically.
+  - `WAV/MP3` are converted to MIDI, saved in `MIDI/`, then loaded automatically.
+  - Audio-to-MIDI conversion uses the vendored Basic Pitch model in `assets/models/basic-pitch/` (deployment-stable path).
+  - Converted/saved files are created with collision-safe names (`name.mid`, `name_1.mid`, ...).
+  - This flow requires the local editor server (`npm run start`) because it writes files into `MIDI/`.
 - Generate the first level draft automatically from the loaded MIDI.
 - Configure runtime output (`bpm`, `gridColumns`, optional `reverseGhost`) and save/copy a runtime level JSON:
   - `{ "bpm": number, "gridColumns": number, "notes": number[], "platforms": [...], "segmentEnemies": [{ "segmentIndex": number, "patrolCount": number, "flyingSpawnIntervalMs": number, "fallingRockSpawnIntervalMs": number }], "enemies": { "patrolCount": number, "flyingSpawnIntervalMs": number } }`
@@ -141,7 +147,7 @@ The repository includes a lightweight browser editor for `level_draft.json` file
    python scripts/audio_to_level.py --input path/to/track.wav --output-dir data
    ```
 2. Open the editor and import `data/level_draft.json`.
-3. Put your MIDI file in `MIDI/` and load it from the editor list.
+3. Either put your MIDI file in `MIDI/` and load it from the editor list, or use `Upload your file` for MIDI/audio upload.
 4. Generate the initial draft from MIDI, then refine the segments.
 5. Save draft/runtime JSON into `Levels/`.
 

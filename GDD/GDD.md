@@ -837,10 +837,11 @@ The project includes a browser editor at `/editor.html` for runtime-oriented lev
 * Left control panel + right workspace layout.
 * User-facing sections:
   * top `Back to Game` action
-  * dedicated `MIDI` box (MIDI folder list/load, local MIDI select, transport controls, playback quality selector, MIDI status)
+  * dedicated `MIDI` box (MIDI folder list/load, `Upload your file` popup action, transport controls, playback quality selector, MIDI status)
   * dedicated `Levels` box (level folder list/load)
   * both `MIDI` and `Levels` selectors place a refresh icon button (`U+1F5D8`) on the left side of the file dropdown, with the same control height as the dropdown and flush top/bottom alignment (no visual step)
   * dedicated `Level Save` box (level base-name, runtime audio-quality profile, BPM fallback, `Save in Levels`, `Download Level`)
+  * dedicated `Debug` box under `Level Save` with timestamped upload/conversion diagnostics and manual clear action
   * segment table editor
   * runtime platform layout canvas
 * Segment authoring source of truth:
@@ -906,7 +907,16 @@ The project includes a browser editor at `/editor.html` for runtime-oriented lev
   * `Load level file` refreshes `Levels/` before applying data, so the latest saved runtime is loaded
   * after load, the selected level remains selected in the `Levels/` dropdown
 * MIDI load behavior:
-  * manual `Load MIDI file` / `Select local MIDI` rebuilds segments from the loaded MIDI and resets layout editor to generated mode
+  * manual `Load MIDI file` (from folder) or `Upload your file` (popup) rebuilds segments from the loaded MIDI and resets layout editor to generated mode
+  * `Upload your file` popup accepts `MID`, `MIDI`, `WAV`, `MP3`
+  * upload flow saves the resulting MIDI in `MIDI/` with collision-safe names (`name.mid`, `name_1.mid`, ...)
+  * `WAV/MP3` uploads are converted to MIDI before save and then auto-loaded by the editor
+  * audio-to-MIDI conversion uses a vendored Basic Pitch model path (`assets/models/basic-pitch`) for deployment stability
+  * audio upload conversion runs as an async server job with progress reporting (`stage` + `0..1` progress) exposed via upload-job polling API
+  * editor shows a dedicated conversion-progress window for long audio jobs, including live percentage and stage label
+  * conversion-job progress is monotonic and includes heartbeat increments during long model-loading phases to prevent stale UI percentages
+  * converted-note velocity is normalized upward (dynamic-range lift) to avoid very low perceived playback volume in generated MIDI
+  * upload/conversion lifecycle writes timestamped entries to the `Debug` box (selection, request start, HTTP response, save/load success, and failures)
   * segment count is derived from MIDI duration and current default BPM fallback at generation time (`2 beats` per segment)
   * segment BPM values are auto-seeded from MIDI tempo changes (tempo map timeline)
   * changing default BPM fallback after MIDI load does not rebuild segment count automatically; regenerate/reload is required to recalculate beats/segments
