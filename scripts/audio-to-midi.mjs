@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 
 const MIDI_EXTENSIONS = new Set(['.mid', '.midi']);
@@ -10,6 +11,8 @@ const VENDORED_MODEL_JSON_PATH = path.join(VENDORED_MODEL_DIR, 'model.json');
 
 let modelPromise = null;
 let vendoredModelMetadataPromise = null;
+let tensorflowRuntimePromise = null;
+const require = createRequire(import.meta.url);
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -156,6 +159,52 @@ export async function assertVendoredBasicPitchModelReady() {
   };
 }
 
+function normalizeModuleExports(moduleValue) {
+  if (!moduleValue || typeof moduleValue !== 'object') return moduleValue;
+  if (moduleValue.default && typeof moduleValue.default === 'object') return moduleValue.default;
+  return moduleValue;
+}
+
+function ensureTfjsNodeUtilCompatibility() {
+  const util = require('util');
+  if (typeof util.isNullOrUndefined !== 'function') {
+    util.isNullOrUndefined = (value) => value === null || value === undefined;
+  }
+}
+
+async function loadTensorflowRuntime(options = {}) {
+  if (tensorflowRuntimePromise) return tensorflowRuntimePromise;
+
+  tensorflowRuntimePromise = (async () => {
+    reportProgress(options, 'Initializing TensorFlow runtime...', 0.06);
+    try {
+      ensureTfjsNodeUtilCompatibility();
+      const tfNodeModule = normalizeModuleExports(await import('@tensorflow/tfjs-node'));
+      const tfNode = tfNodeModule;
+      if (typeof tfNode?.loadGraphModel !== 'function' || typeof tfNode?.io?.fromMemory !== 'function') {
+        throw new Error('Invalid TensorFlow Node runtime.');
+      }
+      await tfNode.ready?.();
+      reportProgress(options, 'TensorFlow Node backend ready.', 0.08);
+      return tfNode;
+    } catch {
+      const tfModule = normalizeModuleExports(await import('@tensorflow/tfjs'));
+      const tf = tfModule;
+      if (typeof tf?.loadGraphModel !== 'function' || typeof tf?.io?.fromMemory !== 'function') {
+        throw new Error('TensorFlow runtime is not available.');
+      }
+      await tf.ready?.();
+      reportProgress(options, 'TensorFlow JS backend ready (slower).', 0.08);
+      return tf;
+    }
+  })().catch((err) => {
+    tensorflowRuntimePromise = null;
+    throw err;
+  });
+
+  return tensorflowRuntimePromise;
+}
+
 async function loadBasicPitchGraphModel(tf, options = {}) {
   if (modelPromise) return modelPromise;
 
@@ -229,12 +278,12 @@ export async function convertAudioBufferToMidiBuffer(inputBuffer, mimeOrExt = ''
   }
   reportProgress(options, 'Loading conversion model...', 0.04);
 
-  const [{ default: decodeAudio }, tf, basicPitchModule, toneMidiModule] = await Promise.all([
+  const [{ default: decodeAudio }, basicPitchModule, toneMidiModule] = await Promise.all([
     import('audio-decode'),
-    import('@tensorflow/tfjs'),
     import('@spotify/basic-pitch'),
     import('@tonejs/midi')
   ]);
+  const tf = await loadTensorflowRuntime(options);
   const { BasicPitch, outputToNotesPoly, noteFramesToTime, addPitchBendsToNoteEvents } = basicPitchModule;
   const toneMidiExports =
     toneMidiModule?.default && typeof toneMidiModule.default === 'object' ? toneMidiModule.default : toneMidiModule;

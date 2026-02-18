@@ -912,6 +912,7 @@ The project includes a browser editor at `/editor.html` for runtime-oriented lev
   * upload flow saves the resulting MIDI in `MIDI/` with collision-safe names (`name.mid`, `name_1.mid`, ...)
   * `WAV/MP3` uploads are converted to MIDI before save and then auto-loaded by the editor
   * audio-to-MIDI conversion uses a vendored Basic Pitch model path (`assets/models/basic-pitch`) for deployment stability
+  * conversion runtime prefers TensorFlow Node backend (`@tensorflow/tfjs-node`) for faster server-side processing
   * audio upload conversion runs as an async server job with progress reporting (`stage` + `0..1` progress) exposed via upload-job polling API
   * editor shows a dedicated conversion-progress window for long audio jobs, including live percentage and stage label
   * conversion-job progress is monotonic and includes heartbeat increments during long model-loading phases to prevent stale UI percentages
