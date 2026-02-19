@@ -114,6 +114,7 @@ The repository includes a lightweight browser editor for `level_draft.json` file
 - Use `Upload your file` to upload `MID/MIDI/WAV/MP3` from a popup:
   - `MID/MIDI` are saved in `MIDI/` and loaded automatically.
   - `WAV/MP3` are converted to MIDI, saved in `MIDI/`, then loaded automatically.
+  - The conversion workflow now lives in `tools/audio-midi-converter/` as a standalone-ready package, so it can be moved into a dedicated repository.
   - Conversion prefers TensorFlow Node backend (`@tensorflow/tfjs-node`) for faster processing.
   - Audio-to-MIDI conversion uses the vendored Basic Pitch model in `assets/models/basic-pitch/` (deployment-stable path).
   - Converted/saved files are created with collision-safe names (`name.mid`, `name_1.mid`, ...).
