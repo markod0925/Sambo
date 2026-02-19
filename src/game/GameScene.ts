@@ -259,6 +259,8 @@ interface SegmentEnemyPlan {
   triggered: boolean;
 }
 
+type LevelPlatform = LevelDefinition['platforms'][number];
+
 interface QueuedGridAudioEvent {
   gridIndex: number;
   direction: MovementDirection;
@@ -481,150 +483,7 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.setBounds(0, 0, this.worldWidth, 540);
 
     for (const platform of this.currentLevel.platforms) {
-      if (platform.kind === 'segment') {
-        const x = this.snapXToGrid(platform.x);
-        const y = this.snapYToGrid(platform.y);
-        const shape = this.add
-          .rectangle(x, y, this.snapLengthToGrid(platform.width), this.platformBlockHeight, COLORS.segmentFill, 0.9)
-          .setStrokeStyle(2, COLORS.segmentBorder, 0.9)
-          .setDepth(DEPTH_ENVIRONMENT);
-        this.segmentPlatforms.push({ shape, solid: true });
-      } else if (platform.kind === 'beat') {
-        const beat = this.add
-          .rectangle(
-            this.snapXToGrid(platform.x),
-            this.snapYToGrid(platform.y),
-            this.snapLengthToGrid(platform.width),
-            this.platformBlockHeight,
-            COLORS.beatFadeFill,
-            0.5
-          )
-          .setStrokeStyle(2, COLORS.beatFadeBorder, 0.65)
-          .setDepth(DEPTH_ENVIRONMENT);
-        this.beatPlatforms.push(beat);
-      } else if (platform.kind === 'alternateBeat') {
-        const alternateBeat = this.add
-          .rectangle(
-            this.snapXToGrid(platform.x),
-            this.snapYToGrid(platform.y),
-            this.snapLengthToGrid(platform.width),
-            this.platformBlockHeight,
-            COLORS.alternateFill,
-            0.85
-          )
-          .setStrokeStyle(2, COLORS.alternateBorder, 0.9)
-          .setDepth(DEPTH_ENVIRONMENT);
-        this.alternateBeatPlatforms.push(alternateBeat);
-      } else if (platform.kind === 'ghost') {
-        const ghost = this.add
-          .rectangle(
-            this.snapXToGrid(platform.x),
-            this.snapYToGrid(platform.y),
-            this.snapLengthToGrid(platform.width),
-            this.platformBlockHeight,
-            COLORS.ghostInactiveFill,
-            0.15
-          )
-          .setStrokeStyle(2, COLORS.ghostInactiveBorder, 0.4)
-          .setDepth(DEPTH_ENVIRONMENT);
-        this.ghostPlatforms.push(ghost);
-      } else if (platform.kind === 'reverseGhost') {
-        const reverseGhost = this.add
-          .rectangle(
-            this.snapXToGrid(platform.x),
-            this.snapYToGrid(platform.y),
-            this.snapLengthToGrid(platform.width),
-            this.platformBlockHeight,
-            COLORS.reverseGhostActiveFill,
-            0.85
-          )
-          .setStrokeStyle(2, COLORS.reverseGhostActiveBorder, 0.9)
-          .setDepth(DEPTH_ENVIRONMENT);
-        this.reverseGhostPlatforms.push(reverseGhost);
-      } else if (platform.kind === 'elevator') {
-        const elevator = this.add
-          .rectangle(
-            this.snapXToGrid(platform.x),
-            this.snapYToGrid(platform.y),
-            this.snapLengthToGrid(platform.width),
-            this.platformBlockHeight,
-            COLORS.elevatorFill,
-            0.9
-          )
-          .setStrokeStyle(2, COLORS.elevatorBorder, 0.9)
-          .setDepth(DEPTH_ENVIRONMENT);
-        this.elevatorPlatforms.push({ shape: elevator, baseY: elevator.y });
-      } else if (platform.kind === 'shuttle') {
-        const shuttle = this.add
-          .rectangle(
-            this.snapXToGrid(platform.x),
-            this.snapYToGrid(platform.y),
-            this.snapLengthToGrid(platform.width),
-            this.platformBlockHeight,
-            COLORS.elevatorFill,
-            0.9
-          )
-          .setStrokeStyle(2, COLORS.elevatorBorder, 0.9)
-          .setDepth(DEPTH_ENVIRONMENT);
-        this.shuttlePlatforms.push({ shape: shuttle, baseX: shuttle.x });
-      } else if (platform.kind === 'cross') {
-        const cross = this.add
-          .rectangle(
-            this.snapXToGrid(platform.x),
-            this.snapYToGrid(platform.y),
-            this.snapLengthToGrid(platform.width),
-            this.platformBlockHeight,
-            COLORS.elevatorFill,
-            0.9
-          )
-          .setStrokeStyle(2, COLORS.elevatorBorder, 0.9)
-          .setDepth(DEPTH_ENVIRONMENT);
-        this.crossPlatforms.push({ shape: cross, baseX: cross.x, baseY: cross.y });
-      } else if (platform.kind === 'spring') {
-        const spring = this.add
-          .rectangle(
-            this.snapXToGrid(platform.x),
-            this.snapYToGrid(platform.y),
-            this.snapLengthToGrid(platform.width),
-            this.platformBlockHeight,
-            COLORS.springFill,
-            0.9
-          )
-          .setStrokeStyle(2, COLORS.springBorder, 0.9)
-          .setDepth(DEPTH_ENVIRONMENT);
-        this.springPlatforms.push(spring);
-      } else if (platform.kind === 'hazard') {
-        const hazard = this.add
-          .rectangle(
-            this.snapXToGrid(platform.x),
-            this.snapYToGrid(platform.y),
-            this.snapLengthToGrid(platform.width),
-            this.platformBlockHeight,
-            COLORS.hazardNeutralFill,
-            0.9
-          )
-          .setStrokeStyle(2, COLORS.hazardNeutralBorder, 0.9)
-          .setDepth(DEPTH_ENVIRONMENT);
-        this.hazardPlatforms.push({ shape: hazard });
-      } else if (platform.kind === 'launch30' || platform.kind === 'launch60') {
-        const angleDeg = platform.kind === 'launch30' ? 30 : 60;
-        const x = this.snapXToGrid(platform.x);
-        const y = this.snapYToGrid(platform.y);
-        const width = this.snapLengthToGrid(platform.width);
-        const launch = this.add
-          .rectangle(x, y, width, this.platformBlockHeight, COLORS.launchFill, 0.9)
-          .setStrokeStyle(2, COLORS.launchBorder, 0.9)
-          .setDepth(DEPTH_ENVIRONMENT);
-        const lineLength = Math.max(12, width * 0.5);
-        const radians = Phaser.Math.DegToRad(angleDeg);
-        const dx = Math.cos(radians) * lineLength * 0.5;
-        const dy = Math.sin(radians) * lineLength * 0.5;
-        const guide = this.add
-          .line(x, y, -dx, dy, dx, -dy, COLORS.launchGuide, 0.95)
-          .setLineWidth(2, 2)
-          .setDepth(DEPTH_ENVIRONMENT + 0.05);
-        this.launchPlatforms.push({ kind: platform.kind, angleDeg, shape: launch, guide });
-      }
+      this.createPlatform(platform);
     }
     const initialNow = performance.now();
     this.syncElevatorPlatforms(initialNow);
@@ -714,6 +573,116 @@ export class GameScene extends Phaser.Scene {
     this.startAudioScheduler();
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.handleSceneShutdown());
     this.events.once(Phaser.Scenes.Events.DESTROY, () => this.handleSceneShutdown());
+  }
+
+  private createPlatform(platform: LevelPlatform): void {
+    switch (platform.kind) {
+      case 'segment': {
+        const shape = this.createPlatformRectangle(platform, COLORS.segmentFill, 0.9, COLORS.segmentBorder, 0.9);
+        this.segmentPlatforms.push({ shape, solid: true });
+        return;
+      }
+      case 'beat': {
+        const beat = this.createPlatformRectangle(platform, COLORS.beatFadeFill, 0.5, COLORS.beatFadeBorder, 0.65);
+        this.beatPlatforms.push(beat);
+        return;
+      }
+      case 'alternateBeat': {
+        const alternateBeat = this.createPlatformRectangle(platform, COLORS.alternateFill, 0.85, COLORS.alternateBorder, 0.9);
+        this.alternateBeatPlatforms.push(alternateBeat);
+        return;
+      }
+      case 'ghost': {
+        const ghost = this.createPlatformRectangle(platform, COLORS.ghostInactiveFill, 0.15, COLORS.ghostInactiveBorder, 0.4);
+        this.ghostPlatforms.push(ghost);
+        return;
+      }
+      case 'reverseGhost': {
+        const reverseGhost = this.createPlatformRectangle(
+          platform,
+          COLORS.reverseGhostActiveFill,
+          0.85,
+          COLORS.reverseGhostActiveBorder,
+          0.9
+        );
+        this.reverseGhostPlatforms.push(reverseGhost);
+        return;
+      }
+      case 'elevator': {
+        const elevator = this.createPlatformRectangle(platform, COLORS.elevatorFill, 0.9, COLORS.elevatorBorder, 0.9);
+        this.elevatorPlatforms.push({ shape: elevator, baseY: elevator.y });
+        return;
+      }
+      case 'shuttle': {
+        const shuttle = this.createPlatformRectangle(platform, COLORS.elevatorFill, 0.9, COLORS.elevatorBorder, 0.9);
+        this.shuttlePlatforms.push({ shape: shuttle, baseX: shuttle.x });
+        return;
+      }
+      case 'cross': {
+        const cross = this.createPlatformRectangle(platform, COLORS.elevatorFill, 0.9, COLORS.elevatorBorder, 0.9);
+        this.crossPlatforms.push({ shape: cross, baseX: cross.x, baseY: cross.y });
+        return;
+      }
+      case 'spring': {
+        const spring = this.createPlatformRectangle(platform, COLORS.springFill, 0.9, COLORS.springBorder, 0.9);
+        this.springPlatforms.push(spring);
+        return;
+      }
+      case 'hazard': {
+        const hazard = this.createPlatformRectangle(platform, COLORS.hazardNeutralFill, 0.9, COLORS.hazardNeutralBorder, 0.9);
+        this.hazardPlatforms.push({ shape: hazard });
+        return;
+      }
+      case 'launch30':
+      case 'launch60': {
+        this.createLaunchPlatform(platform);
+        return;
+      }
+      default: {
+        return;
+      }
+    }
+  }
+
+  private createPlatformRectangle(
+    platform: LevelPlatform,
+    fillColor: number,
+    fillAlpha: number,
+    strokeColor: number,
+    strokeAlpha: number
+  ): any {
+    return this.add
+      .rectangle(
+        this.snapXToGrid(platform.x),
+        this.snapYToGrid(platform.y),
+        this.snapLengthToGrid(platform.width),
+        this.platformBlockHeight,
+        fillColor,
+        fillAlpha
+      )
+      .setStrokeStyle(2, strokeColor, strokeAlpha)
+      .setDepth(DEPTH_ENVIRONMENT);
+  }
+
+  private createLaunchPlatform(platform: LevelPlatform): void {
+    const kind: LaunchPlatformKind = platform.kind === 'launch30' ? 'launch30' : 'launch60';
+    const angleDeg = kind === 'launch30' ? 30 : 60;
+    const x = this.snapXToGrid(platform.x);
+    const y = this.snapYToGrid(platform.y);
+    const width = this.snapLengthToGrid(platform.width);
+    const launch = this.add
+      .rectangle(x, y, width, this.platformBlockHeight, COLORS.launchFill, 0.9)
+      .setStrokeStyle(2, COLORS.launchBorder, 0.9)
+      .setDepth(DEPTH_ENVIRONMENT);
+    const lineLength = Math.max(12, width * 0.5);
+    const radians = Phaser.Math.DegToRad(angleDeg);
+    const dx = Math.cos(radians) * lineLength * 0.5;
+    const dy = Math.sin(radians) * lineLength * 0.5;
+    const guide = this.add
+      .line(x, y, -dx, dy, dx, -dy, COLORS.launchGuide, 0.95)
+      .setLineWidth(2, 2)
+      .setDepth(DEPTH_ENVIRONMENT + 0.05);
+    this.launchPlatforms.push({ kind, angleDeg, shape: launch, guide });
   }
 
   update(_time: number, delta: number): void {
