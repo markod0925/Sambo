@@ -4,6 +4,66 @@ import { createRequire } from 'node:module';
 
 const MIDI_EXTENSIONS = new Set(['.mid', '.midi']);
 const AUDIO_EXTENSIONS = new Set(['.wav', '.mp3']);
+const BASIC_PITCH_MODEL_SAMPLE_RATE = 22050;
+const BASIC_PITCH_MODEL_FFT_HOP = 256;
+const BASIC_PITCH_ANNOTATIONS_FPS = Math.floor(BASIC_PITCH_MODEL_SAMPLE_RATE / BASIC_PITCH_MODEL_FFT_HOP);
+const AUDIO_CONVERSION_PRESETS = {
+  accurate: {
+    noteSegmentationThreshold: 0.55,
+    modelConfidenceThreshold: 0.34,
+    minNoteLengthMs: 28,
+    minPitchHz: 55,
+    maxPitchHz: 3000,
+    midiTempo: 120,
+    energyTolerance: 9,
+    normalizeInput: false,
+    useModelAmplitudeVelocity: true,
+    targetPeak: 0.88,
+    targetRms: 0.08,
+    velocityBase: 0.48,
+    velocityRange: 0.52,
+    amplitudeExponent: 0.52,
+    volumeBoost: 1.5,
+    velocityFloor: 0.52
+  },
+  balanced: {
+    // Defaults aligned to the Basic Pitch web UI parameters requested by design.
+    noteSegmentationThreshold: 0.5,
+    modelConfidenceThreshold: 0.3,
+    minNoteLengthMs: 11,
+    minPitchHz: 0,
+    maxPitchHz: 3000,
+    midiTempo: 120,
+    energyTolerance: 11,
+    normalizeInput: false,
+    useModelAmplitudeVelocity: true,
+    targetPeak: 0.92,
+    targetRms: 0.09,
+    velocityBase: 0.5,
+    velocityRange: 0.5,
+    amplitudeExponent: 0.42,
+    volumeBoost: 1.5,
+    velocityFloor: 0.6
+  },
+  dense: {
+    noteSegmentationThreshold: 0.42,
+    modelConfidenceThreshold: 0.2,
+    minNoteLengthMs: 8,
+    minPitchHz: 0,
+    maxPitchHz: 3000,
+    midiTempo: 120,
+    energyTolerance: 13,
+    normalizeInput: true,
+    useModelAmplitudeVelocity: false,
+    targetPeak: 0.95,
+    targetRms: 0.1,
+    velocityBase: 0.52,
+    velocityRange: 0.48,
+    amplitudeExponent: 0.36,
+    volumeBoost: 1.55,
+    velocityFloor: 0.62
+  }
+};
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -23,6 +83,18 @@ function getExtension(value) {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function normalizeConversionPreset(value) {
+  const preset = String(value || '').trim().toLowerCase();
+  if (preset === 'dense' || preset === 'accurate') return preset;
+  return 'balanced';
+}
+
+function noteLengthMsToFrames(minNoteLengthMs) {
+  const safeMs = Math.max(0, toFiniteNumber(minNoteLengthMs, 11));
+  const frames = Math.round((safeMs / 1000) * BASIC_PITCH_ANNOTATIONS_FPS);
+  return Math.max(1, frames);
 }
 
 function toFiniteNumber(value, fallback = 0) {
@@ -60,6 +132,69 @@ function downmixToMono(audioBuffer) {
     }
   }
   return mono;
+}
+
+function resampleMonoSignal(samples, sourceSampleRate, targetSampleRate = BASIC_PITCH_MODEL_SAMPLE_RATE) {
+  const inputLength = Math.max(0, Number(samples?.length) || 0);
+  if (inputLength <= 0) return new Float32Array(0);
+  const srcRate = Math.max(1, Math.round(toFiniteNumber(sourceSampleRate, targetSampleRate)));
+  const dstRate = Math.max(1, Math.round(toFiniteNumber(targetSampleRate, BASIC_PITCH_MODEL_SAMPLE_RATE)));
+  if (srcRate === dstRate) return samples;
+
+  const outputLength = Math.max(1, Math.round((inputLength * dstRate) / srcRate));
+  const out = new Float32Array(outputLength);
+  const lastSourceIndex = inputLength - 1;
+
+  for (let i = 0; i < outputLength; i += 1) {
+    const sourcePosition = (i * srcRate) / dstRate;
+    const left = Math.floor(sourcePosition);
+    const right = Math.min(lastSourceIndex, left + 1);
+    const frac = sourcePosition - left;
+    const leftSample = toFiniteNumber(samples[left], 0);
+    const rightSample = toFiniteNumber(samples[right], 0);
+    out[i] = leftSample + (rightSample - leftSample) * frac;
+  }
+
+  return out;
+}
+
+function analyzeSignalLevels(samples) {
+  const length = Math.max(0, Number(samples?.length) || 0);
+  if (length <= 0) return { peak: 0, rms: 0 };
+  let peak = 0;
+  let sumSquares = 0;
+  for (let i = 0; i < length; i += 1) {
+    const sample = toFiniteNumber(samples[i], 0);
+    const magnitude = Math.abs(sample);
+    if (magnitude > peak) peak = magnitude;
+    sumSquares += sample * sample;
+  }
+  return {
+    peak,
+    rms: Math.sqrt(sumSquares / length)
+  };
+}
+
+function normalizeMonoSignal(samples, settings, stats = analyzeSignalLevels(samples)) {
+  const length = Math.max(0, Number(samples?.length) || 0);
+  if (length <= 0) return samples;
+  if (stats.peak <= 1e-6) return samples;
+
+  const targetPeak = clamp(toFiniteNumber(settings?.targetPeak, 0.92), 0.2, 0.99);
+  const targetRms = clamp(toFiniteNumber(settings?.targetRms, 0.09), 0.01, 0.3);
+  const maxGain = 8;
+  let gain = targetPeak / stats.peak;
+  if (stats.rms > 1e-6) {
+    gain = Math.max(gain, targetRms / stats.rms);
+  }
+  gain = clamp(gain, 1, maxGain);
+  if (Math.abs(gain - 1) < 1e-4) return samples;
+
+  const out = new Float32Array(length);
+  for (let i = 0; i < length; i += 1) {
+    out[i] = clamp(toFiniteNumber(samples[i], 0) * gain, -1, 1);
+  }
+  return out;
 }
 
 function normalizeModuleExports(moduleValue) {
@@ -291,6 +426,15 @@ export function createAudioToMidiConverter(config = {}) {
       throw new Error('Only WAV and MP3 can be converted to MIDI.');
     }
 
+    const conversionPreset = normalizeConversionPreset(options?.conversionPreset);
+    const presetSettings = AUDIO_CONVERSION_PRESETS[conversionPreset];
+    const minNoteLengthFrames = noteLengthMsToFrames(presetSettings.minNoteLengthMs);
+    const maxFreq = Number.isFinite(Number(presetSettings.maxPitchHz))
+      ? Math.max(0, Number(presetSettings.maxPitchHz))
+      : null;
+    const minPitchHz = Number(presetSettings.minPitchHz);
+    const minFreq = Number.isFinite(minPitchHz) && minPitchHz > 0 ? minPitchHz : null;
+
     reportProgress(options, 'Loading conversion model...', 0.04);
     const [{ default: decodeAudio }, basicPitchModule, toneMidiModule] = await Promise.all([
       import('audio-decode'),
@@ -312,7 +456,12 @@ export function createAudioToMidiConverter(config = {}) {
     const graphModel = await loadBasicPitchGraphModel(tf, options);
     const basicPitch = new BasicPitch(Promise.resolve(graphModel));
     const audioBuffer = await decodeAudio(Buffer.from(inputBuffer));
+    const sourceSampleRate = Math.max(1, Number(audioBuffer?.sampleRate) || BASIC_PITCH_MODEL_SAMPLE_RATE);
     const monoAudio = downmixToMono(audioBuffer);
+    const resampledMonoAudio = resampleMonoSignal(monoAudio, sourceSampleRate, BASIC_PITCH_MODEL_SAMPLE_RATE);
+    const normalizedMonoAudio = presetSettings.normalizeInput
+      ? normalizeMonoSignal(resampledMonoAudio, presetSettings)
+      : resampledMonoAudio;
     reportProgress(options, 'Audio decoded. Analyzing notes...', 0.58);
 
     const frames = [];
@@ -320,7 +469,7 @@ export function createAudioToMidiConverter(config = {}) {
     const contours = [];
 
     await basicPitch.evaluateModel(
-      monoAudio,
+      normalizedMonoAudio,
       (f, o, c) => {
         frames.push(...f);
         onsets.push(...o);
@@ -333,7 +482,18 @@ export function createAudioToMidiConverter(config = {}) {
     );
 
     reportProgress(options, 'Building MIDI events...', 0.92);
-    const rawNotes = outputToNotesPoly(frames, onsets, 0.25, 0.25, 5);
+    const rawNotes = outputToNotesPoly(
+      frames,
+      onsets,
+      presetSettings.modelConfidenceThreshold,
+      presetSettings.noteSegmentationThreshold,
+      minNoteLengthFrames,
+      true,
+      maxFreq,
+      minFreq,
+      true,
+      Math.max(1, Math.floor(toFiniteNumber(presetSettings.energyTolerance, 11)))
+    );
     const noteEvents = noteFramesToTime(addPitchBendsToNoteEvents(contours, rawNotes));
 
     if (!Array.isArray(noteEvents) || noteEvents.length === 0) {
@@ -341,16 +501,23 @@ export function createAudioToMidiConverter(config = {}) {
     }
 
     const midi = new Midi();
-    midi.header.setTempo(120);
+    midi.header.setTempo(clamp(toFiniteNumber(presetSettings.midiTempo, 120), 20, 300));
     const track = midi.addTrack();
 
     for (const note of noteEvents) {
       const pitch = clamp(Math.round(Number(note.pitchMidi) || 0), 0, 127);
       const time = Math.max(0, Number(note.startTimeSeconds) || 0);
       const duration = Math.max(0.02, Number(note.durationSeconds) || 0.02);
-      const amplitude = clamp(toFiniteNumber(note.amplitude, 0.35), 0, 1);
-      const liftedAmplitude = Math.pow(amplitude, 0.58);
-      const velocity = clamp(0.35 + liftedAmplitude * 0.65, 0.35, 1);
+      const amplitude = clamp(toFiniteNumber(note.amplitude, 0.4), 0, 1);
+      if (presetSettings.useModelAmplitudeVelocity) {
+        const velocity = clamp(amplitude, 0.01, 1);
+        track.addNote({ midi: pitch, time, duration, velocity });
+        continue;
+      }
+      const liftedAmplitude = Math.pow(amplitude, presetSettings.amplitudeExponent);
+      const baseVelocity = presetSettings.velocityBase + liftedAmplitude * presetSettings.velocityRange;
+      const boostedVelocity = baseVelocity * presetSettings.volumeBoost;
+      const velocity = clamp(boostedVelocity, presetSettings.velocityFloor, 1);
       track.addNote({ midi: pitch, time, duration, velocity });
     }
 

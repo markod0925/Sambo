@@ -260,6 +260,16 @@
         margin: 0 0 6px;
         font-size: 14px;
       }
+      .upload-midi-field {
+        margin: 8px 0;
+      }
+      .upload-midi-field label {
+        display: block;
+        margin: 0 0 4px;
+      }
+      .upload-midi-field select {
+        width: 100%;
+      }
       .conversion-progress-modal[hidden] { display: none; }
       .conversion-progress-modal {
         position: fixed;
@@ -464,6 +474,14 @@
       <div class="upload-midi-panel" role="dialog" aria-modal="true" aria-labelledby="uploadMidiTitle">
         <h3 id="uploadMidiTitle">Upload your file</h3>
         <p class="small">Supported formats: MID, MIDI, WAV, MP3</p>
+        <div class="upload-midi-field">
+          <label for="audioConversionPreset">Audio conversion preset (WAV/MP3 only)</label>
+          <select id="audioConversionPreset">
+            <option value="balanced">Balanced</option>
+            <option value="dense">Dense notes</option>
+            <option value="accurate">Accurate</option>
+          </select>
+        </div>
         <p id="uploadMidiStatus" class="small">Choose a file to upload.</p>
         <div class="button-row">
           <button id="chooseMidiUploadFile">Choose file</button>
@@ -508,6 +526,7 @@
       const uploadMidiModal = document.getElementById('uploadMidiModal');
       const uploadMidiBackdrop = document.getElementById('uploadMidiBackdrop');
       const uploadMidiStatusEl = document.getElementById('uploadMidiStatus');
+      const audioConversionPresetEl = document.getElementById('audioConversionPreset');
       const conversionProgressModal = document.getElementById('conversionProgressModal');
       const conversionProgressStatusEl = document.getElementById('conversionProgressStatus');
       const conversionProgressPercentEl = document.getElementById('conversionProgressPercent');
@@ -544,6 +563,9 @@
       const PREVIEW_RESPAWN_Y = 620;
       const PLATFORM_WIDTH = GRID_STEP * 2;
       const PLATFORM_BLOCK_HEIGHT = 18;
+      const EDITOR_MIDI_MASTER_GAIN = 0.48;
+      const EDITOR_MIDI_ATTACK_GAIN = 0.3;
+      const EDITOR_MIDI_SUSTAIN_GAIN = 0.24;
       const LAYOUT_WORLD_TOP = 80;
       const LAYOUT_WORLD_BOTTOM = 460;
       let midiFolderFiles = [];
@@ -663,6 +685,7 @@
         doneTimer: null,
         initialBpm: null,
         masterGain: null,
+        outputLimiter: null,
         schedulerTimer: null,
         playbackStartCtxTime: 0,
         scheduledNoteIndex: 0,
@@ -827,6 +850,12 @@
         return ext === 'wav' || ext === 'mp3';
       }
 
+      function getSelectedAudioConversionPreset() {
+        const raw = String(audioConversionPresetEl?.value || '').trim().toLowerCase();
+        if (raw === 'dense' || raw === 'accurate') return raw;
+        return 'balanced';
+      }
+
       async function pollUploadJobUntilDone(jobId) {
         const safeJobId = String(jobId || '').trim();
         if (!safeJobId) throw new Error('Missing upload job ID.');
@@ -862,15 +891,18 @@
 
       async function uploadAndLoadMidiFile(file) {
         const isAudio = isAudioUploadFileName(file?.name || '');
+        const conversionPreset = getSelectedAudioConversionPreset();
         appendDebugLog(`Selected file: ${file.name} (${file.type || 'unknown type'}, ${file.size} bytes)`);
         setUploadMidiStatus(isAudio ? 'Uploading and converting...' : 'Uploading...');
         appendDebugLog(isAudio ? 'Uploading audio file and converting to MIDI...' : 'Uploading MIDI file...');
+        if (isAudio) appendDebugLog(`Audio conversion preset: ${conversionPreset}`);
         if (isAudio) {
           setConversionProgressModalOpen(true);
           setConversionProgress('Uploading audio file...', 0.02);
         }
         const formData = new FormData();
         formData.append('upload', file, file.name);
+        formData.append('conversionPreset', conversionPreset);
         appendDebugLog('POST /api/upload-midi');
         const response = await fetch('/api/upload-midi', { method: 'POST', body: formData });
         appendDebugLog(`Upload response: HTTP ${response.status}`);
@@ -2087,6 +2119,14 @@
           }
           midiPlayback.masterGain = null;
         }
+        if (midiPlayback.outputLimiter) {
+          try {
+            midiPlayback.outputLimiter.disconnect();
+          } catch (_) {
+            // Already disconnected.
+          }
+          midiPlayback.outputLimiter = null;
+        }
         midiPlayback.scheduledNoteIndex = 0;
         midiPlayback.playbackStartCtxTime = 0;
         if (midiPlayback.isPlaying) setMidiStatus(`${midiPlayback.fileName || 'MIDI'} stopped`);
@@ -2110,9 +2150,17 @@
         const scheduleAheadSec = 0.22;
         const baseTime = ctx.currentTime + lookaheadSec;
         const masterGain = ctx.createGain();
-        masterGain.gain.setValueAtTime(0.22, baseTime);
-        masterGain.connect(ctx.destination);
+        masterGain.gain.setValueAtTime(EDITOR_MIDI_MASTER_GAIN, baseTime);
+        const outputLimiter = ctx.createDynamicsCompressor();
+        outputLimiter.threshold.setValueAtTime(-10, baseTime);
+        outputLimiter.knee.setValueAtTime(18, baseTime);
+        outputLimiter.ratio.setValueAtTime(7, baseTime);
+        outputLimiter.attack.setValueAtTime(0.004, baseTime);
+        outputLimiter.release.setValueAtTime(0.14, baseTime);
+        masterGain.connect(outputLimiter);
+        outputLimiter.connect(ctx.destination);
         midiPlayback.masterGain = masterGain;
+        midiPlayback.outputLimiter = outputLimiter;
         midiPlayback.playbackStartCtxTime = baseTime;
         midiPlayback.scheduledNoteIndex = 0;
 
@@ -2140,8 +2188,11 @@
               osc.frequency.setValueAtTime(midiToFrequency(note.midiNote), Math.max(startAt, now));
 
               gain.gain.setValueAtTime(0.0001, Math.max(startAt, now));
-              gain.gain.linearRampToValueAtTime(velocity * 0.16, Math.max(startAt, now) + 0.008);
-              gain.gain.setValueAtTime(velocity * 0.14, Math.max(startAt + 0.008, endAt - 0.018));
+              gain.gain.linearRampToValueAtTime(velocity * EDITOR_MIDI_ATTACK_GAIN, Math.max(startAt, now) + 0.008);
+              gain.gain.setValueAtTime(
+                velocity * EDITOR_MIDI_SUSTAIN_GAIN,
+                Math.max(startAt + 0.008, endAt - 0.018)
+              );
               gain.gain.linearRampToValueAtTime(0.0001, endAt);
 
               osc.connect(gain);

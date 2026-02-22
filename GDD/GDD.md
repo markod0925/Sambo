@@ -911,12 +911,25 @@ The project includes a browser editor at `/editor.html` for runtime-oriented lev
   * `Upload your file` popup accepts `MID`, `MIDI`, `WAV`, `MP3`
   * upload flow saves the resulting MIDI in `MIDI/` with collision-safe names (`name.mid`, `name_1.mid`, ...)
   * `WAV/MP3` uploads are converted to MIDI before save and then auto-loaded by the editor
+  * upload popup includes an `Audio conversion preset` selector for `WAV/MP3` (`Balanced`, `Dense notes`, `Accurate`)
   * audio-to-MIDI conversion uses a vendored Basic Pitch model path (`assets/models/basic-pitch`) for deployment stability
   * conversion runtime prefers TensorFlow Node backend (`@tensorflow/tfjs-node`) for faster server-side processing
+  * conversion now resamples decoded audio to `22050 Hz` before Basic Pitch inference to match the official model input contract
   * audio upload conversion runs as an async server job with progress reporting (`stage` + `0..1` progress) exposed via upload-job polling API
   * editor shows a dedicated conversion-progress window for long audio jobs, including live percentage and stage label
   * conversion-job progress is monotonic and includes heartbeat increments during long model-loading phases to prevent stale UI percentages
-  * converted-note velocity is normalized upward (dynamic-range lift) to avoid very low perceived playback volume in generated MIDI
+  * conversion applies mono auto-gain normalization before note inference, so quiet MP3/WAV sources are analyzed with a stable level
+  * Basic Pitch note extraction is aligned to official parameter order (`onsetThreshold`, `frameThreshold`, `minNoteLen`) and supports frequency bounds
+  * default (`Balanced`) conversion parameters mirror the current Basic Pitch web defaults used by this project:
+    * `noteSegmentation=0.50` (mapped to `frameThreshold`)
+    * `modelConfidenceThreshold=0.30` (mapped to `onsetThreshold`)
+    * `minimumPitch=0 Hz`
+    * `maximumPitch=3000 Hz`
+    * `minimumNoteLength=11 ms` (converted to model frames internally)
+    * `midiTempo=120`
+  * `Balanced` / `Accurate` presets keep MIDI velocity directly aligned to Basic Pitch note amplitude; `Dense notes` keeps an additional velocity lift profile
+  * optional input normalization + aggressive velocity lift are applied only to the `Dense notes` preset (not to `Balanced` defaults)
+  * editor MIDI preview playback uses a louder gain stage plus output limiter/compressor to keep converted tracks clearly audible without hard clipping
   * upload/conversion lifecycle writes timestamped entries to the `Debug` box (selection, request start, HTTP response, save/load success, and failures)
   * segment count is derived from MIDI duration and current default BPM fallback at generation time (`2 beats` per segment)
   * segment BPM values are auto-seeded from MIDI tempo changes (tempo map timeline)

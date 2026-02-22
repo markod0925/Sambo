@@ -572,6 +572,7 @@ Editor controls should use the same hard-edged UI language used by runtime overl
 * `Upload your file` opens a centered modal with:
   * dark backdrop overlay to preserve focus on upload flow
   * panel title (`Upload your file`), supported-format hint (`MID, MIDI, WAV, MP3`), and concise status line
+  * an `Audio conversion preset (WAV/MP3 only)` dropdown with options `Balanced`, `Dense notes`, `Accurate`
   * two equal-width actions (`Choose file`, `Close`) matching existing hard-edged button style
 * Audio conversion progress uses a separate centered progress window:
   * title (`Converting audio to MIDI`)

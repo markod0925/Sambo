@@ -96,6 +96,12 @@ function clampProgress(value) {
   return Math.max(0, Math.min(1, safe));
 }
 
+function sanitizeConversionPreset(value) {
+  const preset = String(value || '').trim().toLowerCase();
+  if (preset === 'dense' || preset === 'accurate') return preset;
+  return 'balanced';
+}
+
 function createUploadJob(sourceType, fileName = '') {
   const id = crypto.randomUUID();
   const now = Date.now();
@@ -202,6 +208,7 @@ function parseMidiUploadBody(req) {
     }
 
     let upload = null;
+    let conversionPreset = 'balanced';
     let settled = false;
     const fail = (message, statusCode = 400) => {
       if (settled) return;
@@ -257,6 +264,11 @@ function parseMidiUploadBody(req) {
       fail('Invalid multipart upload payload');
     });
 
+    parser.on('field', (fieldName, fieldValue) => {
+      if (fieldName !== 'conversionPreset') return;
+      conversionPreset = sanitizeConversionPreset(fieldValue);
+    });
+
     parser.on('finish', () => {
       if (settled) return;
       if (!upload) {
@@ -272,7 +284,10 @@ function parseMidiUploadBody(req) {
         return;
       }
       settled = true;
-      resolve(upload);
+      resolve({
+        ...upload,
+        conversionPreset
+      });
     });
 
     req.pipe(parser);
@@ -411,9 +426,14 @@ http
 
           (async () => {
             try {
-              updateUploadJob(job.id, { stage: 'Preparing audio conversion...', progress: 0.03 });
+              const conversionPreset = sanitizeConversionPreset(upload.conversionPreset);
+              updateUploadJob(job.id, {
+                stage: `Preparing audio conversion (${conversionPreset} preset)...`,
+                progress: 0.03
+              });
               const existingMidiNames = new Set(fs.readdirSync(midiDir).filter(isMidiFile));
               const convertedUpload = await convertUploadToMidi(upload, existingMidiNames, {
+                conversionPreset,
                 onProgress: ({ stage, progress }) => {
                   updateUploadJob(job.id, {
                     stage,
@@ -455,7 +475,9 @@ http
         const existingMidiNames = new Set(fs.readdirSync(midiDir).filter(isMidiFile));
         let convertedUpload;
         try {
-          convertedUpload = await convertUploadToMidi(upload, existingMidiNames);
+          convertedUpload = await convertUploadToMidi(upload, existingMidiNames, {
+            conversionPreset: sanitizeConversionPreset(upload.conversionPreset)
+          });
         } catch (err) {
           const statusCode = err && typeof err === 'object' && 'statusCode' in err ? Number(err.statusCode) : 422;
           sendJson(res, Number.isFinite(statusCode) ? statusCode : 422, {
