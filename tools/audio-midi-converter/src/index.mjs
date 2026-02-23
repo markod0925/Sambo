@@ -16,6 +16,7 @@ const AUDIO_CONVERSION_PRESETS = {
     maxPitchHz: 3000,
     midiTempo: 120,
     energyTolerance: 9,
+    melodiaTrick: true,
     normalizeInput: false,
     useModelAmplitudeVelocity: true,
     targetPeak: 0.88,
@@ -27,14 +28,15 @@ const AUDIO_CONVERSION_PRESETS = {
     velocityFloor: 0.52
   },
   balanced: {
-    // Defaults aligned to the Basic Pitch web UI parameters requested by design.
-    noteSegmentationThreshold: 0.5,
-    modelConfidenceThreshold: 0.3,
-    minNoteLengthMs: 11,
+    // Tuned to closely match the project reference transcription.
+    noteSegmentationThreshold: 0.31,
+    modelConfidenceThreshold: 0.355,
+    minNoteLengthMs: 24,
     minPitchHz: 0,
     maxPitchHz: 3000,
     midiTempo: 120,
     energyTolerance: 11,
+    melodiaTrick: false,
     normalizeInput: false,
     useModelAmplitudeVelocity: true,
     targetPeak: 0.92,
@@ -53,6 +55,7 @@ const AUDIO_CONVERSION_PRESETS = {
     maxPitchHz: 3000,
     midiTempo: 120,
     energyTolerance: 13,
+    melodiaTrick: true,
     normalizeInput: true,
     useModelAmplitudeVelocity: false,
     targetPeak: 0.95,
@@ -491,7 +494,7 @@ export function createAudioToMidiConverter(config = {}) {
       true,
       maxFreq,
       minFreq,
-      true,
+      presetSettings.melodiaTrick !== false,
       Math.max(1, Math.floor(toFiniteNumber(presetSettings.energyTolerance, 11)))
     );
     const noteEvents = noteFramesToTime(addPitchBendsToNoteEvents(contours, rawNotes));

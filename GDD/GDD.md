@@ -920,13 +920,14 @@ The project includes a browser editor at `/editor.html` for runtime-oriented lev
   * conversion-job progress is monotonic and includes heartbeat increments during long model-loading phases to prevent stale UI percentages
   * conversion applies mono auto-gain normalization before note inference, so quiet MP3/WAV sources are analyzed with a stable level
   * Basic Pitch note extraction is aligned to official parameter order (`onsetThreshold`, `frameThreshold`, `minNoteLen`) and supports frequency bounds
-  * default (`Balanced`) conversion parameters mirror the current Basic Pitch web defaults used by this project:
-    * `noteSegmentation=0.50` (mapped to `frameThreshold`)
-    * `modelConfidenceThreshold=0.30` (mapped to `onsetThreshold`)
+  * default (`Balanced`) conversion parameters are tuned against `MIDI/python_official/basic_pitch_transcription.mid` to keep exports practically aligned with the reference:
+    * `noteSegmentation=0.31` (mapped to `frameThreshold`)
+    * `modelConfidenceThreshold=0.355` (mapped to `onsetThreshold`)
     * `minimumPitch=0 Hz`
     * `maximumPitch=3000 Hz`
-    * `minimumNoteLength=11 ms` (converted to model frames internally)
+    * `minimumNoteLength=24 ms` (converted to model frames internally)
     * `midiTempo=120`
+    * `melodiaTrick=false`
   * `Balanced` / `Accurate` presets keep MIDI velocity directly aligned to Basic Pitch note amplitude; `Dense notes` keeps an additional velocity lift profile
   * optional input normalization + aggressive velocity lift are applied only to the `Dense notes` preset (not to `Balanced` defaults)
   * editor MIDI preview playback uses a louder gain stage plus output limiter/compressor to keep converted tracks clearly audible without hard clipping
