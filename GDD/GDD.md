@@ -939,10 +939,12 @@ The project includes a browser editor at `/editor.html` for runtime-oriented lev
   * if no generated `static` segment covers spawn, a fallback spawn-support segment is injected immediately left of spawn (its right edge aligns to spawn)
   * default platform width is 2 horizontal grid cells
   * each segment is fixed to 2 beats and generates exactly 1 platform slot
-  * platform kind generation is now stateful (sequence-aware) instead of independent per segment:
-    * weighted sampling still uses deterministic seed rolls
-    * generation keeps a low blank-slot probability and applies rhythm-density weighting for static vs dynamic kinds
-  * hard pattern constraints in default generation:
+  * platform kind generation uses a deterministic, sequence-aware motif system:
+    * generation samples from a curated catalog of short puzzle-like motifs (`2-4` slots each), not only independent per-slot picks
+    * each motif defines ordered kind preferences per step and flow contracts (`entry/exit`) used for motif-to-motif compatibility
+    * motif selection is weighted by segment energy, rhythm density, motif complexity, deterministic seed roll, and short reuse cooldown
+    * if a motif cannot be placed safely under current constraints, generation falls back to per-slot weighted sampling for that position
+  * hard constraints are enforced globally on every chosen slot (motif or fallback):
     * `beat` cannot be followed by `beat` or `alternateBeat`
     * `alternateBeat` cannot be followed by `beat` or `alternateBeat`
     * timed-platform runs (`beat`, `alternateBeat`, `ghost`, `reverseGhost`) are capped at 2 in a row
@@ -952,6 +954,10 @@ The project includes a browser editor at `/editor.html` for runtime-oriented lev
       * `low`: `segment`, `beat`, `alternateBeat`, `elevator`
       * `medium`: `low` set + `ghost`, `reverseGhost`, `shuttle`, `cross`, `spring`
       * `high`: full kind set (includes `hazard`, `launch30`, `launch60`)
+  * generated segment templates expose broader allowed kinds per energy:
+    * `low`: `static`, `beat`, `alternateBeat`, `elevator`
+    * `medium`: `low` set + `ghost`, `reverseGhost`, `shuttle`, `cross`, `spring`
+    * `high`: `medium` set + `hazard`, `launch30`, `launch60`
   * each generated platform picks a random vertical level between `vertical_min` and `vertical_max`
   * generation avoids overlapping placements while building the lane
   * when generating from loaded MIDI, runtime appends a fixed 3-step static ascent at vertical levels `3 -> 5 -> 7` after authored/generated segment slots to preserve moon reachability

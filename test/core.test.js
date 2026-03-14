@@ -401,8 +401,7 @@ test('energy classification and segment generation follow templates', () => {
   const segments = generateSegments({ bpm: 120, energy_curve: [0.1, 0.2, 0.5, 0.6, 0.8, 0.9] }, 2);
   assert.equal(segments.length, 3);
   assert.deepEqual(segments[0].platformTypes, ['static', 'beat', 'alternateBeat', 'elevator']);
-  assert.deepEqual(segments[1].platformTypes, ['static', 'beat', 'alternateBeat', 'ghost', 'reverseGhost', 'elevator']);
-  assert.deepEqual(segments[2].platformTypes, [
+  assert.deepEqual(segments[1].platformTypes, [
     'static',
     'beat',
     'alternateBeat',
@@ -413,6 +412,48 @@ test('energy classification and segment generation follow templates', () => {
     'cross',
     'spring'
   ]);
+  assert.deepEqual(segments[2].platformTypes, [
+    'static',
+    'beat',
+    'alternateBeat',
+    'ghost',
+    'reverseGhost',
+    'elevator',
+    'shuttle',
+    'cross',
+    'spring',
+    'hazard',
+    'launch30',
+    'launch60'
+  ]);
+});
+
+test('platform kind sequence uses diverse puzzle motifs on high-energy inputs', () => {
+  const sequence = generatePlatformKindSequence(
+    Array.from({ length: 120 }, () => ({
+      energyState: 'high',
+      platformTypes: [
+        'static',
+        'beat',
+        'alternateBeat',
+        'ghost',
+        'reverseGhost',
+        'elevator',
+        'shuttle',
+        'cross',
+        'spring',
+        'hazard',
+        'launch30',
+        'launch60'
+      ],
+      rhythmDensity: 0.9
+    })),
+    31
+  );
+  const used = new Set(sequence.filter((kind) => kind !== null && kind !== 'segment'));
+  assert.ok(used.size >= 6);
+  assert.ok(used.has('hazard'));
+  assert.ok(used.has('launch30') || used.has('launch60'));
 });
 
 test('platform kind sequence applies energy gate to high-complexity kinds', () => {
