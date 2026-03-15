@@ -1,0 +1,741 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sambo - Pattern Editor</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #05070f;
+        --surface: #0c1322;
+        --surface-2: #121a2b;
+        --text: #d7e2ff;
+        --text-dim: #9db6de;
+        --ink: #05070f;
+        --border: #1b2a45;
+        --border-2: #3a4663;
+        --accent-warm: #f4d35e;
+        --accent-cool: #4cc9f0;
+        --accent-danger: #ff6b6b;
+      }
+      * {
+        box-sizing: border-box;
+        font-family: monospace;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: 340px 1fr;
+        min-height: 100vh;
+      }
+      .panel {
+        background: var(--surface);
+        border-right: 1px solid var(--border);
+        padding: 14px;
+        overflow-y: auto;
+      }
+      .panel h1 {
+        margin: 0 0 10px;
+        font-size: 18px;
+      }
+      .panel-box {
+        border: 1px solid var(--border-2);
+        background: var(--surface-2);
+        border-radius: 10px;
+        padding: 10px;
+        margin-top: 10px;
+      }
+      .panel-box h3 {
+        margin: 0 0 8px;
+        font-size: 14px;
+      }
+      label {
+        display: block;
+        color: var(--text-dim);
+        font-size: 12px;
+        margin-top: 8px;
+      }
+      input,
+      select,
+      button {
+        width: 100%;
+        margin-top: 6px;
+        padding: 9px 10px;
+        border: 1px solid var(--border-2);
+        background: #1b2a45;
+        color: var(--text);
+      }
+      button {
+        cursor: pointer;
+      }
+      button:hover {
+        border-color: var(--accent-cool);
+        background: var(--accent-cool);
+        color: var(--ink);
+      }
+      #backToLevelEditor,
+      #saveCatalog {
+        background: var(--accent-warm);
+        color: var(--ink);
+        border-color: #e8bf39;
+      }
+      #saveCatalog:hover,
+      #backToLevelEditor:hover {
+        background: #f8de82;
+        border-color: #f8de82;
+      }
+      #deletePattern {
+        background: var(--accent-danger);
+        color: var(--ink);
+        border-color: #ff8585;
+      }
+      #deletePattern:hover {
+        background: #ff8585;
+      }
+      .button-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+      }
+      .button-row-3 {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 6px;
+      }
+      .main {
+        padding: 14px;
+        overflow-y: auto;
+      }
+      .workspace-box {
+        border: 1px solid var(--border-2);
+        background: var(--surface);
+        border-radius: 10px;
+        padding: 12px;
+      }
+      .workspace-box h2 {
+        margin: 0 0 6px;
+        font-size: 16px;
+      }
+      .small {
+        color: var(--text-dim);
+        font-size: 12px;
+      }
+      .canvas-wrap {
+        margin-top: 10px;
+        border: 1px solid var(--border);
+        background: #0b0f1a;
+        border-radius: 8px;
+        padding: 8px;
+      }
+      #patternCanvas {
+        width: 100%;
+        height: 340px;
+        display: block;
+        border: 1px solid var(--border);
+        background: #10192d;
+      }
+      .palette {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: 6px;
+        margin-top: 8px;
+      }
+      .token-btn {
+        padding: 8px 6px;
+        font-size: 12px;
+      }
+      .token-btn.active {
+        border-color: #f8de82;
+        box-shadow: inset 0 0 0 1px #f8de82;
+      }
+      .meta-grid {
+        margin-top: 10px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+      .meta-cell {
+        border: 1px solid var(--border);
+        background: #0f182c;
+        padding: 8px;
+      }
+      .meta-cell strong {
+        display: block;
+        color: var(--text-dim);
+        font-size: 11px;
+      }
+      .status {
+        margin-top: 10px;
+        min-height: 18px;
+        font-size: 12px;
+        color: var(--text-dim);
+      }
+      .status.error {
+        color: var(--accent-danger);
+      }
+      .status.ok {
+        color: var(--accent-cool);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="panel">
+        <h1>Pattern Editor</h1>
+        <button id="backToLevelEditor">Back to Level Editor</button>
+        <section class="panel-box">
+          <h3>Catalog</h3>
+          <label for="patternSelect">Pattern</label>
+          <select id="patternSelect"></select>
+          <div class="button-row-3">
+            <button id="reloadPatterns">Reload</button>
+            <button id="addPattern">Add</button>
+            <button id="duplicatePattern">Duplicate</button>
+          </div>
+          <button id="deletePattern">Delete Pattern</button>
+        </section>
+        <section class="panel-box">
+          <h3>Pattern Settings</h3>
+          <label for="patternKind">Pattern type</label>
+          <select id="patternKind">
+            <option value="flow1d">flow1d</option>
+            <option value="micro2d">micro2d</option>
+          </select>
+          <label for="patternEnergy">Energy hint</label>
+          <select id="patternEnergy">
+            <option value="low">low</option>
+            <option value="medium">medium</option>
+            <option value="high">high</option>
+          </select>
+          <label for="patternWeight">Weight</label>
+          <input id="patternWeight" type="number" step="0.0001" min="0.0001" value="1" />
+          <div class="button-row">
+            <div>
+              <label for="gridWidth">Grid width</label>
+              <input id="gridWidth" type="number" min="3" max="16" value="6" />
+            </div>
+            <div>
+              <label for="gridHeight">Grid height</label>
+              <input id="gridHeight" type="number" min="1" max="6" value="3" />
+            </div>
+          </div>
+          <button id="applyGridSize">Apply Grid Size</button>
+        </section>
+        <section class="panel-box">
+          <h3>Actions</h3>
+          <button id="savePattern">Save Pattern (recompute constraints)</button>
+          <div class="button-row">
+            <button id="saveCatalog">Save Catalog</button>
+            <button id="downloadCatalog">Download JSON</button>
+          </div>
+          <p class="small">Constraints are always auto-generated when a pattern is saved.</p>
+        </section>
+      </aside>
+      <main class="main">
+        <section class="workspace-box">
+          <h2>Token Minimap</h2>
+          <p class="small">
+            Click to paint the selected token. Right-click paints `gap`.
+            For `flow1d`, height is locked to one row.
+          </p>
+          <div id="tokenPalette" class="palette"></div>
+          <div class="canvas-wrap">
+            <canvas id="patternCanvas" width="960" height="340"></canvas>
+          </div>
+          <div class="meta-grid">
+            <div class="meta-cell"><strong>Pattern ID</strong><span id="metaPatternId">-</span></div>
+            <div class="meta-cell"><strong>maxGapRun</strong><span id="metaMaxGapRun">-</span></div>
+            <div class="meta-cell"><strong>minSegmentBeforeLaunch</strong><span id="metaMinSegmentBeforeLaunch">-</span></div>
+            <div class="meta-cell"><strong>Source Breakdown</strong><span id="metaSourceBreakdown">-</span></div>
+          </div>
+          <p id="statusLine" class="status" aria-live="polite"></p>
+        </section>
+      </main>
+    </div>
+
+    <script type="module">
+      const TOKEN_ORDER = ['segment', 'gap', 'timed', 'mobile', 'hazard', 'launch'];
+      const TOKEN_LABEL = {
+        segment: 'segment',
+        gap: 'gap',
+        timed: 'timed',
+        mobile: 'mobile',
+        hazard: 'hazard',
+        launch: 'launch'
+      };
+      const TOKEN_COLOR = {
+        segment: '#415277',
+        gap: '#0d1424',
+        timed: '#f4d35e',
+        mobile: '#4cc9f0',
+        hazard: '#ff6b6b',
+        launch: '#95d5b2'
+      };
+      const DEFAULT_SOURCE = { vglc: 0, mario: 0, opensurge: 0, supertux: 0 };
+
+      const backBtn = document.getElementById('backToLevelEditor');
+      const reloadBtn = document.getElementById('reloadPatterns');
+      const addBtn = document.getElementById('addPattern');
+      const duplicateBtn = document.getElementById('duplicatePattern');
+      const deleteBtn = document.getElementById('deletePattern');
+      const savePatternBtn = document.getElementById('savePattern');
+      const saveCatalogBtn = document.getElementById('saveCatalog');
+      const downloadBtn = document.getElementById('downloadCatalog');
+      const patternSelect = document.getElementById('patternSelect');
+      const kindSelect = document.getElementById('patternKind');
+      const energySelect = document.getElementById('patternEnergy');
+      const weightInput = document.getElementById('patternWeight');
+      const gridWidthInput = document.getElementById('gridWidth');
+      const gridHeightInput = document.getElementById('gridHeight');
+      const applyGridBtn = document.getElementById('applyGridSize');
+      const canvas = document.getElementById('patternCanvas');
+      const ctx = canvas.getContext('2d');
+      const tokenPalette = document.getElementById('tokenPalette');
+      const statusLine = document.getElementById('statusLine');
+      const metaPatternId = document.getElementById('metaPatternId');
+      const metaMaxGapRun = document.getElementById('metaMaxGapRun');
+      const metaMinSegmentBeforeLaunch = document.getElementById('metaMinSegmentBeforeLaunch');
+      const metaSourceBreakdown = document.getElementById('metaSourceBreakdown');
+
+      let patterns = [];
+      let currentIndex = -1;
+      let activeToken = 'segment';
+      let workingGrid = [['segment', 'segment', 'segment', 'segment', 'segment', 'segment']];
+
+      function setStatus(message, type = '') {
+        statusLine.textContent = String(message || '');
+        statusLine.className = `status ${type}`.trim();
+      }
+
+      function deepClone(value) {
+        return JSON.parse(JSON.stringify(value));
+      }
+
+      function safeToken(value) {
+        const token = String(value || '').trim().toLowerCase();
+        return TOKEN_ORDER.includes(token) ? token : 'segment';
+      }
+
+      function normalizeFlowTokens(tokens) {
+        const row = Array.isArray(tokens) ? tokens.filter((entry) => typeof entry === 'string') : [];
+        const out = row.map(safeToken).slice(0, 16);
+        while (out.length < 3) out.push('segment');
+        return out;
+      }
+
+      function normalizeMicroTokens(tokens) {
+        const rows = Array.isArray(tokens) ? tokens : [];
+        const normalizedRows = rows
+          .filter((row) => Array.isArray(row))
+          .map((row) => row.map(safeToken).slice(0, 16))
+          .slice(0, 6);
+        const width = Math.max(3, normalizedRows.reduce((max, row) => Math.max(max, row.length), 0) || 6);
+        for (const row of normalizedRows) {
+          while (row.length < width) row.push('gap');
+        }
+        while (normalizedRows.length < 3) {
+          const fill = new Array(width).fill(normalizedRows.length === 2 ? 'segment' : 'gap');
+          normalizedRows.push(fill);
+        }
+        return normalizedRows;
+      }
+
+      function toGrid(pattern) {
+        if (pattern.kind === 'flow1d') return [normalizeFlowTokens(pattern.tokens)];
+        return normalizeMicroTokens(pattern.tokens);
+      }
+
+      function fromGrid(kind, grid) {
+        if (kind === 'flow1d') return normalizeFlowTokens(grid[0] || []);
+        return normalizeMicroTokens(grid);
+      }
+
+      function computeConstraints(kind, tokens) {
+        const flat = kind === 'flow1d' ? [...tokens] : tokens.flat();
+        let maxGapRun = 0;
+        let gapRun = 0;
+        let minSegmentBeforeLaunch = 1;
+        let segmentLead = 0;
+        for (const token of flat) {
+          if (token === 'gap') {
+            gapRun += 1;
+            maxGapRun = Math.max(maxGapRun, gapRun);
+          } else {
+            gapRun = 0;
+          }
+          if (token === 'segment') {
+            segmentLead += 1;
+          } else if (token === 'launch') {
+            minSegmentBeforeLaunch = Math.max(minSegmentBeforeLaunch, segmentLead || 1);
+            segmentLead = 0;
+          } else {
+            segmentLead = 0;
+          }
+        }
+        return {
+          maxGapRun: Math.max(1, maxGapRun || 1),
+          minSegmentBeforeLaunch: Math.max(1, minSegmentBeforeLaunch || 1)
+        };
+      }
+
+      function sourceBreakdownText(source) {
+        const src = source && typeof source === 'object' ? source : DEFAULT_SOURCE;
+        return `vglc=${src.vglc}, mario=${src.mario}, opensurge=${src.opensurge}, supertux=${src.supertux}`;
+      }
+
+      function makePatternId() {
+        let max = 0;
+        for (const pattern of patterns) {
+          const match = String(pattern.patternId || '').match(/^p(\d{1,})$/i);
+          if (!match) continue;
+          max = Math.max(max, Number(match[1]) || 0);
+        }
+        return `p${String(max + 1).padStart(3, '0')}`;
+      }
+
+      function repaintPalette() {
+        for (const btn of tokenPalette.querySelectorAll('button')) {
+          btn.classList.toggle('active', btn.dataset.token === activeToken);
+        }
+      }
+
+      function initPalette() {
+        tokenPalette.innerHTML = '';
+        for (const token of TOKEN_ORDER) {
+          const btn = document.createElement('button');
+          btn.className = 'token-btn';
+          btn.type = 'button';
+          btn.dataset.token = token;
+          btn.textContent = TOKEN_LABEL[token];
+          btn.style.borderColor = TOKEN_COLOR[token];
+          btn.style.background = TOKEN_COLOR[token];
+          btn.style.color = token === 'gap' ? '#d7e2ff' : '#05070f';
+          btn.onclick = () => {
+            activeToken = token;
+            repaintPalette();
+          };
+          tokenPalette.appendChild(btn);
+        }
+        repaintPalette();
+      }
+
+      function drawGrid() {
+        const rows = workingGrid.length;
+        const cols = workingGrid[0]?.length || 1;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const pad = 14;
+        const cellW = Math.floor((canvas.width - pad * 2) / Math.max(1, cols));
+        const cellH = Math.floor((canvas.height - pad * 2) / Math.max(1, rows));
+        const offsetX = Math.floor((canvas.width - cellW * cols) * 0.5);
+        const offsetY = Math.floor((canvas.height - cellH * rows) * 0.5);
+
+        for (let y = 0; y < rows; y++) {
+          for (let x = 0; x < cols; x++) {
+            const token = safeToken(workingGrid[y][x]);
+            const left = offsetX + x * cellW;
+            const top = offsetY + y * cellH;
+            ctx.fillStyle = TOKEN_COLOR[token];
+            ctx.fillRect(left + 1, top + 1, cellW - 2, cellH - 2);
+            ctx.strokeStyle = '#223357';
+            ctx.strokeRect(left + 0.5, top + 0.5, cellW - 1, cellH - 1);
+            ctx.fillStyle = token === 'gap' ? '#9db6de' : '#05070f';
+            ctx.font = `${Math.max(10, Math.floor(cellH * 0.28))}px monospace`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(token[0].toUpperCase(), left + cellW / 2, top + cellH / 2);
+          }
+        }
+
+        canvas.dataset.offsetX = String(offsetX);
+        canvas.dataset.offsetY = String(offsetY);
+        canvas.dataset.cellW = String(cellW);
+        canvas.dataset.cellH = String(cellH);
+        canvas.dataset.cols = String(cols);
+        canvas.dataset.rows = String(rows);
+      }
+
+      function renderPatternList(selectedId = '') {
+        const previous = selectedId || patterns[currentIndex]?.patternId || '';
+        patternSelect.innerHTML = '';
+        patterns.forEach((pattern, index) => {
+          const option = document.createElement('option');
+          option.value = String(index);
+          option.textContent = `${pattern.patternId} | ${pattern.kind} | ${pattern.energyHint}`;
+          if (pattern.patternId === previous) option.selected = true;
+          patternSelect.appendChild(option);
+        });
+        const chosen = Number(patternSelect.value);
+        if (Number.isFinite(chosen) && chosen >= 0 && chosen < patterns.length) {
+          currentIndex = chosen;
+        } else {
+          currentIndex = patterns.length > 0 ? 0 : -1;
+        }
+      }
+
+      function renderMeta(pattern) {
+        if (!pattern) return;
+        metaPatternId.textContent = pattern.patternId || '-';
+        const constraints = pattern.constraints || { maxGapRun: 1, minSegmentBeforeLaunch: 1 };
+        metaMaxGapRun.textContent = String(constraints.maxGapRun);
+        metaMinSegmentBeforeLaunch.textContent = String(constraints.minSegmentBeforeLaunch);
+        metaSourceBreakdown.textContent = sourceBreakdownText(pattern.sourceBreakdown);
+      }
+
+      function loadPatternIntoEditor(index) {
+        if (!Number.isFinite(index) || index < 0 || index >= patterns.length) return;
+        currentIndex = index;
+        const pattern = patterns[index];
+        kindSelect.value = pattern.kind;
+        energySelect.value = pattern.energyHint || 'medium';
+        weightInput.value = String(Number(pattern.weight) || 1);
+        workingGrid = toGrid(pattern);
+        gridWidthInput.value = String(workingGrid[0]?.length || 6);
+        gridHeightInput.value = String(pattern.kind === 'flow1d' ? 1 : workingGrid.length);
+        gridHeightInput.disabled = pattern.kind === 'flow1d';
+        renderMeta(pattern);
+        drawGrid();
+      }
+
+      function applyGridResize() {
+        const kind = kindSelect.value;
+        const targetCols = Math.max(3, Math.min(16, Math.floor(Number(gridWidthInput.value) || 6)));
+        const targetRows = kind === 'flow1d' ? 1 : Math.max(2, Math.min(6, Math.floor(Number(gridHeightInput.value) || 3)));
+        const next = [];
+        for (let y = 0; y < targetRows; y++) {
+          const row = [];
+          for (let x = 0; x < targetCols; x++) {
+            const prev = workingGrid[y]?.[x];
+            row.push(prev ? safeToken(prev) : y === targetRows - 1 ? 'segment' : 'gap');
+          }
+          next.push(row);
+        }
+        workingGrid = next;
+        gridWidthInput.value = String(targetCols);
+        gridHeightInput.value = String(targetRows);
+        drawGrid();
+      }
+
+      function ensureCurrentPattern() {
+        if (currentIndex < 0 || currentIndex >= patterns.length) return null;
+        return patterns[currentIndex];
+      }
+
+      function saveCurrentPattern() {
+        const pattern = ensureCurrentPattern();
+        if (!pattern) return;
+        const kind = kindSelect.value === 'micro2d' ? 'micro2d' : 'flow1d';
+        const tokens = fromGrid(kind, workingGrid);
+        const constraints = computeConstraints(kind, tokens);
+        pattern.kind = kind;
+        pattern.energyHint = ['low', 'medium', 'high'].includes(energySelect.value) ? energySelect.value : 'medium';
+        pattern.weight = Math.max(0.0001, Number(weightInput.value) || 1);
+        pattern.tokens = tokens;
+        pattern.constraints = constraints;
+        if (!pattern.sourceBreakdown || typeof pattern.sourceBreakdown !== 'object') pattern.sourceBreakdown = { ...DEFAULT_SOURCE };
+        renderPatternList(pattern.patternId);
+        patternSelect.value = String(currentIndex);
+        renderMeta(pattern);
+        setStatus('Pattern saved. Constraints recalculated.', 'ok');
+      }
+
+      function toSerializableCatalog() {
+        return patterns.map((pattern, index) => {
+          const kind = pattern.kind === 'micro2d' ? 'micro2d' : 'flow1d';
+          const tokens = kind === 'flow1d' ? normalizeFlowTokens(pattern.tokens) : normalizeMicroTokens(pattern.tokens);
+          return {
+            patternId: typeof pattern.patternId === 'string' && pattern.patternId ? pattern.patternId : `p${String(index + 1).padStart(3, '0')}`,
+            kind,
+            tokens,
+            weight: Math.max(0.0001, Number(pattern.weight) || 1),
+            sourceBreakdown: {
+              vglc: Math.max(0, Number(pattern.sourceBreakdown?.vglc) || 0),
+              mario: Math.max(0, Number(pattern.sourceBreakdown?.mario) || 0),
+              opensurge: Math.max(0, Number(pattern.sourceBreakdown?.opensurge) || 0),
+              supertux: Math.max(0, Number(pattern.sourceBreakdown?.supertux) || 0)
+            },
+            energyHint: ['low', 'medium', 'high'].includes(pattern.energyHint) ? pattern.energyHint : 'medium',
+            constraints: computeConstraints(kind, tokens)
+          };
+        });
+      }
+
+      function addNewPattern(fromCurrent = false) {
+        const base = fromCurrent && ensureCurrentPattern() ? deepClone(ensureCurrentPattern()) : null;
+        const pattern = {
+          patternId: makePatternId(),
+          kind: base?.kind || 'flow1d',
+          tokens: base?.tokens || ['segment', 'segment', 'timed', 'segment', 'mobile', 'segment'],
+          weight: Math.max(0.0001, Number(base?.weight) || 1),
+          sourceBreakdown: deepClone(base?.sourceBreakdown || DEFAULT_SOURCE),
+          energyHint: base?.energyHint || 'medium',
+          constraints: { maxGapRun: 1, minSegmentBeforeLaunch: 1 }
+        };
+        pattern.constraints = computeConstraints(pattern.kind, pattern.kind === 'flow1d' ? normalizeFlowTokens(pattern.tokens) : normalizeMicroTokens(pattern.tokens));
+        patterns.push(pattern);
+        renderPatternList(pattern.patternId);
+        loadPatternIntoEditor(currentIndex);
+        setStatus(fromCurrent ? 'Pattern duplicated.' : 'Pattern added.', 'ok');
+      }
+
+      async function loadPatterns() {
+        setStatus('Loading patterns...');
+        try {
+          const response = await fetch('/api/patterns');
+          if (!response.ok) throw new Error(`Unable to load patterns (${response.status})`);
+          const payload = await response.json();
+          const rows = Array.isArray(payload?.patterns) ? payload.patterns : [];
+          patterns = rows.map((entry, index) => ({
+            patternId: typeof entry.patternId === 'string' && entry.patternId ? entry.patternId : `p${String(index + 1).padStart(3, '0')}`,
+            kind: entry.kind === 'micro2d' ? 'micro2d' : 'flow1d',
+            tokens: entry.kind === 'micro2d' ? normalizeMicroTokens(entry.tokens) : normalizeFlowTokens(entry.tokens),
+            weight: Math.max(0.0001, Number(entry.weight) || 1),
+            sourceBreakdown: {
+              vglc: Math.max(0, Number(entry.sourceBreakdown?.vglc) || 0),
+              mario: Math.max(0, Number(entry.sourceBreakdown?.mario) || 0),
+              opensurge: Math.max(0, Number(entry.sourceBreakdown?.opensurge) || 0),
+              supertux: Math.max(0, Number(entry.sourceBreakdown?.supertux) || 0)
+            },
+            energyHint: ['low', 'medium', 'high'].includes(entry.energyHint) ? entry.energyHint : 'medium',
+            constraints: entry.constraints || { maxGapRun: 1, minSegmentBeforeLaunch: 1 }
+          }));
+          if (patterns.length === 0) addNewPattern(false);
+          renderPatternList();
+          loadPatternIntoEditor(currentIndex >= 0 ? currentIndex : 0);
+          setStatus(`Loaded ${patterns.length} patterns.`, 'ok');
+        } catch (err) {
+          setStatus(err instanceof Error ? err.message : 'Unable to load patterns.', 'error');
+        }
+      }
+
+      async function saveCatalog() {
+        saveCurrentPattern();
+        const payload = { patterns: toSerializableCatalog() };
+        try {
+          const response = await fetch('/api/save-patterns', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok || !data?.ok) {
+            throw new Error(data?.error || `Unable to save catalog (${response.status})`);
+          }
+          await loadPatterns();
+          setStatus(`Catalog saved (${data.count} patterns).`, 'ok');
+        } catch (err) {
+          setStatus(err instanceof Error ? err.message : 'Unable to save catalog.', 'error');
+        }
+      }
+
+      function downloadCatalog() {
+        saveCurrentPattern();
+        const serialized = toSerializableCatalog();
+        const blob = new Blob([`${JSON.stringify(serialized, null, 2)}\n`], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'runtime_patterns_v1.json';
+        a.click();
+        URL.revokeObjectURL(url);
+        setStatus('Catalog downloaded.', 'ok');
+      }
+
+      function canvasToCell(event) {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        const px = (event.clientX - rect.left) * scaleX;
+        const py = (event.clientY - rect.top) * scaleY;
+
+        const offsetX = Number(canvas.dataset.offsetX || 0);
+        const offsetY = Number(canvas.dataset.offsetY || 0);
+        const cellW = Number(canvas.dataset.cellW || 1);
+        const cellH = Number(canvas.dataset.cellH || 1);
+        const cols = Number(canvas.dataset.cols || 1);
+        const rows = Number(canvas.dataset.rows || 1);
+        if (!cellW || !cellH) return null;
+        const x = Math.floor((px - offsetX) / cellW);
+        const y = Math.floor((py - offsetY) / cellH);
+        if (x < 0 || y < 0 || x >= cols || y >= rows) return null;
+        return { x, y };
+      }
+
+      function paintCell(event, token) {
+        const cell = canvasToCell(event);
+        if (!cell) return;
+        if (!workingGrid[cell.y]) return;
+        workingGrid[cell.y][cell.x] = token;
+        drawGrid();
+      }
+
+      backBtn.onclick = () => {
+        if (typeof window !== 'undefined') window.location.href = '/editor.html';
+      };
+      reloadBtn.onclick = () => loadPatterns();
+      addBtn.onclick = () => addNewPattern(false);
+      duplicateBtn.onclick = () => addNewPattern(true);
+      deleteBtn.onclick = () => {
+        if (patterns.length <= 1) {
+          setStatus('At least one pattern is required.', 'error');
+          return;
+        }
+        const removed = patterns.splice(currentIndex, 1)[0];
+        renderPatternList();
+        loadPatternIntoEditor(Math.max(0, Math.min(currentIndex, patterns.length - 1)));
+        setStatus(`Pattern ${removed.patternId} deleted.`, 'ok');
+      };
+      savePatternBtn.onclick = () => saveCurrentPattern();
+      saveCatalogBtn.onclick = () => saveCatalog();
+      downloadBtn.onclick = () => downloadCatalog();
+      applyGridBtn.onclick = () => {
+        applyGridResize();
+        setStatus('Grid size applied.');
+      };
+
+      patternSelect.onchange = () => {
+        const index = Number(patternSelect.value);
+        if (!Number.isFinite(index)) return;
+        loadPatternIntoEditor(index);
+        setStatus('Pattern loaded.');
+      };
+
+      kindSelect.onchange = () => {
+        const newKind = kindSelect.value === 'micro2d' ? 'micro2d' : 'flow1d';
+        if (newKind === 'flow1d') {
+          const sourceRow = workingGrid[workingGrid.length - 1] || workingGrid[0] || [];
+          workingGrid = [normalizeFlowTokens(sourceRow)];
+          gridHeightInput.value = '1';
+          gridHeightInput.disabled = true;
+        } else {
+          const row = normalizeFlowTokens(workingGrid[0] || []);
+          workingGrid = [
+            new Array(row.length).fill('gap'),
+            [...row],
+            new Array(row.length).fill('segment')
+          ];
+          gridHeightInput.disabled = false;
+          gridHeightInput.value = String(workingGrid.length);
+        }
+        gridWidthInput.value = String(workingGrid[0]?.length || 6);
+        drawGrid();
+      };
+
+      canvas.addEventListener('mousedown', (event) => {
+        if (event.button === 2) return;
+        paintCell(event, activeToken);
+      });
+      canvas.addEventListener('contextmenu', (event) => {
+        event.preventDefault();
+        paintCell(event, 'gap');
+      });
+
+      initPalette();
+      loadPatterns();
+    </script>
+  </body>
+</html>

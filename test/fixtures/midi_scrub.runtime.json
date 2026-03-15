@@ -1,0 +1,69 @@
+{
+  "midiPlayback": {
+    "ppq": 480,
+    "songEndTick": 1920,
+    "tempoPoints": [
+      {
+        "tick": 0,
+        "usPerQuarter": 500000
+      }
+    ],
+    "notes": [
+      {
+        "startTick": 0,
+        "endTick": 480,
+        "pitch": 60,
+        "velocity": 100,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 480,
+        "endTick": 960,
+        "pitch": 64,
+        "velocity": 100,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 960,
+        "endTick": 1440,
+        "pitch": 67,
+        "velocity": 100,
+        "trackId": 0,
+        "channel": 0
+      },
+      {
+        "startTick": 1440,
+        "endTick": 1920,
+        "pitch": 72,
+        "velocity": 100,
+        "trackId": 0,
+        "channel": 0
+      }
+    ]
+  },
+  "tempoMap": [
+    {
+      "startColumn": 0,
+      "bpm": 120
+    }
+  ],
+  "gridColumns": 4,
+  "notes": [
+    261.63,
+    329.63,
+    392,
+    523.25
+  ],
+  "platforms": [
+    {
+      "kind": "segment",
+      "x": 120,
+      "y": 405,
+      "width": 74,
+      "height": 18
+    }
+  ],
+  "segmentEnemies": []
+}

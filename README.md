@@ -59,6 +59,7 @@ npm run start
 Then open:
 - Game (Start Screen): `http://localhost:4173/`
 - Direct level start still supported: `http://localhost:4173/?level=1`, `http://localhost:4173/?level=2`
+- Pattern Editor: `http://localhost:4173/pattern-editor.html`
 - Built files are served from the project root (`dist/` after TypeScript build).
 
 ### Start Screen
@@ -92,6 +93,7 @@ Commands in CLI mode:
 npm run build   # compile TypeScript to dist/
 npm run check   # type-check (no emit)
 npm run test    # build + node test runner
+npm run build:patterns  # rebuild abstract pattern catalog (50 patterns)
 ```
 
 ---
@@ -107,6 +109,7 @@ The repository includes a lightweight browser editor for `level_draft.json` file
    ```
 2. Open:
    - `http://localhost:4173/editor.html`
+   - `http://localhost:4173/pattern-editor.html` (pattern authoring scene)
 
 ### What you can do in the editor
 - Load a draft JSON (`{ "segments": [...], "midi_file": "track.mid" }`) from your machine.
@@ -142,6 +145,26 @@ The repository includes a lightweight browser editor for `level_draft.json` file
   - If a MIDI file has been loaded, the editor stores its filename in `midi_file` (the binary MIDI is not embedded in JSON).
   - Runtime save uses sampled notes from the loaded MIDI when available; otherwise it generates fallback notes from segment energy.
   - Level-related JSON output is written to `Levels/`.
+- Inspect the active runtime pattern trace in-editor (`Pattern Runtime Trace` panel):
+  - random pattern picks by segment index (`patternId`, energy hint, weight, length)
+  - aggregated usage stats per pattern (`picks`, `segmentsCovered`, `avgWeight`)
+  - generated token stream
+  - mapped kinds and final constrained kinds
+
+### Pattern editor (`/pattern-editor.html`)
+
+- Loads existing runtime patterns from `assets/procgen/runtime_patterns_v1.json`.
+- Lets you browse, edit, duplicate, delete, and add patterns.
+- Supports explicit selectors for:
+  - pattern type (`flow1d` / `micro2d`)
+  - energy hint (`low` / `medium` / `high`)
+- Provides a token minimap canvas for direct token painting (`segment`, `gap`, `timed`, `mobile`, `hazard`, `launch`).
+- `Save Pattern` recomputes constraints automatically from the edited tokens:
+  - `maxGapRun`
+  - `minSegmentBeforeLaunch`
+- `Save Catalog` persists JSON and regenerates TS mirror:
+  - `assets/procgen/runtime_patterns_v1.json`
+  - `src/core/patternCatalog.ts`
 
 ### Suggested workflow with audio analysis script
 1. Generate draft data from a WAV file:
@@ -158,12 +181,37 @@ Optional BPM override:
 python scripts/audio_to_level.py --input path/to/track.wav --output-dir data --bpm 128
 ```
 
+### Rebuild the pattern catalog
+
+The project ships a versioned abstract catalog at `assets/procgen/runtime_patterns_v1.json` and a TS mirror used by runtime generation (`src/core/patternCatalog.ts`).
+
+To rebuild from corpus roots:
+
+```bash
+node scripts/build-patterns.mjs \
+  --vglc-root /path/to/TheVGLC \
+  --mario-root /path/to/Mario-AI-Framework \
+  --opensurge-root /path/to/opensurge \
+  --supertux-root /path/to/supertux-addons \
+  --output assets/procgen/runtime_patterns_v1.json \
+  --ts-out src/core/patternCatalog.ts \
+  --target-count 50
+```
+
+Notes:
+- The script writes only abstracted pattern tokens and source statistics (no raw map extracts).
+- If roots are omitted, it attempts common local defaults (`/tmp/...` and `third_party/...`).
+- Runtime generation now picks predefined patterns pseudo-randomly from energy-scoped pools.
+
 ---
 
 ## Project structure (quick map)
 - `src/game/GameScene.ts` - Phaser scene and gameplay loop.
 - `src/core/*` - metronome, movement, intensity, platforms, enemies, generator logic.
+- `src/core/patternCatalog.ts` - generated TS mirror of abstract pattern catalog.
 - `editor.html` - level draft editor.
+- `pattern-editor.html` - standalone pattern authoring scene.
 - `scripts/audio_to_level.py` - WAV analysis + level draft generation.
+- `scripts/build-patterns.mjs` - corpus mining and abstract pattern catalog builder.
 - `scripts/serve.mjs` - static local HTTP server used by `npm run start`.
 - `GDD/GDD.md` - high-level design document.

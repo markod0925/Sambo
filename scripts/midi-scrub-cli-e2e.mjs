@@ -186,11 +186,21 @@ function runScenarioForLevel(levelPath) {
 }
 
 function listRuntimeLevelPaths() {
-  const entries = fs.readdirSync(LEVELS_DIR, { withFileTypes: true });
-  return entries
-    .filter((entry) => entry.isFile() && entry.name.endsWith('.runtime.json'))
-    .map((entry) => path.join(LEVELS_DIR, entry.name))
-    .sort();
+  const paths = [];
+  if (fs.existsSync(LEVELS_DIR)) {
+    const entries = fs.readdirSync(LEVELS_DIR, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      if (!entry.name.endsWith('.runtime.json')) continue;
+      paths.push(path.join(LEVELS_DIR, entry.name));
+    }
+  }
+  if (paths.length > 0) return paths.sort();
+
+  // Test fallback when workspace has no authored runtime levels.
+  const fallbackFixture = path.resolve(__dirname, '..', 'test', 'fixtures', 'midi_scrub.runtime.json');
+  if (fs.existsSync(fallbackFixture)) return [fallbackFixture];
+  return [];
 }
 
 function main() {

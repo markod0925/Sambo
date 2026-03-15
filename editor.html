@@ -89,6 +89,15 @@
         color: var(--ink);
         border-color: #e8bf39;
       }
+      #openPatternEditor {
+        background: var(--accent-cool);
+        color: var(--ink);
+        border-color: #7edcf7;
+      }
+      #openPatternEditor:hover {
+        background: #7edcf7;
+        border-color: #a5ebff;
+      }
       #backToGameStart:hover,
       #exportRuntime:hover,
       #playMidi:hover {
@@ -328,6 +337,19 @@
       .debug-log-line.success {
         color: var(--accent-cool);
       }
+      .pattern-trace-output {
+        margin-top: 8px;
+        max-height: 260px;
+        overflow: auto;
+        border: 1px solid var(--border);
+        background: #0b0f1a;
+        padding: 6px;
+        box-sizing: border-box;
+        color: var(--text-dim);
+        font-size: 11px;
+        line-height: 1.35;
+        white-space: pre;
+      }
       button, input, select, textarea { font-family: inherit; }
     </style>
   </head>
@@ -336,6 +358,7 @@
       <div class="panel">
         <h1>Level Draft Editor</h1>
         <button id="backToGameStart">Back to Game</button>
+        <button id="openPatternEditor">Open Pattern Editor</button>
         <section class="panel-box">
           <h3>MIDI</h3>
           <label for="midiFolderSelect">MIDI files available in <code>MIDI/</code></label>
@@ -402,6 +425,11 @@
           <p class="small">Upload and conversion diagnostics.</p>
           <button id="clearDebugLog">Clear debug log</button>
           <div id="debugLogPanel" class="debug-log-panel" aria-live="polite"></div>
+        </section>
+        <section class="panel-box">
+          <h3>Pattern Runtime Trace</h3>
+          <p class="small">Shows random pattern picks and resulting kinds for the latest generated layout pass.</p>
+          <pre id="patternTraceOutput" class="pattern-trace-output" aria-live="polite"></pre>
         </section>
       </div>
       <div class="main">
@@ -511,7 +539,7 @@
       import { Metronome } from '/dist/src/core/metronome.js';
       import { BeatSnapMover } from '/dist/src/core/beatMovement.js';
       import { resolveIntent } from '/dist/src/core/input.js';
-      import { generatePlatformKindSequence } from '/dist/src/core/levelGenerator.js';
+      import { generatePlatformKindSequenceWithTrace } from '/dist/src/core/levelGenerator.js';
       import { DEFAULT_REFERENCE_BPM, DEFAULT_TEMPO_SMOOTHING_BPM_PER_SECOND, stepTempoToward } from '/dist/src/core/tempo.js';
 
       const rowsEl = document.getElementById('rows');
@@ -536,6 +564,7 @@
       const runtimeBpmInput = document.getElementById('runtimeBpm');
       const runtimeAudioQualityModeInput = document.getElementById('runtimeAudioQualityMode');
       const runtimeGridColumnsAutoEl = document.getElementById('runtimeGridColumnsAuto');
+      const patternTraceOutputEl = document.getElementById('patternTraceOutput');
       const qualityModeSelect = document.getElementById('qualityMode');
       const layoutEditorCanvas = document.getElementById('layoutEditorCanvas');
       const layoutEditorContainer = layoutEditorCanvas ? layoutEditorCanvas.closest('.level-layout-editor') : null;
@@ -555,7 +584,7 @@
       const PREVIEW_PLAYER_HEART_OFFSET_X = -2;
       const PREVIEW_PLAYER_HEART_OFFSET_Y = -2;
       const PREVIEW_PLAYER_STEP_SUBDIVISIONS = 4;
-      const PREVIEW_PLAYER_SPEED_MULTIPLIER = 2.2;
+      const PREVIEW_PLAYER_SPEED_MULTIPLIER = 4.4;
       const PREVIEW_PLAYER_SNAP_STEP_X = GAME_PLAYER_UNITS_PER_BEAT * PREVIEW_PLAYER_SPEED_MULTIPLIER;
       const PREVIEW_JUMP_VELOCITY = -560;
       const PREVIEW_GRAVITY = 1400;
@@ -573,6 +602,7 @@
       let runtimeGridColumns = 29;
       let generatedLayoutSeed = 1;
       let customRuntimePlatforms = null;
+      let lastPatternRuntimeTrace = null;
       let platformClipboard = [];
       const layoutEditorState = {
         cameraX: 0,
@@ -820,6 +850,154 @@
       function clearDebugLog() {
         if (!debugLogPanelEl) return;
         debugLogPanelEl.innerHTML = '';
+      }
+
+      function toTraceNumber(value, digits = 3) {
+        const n = Number(value);
+        if (!Number.isFinite(n)) return '0';
+        return n.toFixed(digits);
+      }
+
+      function toTraceKindLabel(kind) {
+        return kind === null ? 'gap' : String(kind);
+      }
+
+      function formatTraceTokenSequence(label, tokens, maxItems = 96) {
+        const safeTokens = Array.isArray(tokens)
+          ? tokens.map((token) => (token === null ? 'gap' : String(token ?? 'segment')))
+          : [];
+        const slice = safeTokens.slice(0, maxItems);
+        const suffix = safeTokens.length > maxItems ? ` ... (+${safeTokens.length - maxItems})` : '';
+        return `${label}: ${slice.join(' ')}${suffix}`;
+      }
+
+      function buildPatternUsageRows(trace) {
+        if (Array.isArray(trace?.patternUsage) && trace.patternUsage.length > 0) {
+          return {
+            rows: trace.patternUsage,
+            derived: false
+          };
+        }
+
+        const picks = Array.isArray(trace?.patternPicks) ? trace.patternPicks : [];
+        if (picks.length <= 0) {
+          return {
+            rows: [],
+            derived: false
+          };
+        }
+
+        const usageMap = new Map();
+        for (const pick of picks) {
+          const patternId = String(pick?.patternId || 'unknown');
+          const stat = usageMap.get(patternId) || { picks: 0, segmentsCovered: 0, weightTotal: 0 };
+          stat.picks += 1;
+          stat.segmentsCovered += Math.max(1, Math.floor(Number(pick?.length) || 1));
+          stat.weightTotal += Number(pick?.weight) || 0;
+          usageMap.set(patternId, stat);
+        }
+
+        const rows = [...usageMap.entries()]
+          .map(([patternId, stat]) => ({
+            patternId,
+            picks: stat.picks,
+            segmentsCovered: stat.segmentsCovered,
+            avgWeight: stat.weightTotal / Math.max(1, stat.picks)
+          }))
+          .sort((a, b) => {
+            if (b.picks !== a.picks) return b.picks - a.picks;
+            if (b.segmentsCovered !== a.segmentsCovered) return b.segmentsCovered - a.segmentsCovered;
+            return String(a.patternId).localeCompare(String(b.patternId));
+          });
+
+        return {
+          rows,
+          derived: true
+        };
+      }
+
+      function renderPatternTraceOutput() {
+        if (!patternTraceOutputEl) return;
+        const lines = [];
+        if (!lastPatternRuntimeTrace) {
+          // Keep trace debug available also when manual layout is active.
+          buildRuntimePlatforms();
+        }
+        if (!lastPatternRuntimeTrace) {
+          lines.push('No pattern trace yet.');
+          lines.push('Load a level or MIDI to generate runtime platforms.');
+          patternTraceOutputEl.textContent = lines.join('\n');
+          return;
+        }
+
+        const trace = lastPatternRuntimeTrace;
+        lines.push(
+          `seed=${trace.seed} mode=${trace.mode || 'pattern-random'} layoutMode=${
+            Array.isArray(customRuntimePlatforms) ? 'manual-layout-active' : 'generated-layout-active'
+          }`
+        );
+        lines.push(
+          `constraints: maxStaticRun=${trace.constraints.maxStaticRun} maxTimedRun=${trace.constraints.maxTimedRun} minSegmentsBetweenLaunches=${trace.constraints.minSegmentsBetweenLaunches}`
+        );
+        lines.push(`segments=${trace.finalKinds.length}`);
+        lines.push('');
+
+        const pools = trace.patternPoolSizes || {};
+        lines.push(
+          `pattern pools: low=${Math.max(0, Math.floor(Number(pools.low) || 0))} medium=${Math.max(
+            0,
+            Math.floor(Number(pools.medium) || 0)
+          )} high=${Math.max(0, Math.floor(Number(pools.high) || 0))}`
+        );
+        lines.push('');
+
+        lines.push('pattern picks timeline:');
+        const pickRows = Array.isArray(trace.patternPicks) ? trace.patternPicks : [];
+        if (pickRows.length > 0) {
+          for (const pick of pickRows.slice(0, 30)) {
+            lines.push(
+              `  i=${pick.segmentIndex} pattern=${pick.patternId} hint=${pick.energyHint} len=${pick.length} weight=${toTraceNumber(pick.weight)}`
+            );
+          }
+          if (pickRows.length > 30) lines.push(`  ... (+${pickRows.length - 30})`);
+        } else {
+          lines.push('  (none)');
+        }
+        lines.push('');
+
+        const usageInfo = buildPatternUsageRows(trace);
+        lines.push(usageInfo.derived ? 'pattern usage stats (derived from picks):' : 'pattern usage stats:');
+        const usageRows = usageInfo.rows;
+        const usedPatternCount = usageRows.reduce((count, row) => count + (Number(row?.picks) > 0 ? 1 : 0), 0);
+        lines.push(`  used=${usedPatternCount}/${usageRows.length}`);
+        if (usageRows.length > 0) {
+          for (const row of usageRows.slice(0, 80)) {
+            lines.push(
+              `  ${row.patternId} picks=${Math.max(0, Math.floor(Number(row.picks) || 0))} segments=${Math.max(
+                0,
+                Math.floor(Number(row.segmentsCovered) || 0)
+              )} avgWeight=${toTraceNumber(row.avgWeight)}`
+            );
+          }
+          if (usageRows.length > 80) lines.push(`  ... (+${usageRows.length - 80})`);
+        } else {
+          lines.push('  (none)');
+        }
+        lines.push('');
+
+        lines.push(formatTraceTokenSequence('tokens', trace.tokens));
+        lines.push(formatTraceTokenSequence('mappedKinds', trace.mappedKinds));
+        lines.push('');
+        lines.push('final kind by segment index:');
+        const finalKinds = Array.isArray(trace.finalKinds) ? trace.finalKinds : [];
+        if (finalKinds.length > 0) {
+          for (let i = 0; i < Math.min(64, finalKinds.length); i++) {
+            lines.push(`  [${i}] final=${toTraceKindLabel(finalKinds[i])}`);
+          }
+          if (finalKinds.length > 64) lines.push(`  ... (+${finalKinds.length - 64})`);
+        }
+
+        patternTraceOutputEl.textContent = lines.join('\n');
       }
 
       function setUploadMidiStatus(text) {
@@ -2084,6 +2262,7 @@
           midi_file: midiPlayback.fileName,
           segments
         };
+        lastPatternRuntimeTrace = null;
       }
 
       function getAudioContext() {
@@ -2390,6 +2569,7 @@
         model = nextModel;
         customRuntimePlatforms = Array.isArray(rawLevel?.platforms) ? clonePlatforms(rawLevel.platforms) : null;
         generatedLayoutSeed = Date.now() + Math.floor(Math.random() * 1000000);
+        lastPatternRuntimeTrace = null;
         clearSelection();
         stopLayoutSelectionInteractions();
         closeLayoutContextMenu();
@@ -2527,7 +2707,7 @@
               : 0.5
           };
         });
-        const generatedKinds = generatePlatformKindSequence(generatorSegments, generatedLayoutSeed, {
+        const generatedResult = generatePlatformKindSequenceWithTrace(generatorSegments, generatedLayoutSeed, {
           enableEnergyGate: true,
           maxStaticRun: 3,
           maxTimedRun: 2,
@@ -2539,6 +2719,8 @@
             ['alternateBeat', 'alternateBeat']
           ]
         });
+        const generatedKinds = Array.isArray(generatedResult?.kinds) ? generatedResult.kinds : [];
+        lastPatternRuntimeTrace = generatedResult?.trace || null;
 
         for (let i = 0; i < sorted.length; i++) {
           const seg = sorted[i];
@@ -3038,6 +3220,7 @@
           counts.high || 0
         } | selected platforms: ${selectedIndices.length} | clipboard: ${platformClipboard.length} | tempo zones: ${tempoZones.length}`;
         renderLayoutEditor();
+        renderPatternTraceOutput();
       }
 
       function normalizeModel(raw) {
@@ -3080,6 +3263,9 @@
 
       document.getElementById('backToGameStart').onclick = () => {
         if (typeof window !== 'undefined') window.location.href = '/';
+      };
+      document.getElementById('openPatternEditor').onclick = () => {
+        if (typeof window !== 'undefined') window.location.href = '/pattern-editor.html';
       };
 
       document.getElementById('exportRuntime').onclick = async () => {

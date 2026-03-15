@@ -1,4 +1,7 @@
 import { EnergyState, Segment } from './types.js';
+import { RUNTIME_PATTERN_CATALOG } from './patternCatalog.js';
+
+type PatternToken = 'segment' | 'gap' | 'timed' | 'mobile' | 'hazard' | 'launch';
 
 export interface AnalysisData {
   bpm: number;
@@ -7,35 +10,43 @@ export interface AnalysisData {
 
 export type RuntimePlatformKind = Exclude<Segment['platformTypes'][number], 'static'> | 'segment';
 
-export interface KindSequenceRules {
-  enableEnergyGate?: boolean;
-  maxStaticRun?: number;
-  maxTimedRun?: number;
-  minSegmentsBetweenLaunches?: number;
-  forbidPairs?: Array<[RuntimePlatformKind, RuntimePlatformKind]>;
-}
-
 export interface PatternSegmentInput {
   energyState: EnergyState;
   platformTypes: Segment['platformTypes'];
   rhythmDensity: number;
 }
 
-type PatternFlowTag = 'safe' | 'timed' | 'rewind' | 'mobile' | 'utility' | 'hazard' | 'launch';
-
-interface PatternStep {
-  kinds: Array<RuntimePlatformKind | null>;
+export interface PatternSelectionTrace {
+  seed: number;
+  mode: 'pattern-random';
+  constraints: Required<KindSequenceRules>;
+  patternPoolSizes: Record<EnergyState, number>;
+  patternPicks: Array<{
+    segmentIndex: number;
+    patternId: string;
+    energyHint: EnergyState;
+    weight: number;
+    length: number;
+  }>;
+  patternUsage: Array<{
+    patternId: string;
+    picks: number;
+    segmentsCovered: number;
+    avgWeight: number;
+  }>;
+  tokens: PatternToken[];
+  mappedKinds: Array<RuntimePlatformKind | null>;
+  finalKinds: Array<RuntimePlatformKind | null>;
 }
 
-interface PatternTemplate {
-  id: string;
-  weight: number;
-  energies: EnergyState[];
-  minDensity: number;
-  maxDensity: number;
-  entry: PatternFlowTag;
-  exit: PatternFlowTag;
-  steps: PatternStep[];
+export type { PatternToken };
+
+export interface KindSequenceRules {
+  enableEnergyGate?: boolean;
+  maxStaticRun?: number;
+  maxTimedRun?: number;
+  minSegmentsBetweenLaunches?: number;
+  forbidPairs?: Array<[RuntimePlatformKind, RuntimePlatformKind]>;
 }
 
 export const defaultKindSequenceRules: Required<KindSequenceRules> = {
@@ -51,8 +62,12 @@ export const defaultKindSequenceRules: Required<KindSequenceRules> = {
   ]
 };
 
-const allRuntimeKinds: RuntimePlatformKind[] = [
-  'segment',
+const ALL_PATTERN_TOKENS: PatternToken[] = ['segment', 'gap', 'timed', 'mobile', 'hazard', 'launch'];
+const TIMED_KINDS = new Set<RuntimePlatformKind>(['beat', 'alternateBeat', 'ghost', 'reverseGhost']);
+const LAUNCH_KINDS = new Set<RuntimePlatformKind>(['launch30', 'launch60']);
+const PATTERN_REPEAT_COOLDOWN_PICKS = 3;
+const PATTERN_REPEAT_MIN_WEIGHT_FACTOR = 0.3;
+const DIVERSITY_KIND_PRIORITY: RuntimePlatformKind[] = [
   'beat',
   'alternateBeat',
   'ghost',
@@ -66,164 +81,19 @@ const allRuntimeKinds: RuntimePlatformKind[] = [
   'launch60'
 ];
 
-const timedKinds = new Set<RuntimePlatformKind>(['beat', 'alternateBeat', 'ghost', 'reverseGhost']);
-const launchKinds = new Set<RuntimePlatformKind>(['launch30', 'launch60']);
-const patternReuseCooldown = 2;
-
-const patternTransitionMap: Record<PatternFlowTag, Set<PatternFlowTag>> = {
-  safe: new Set<PatternFlowTag>(['safe', 'timed', 'rewind', 'mobile', 'utility', 'hazard', 'launch']),
-  timed: new Set<PatternFlowTag>(['safe', 'timed', 'rewind', 'mobile', 'utility']),
-  rewind: new Set<PatternFlowTag>(['safe', 'timed', 'rewind', 'mobile', 'utility', 'launch']),
-  mobile: new Set<PatternFlowTag>(['safe', 'timed', 'rewind', 'mobile', 'utility', 'launch']),
-  utility: new Set<PatternFlowTag>(['safe', 'timed', 'rewind', 'mobile', 'utility', 'launch']),
-  hazard: new Set<PatternFlowTag>(['safe', 'rewind', 'mobile', 'utility']),
-  launch: new Set<PatternFlowTag>(['safe', 'rewind', 'mobile'])
-};
-
-const patternTemplates: PatternTemplate[] = [
-  {
-    id: 'low_beat_gate',
-    weight: 1.1,
-    energies: ['low', 'medium'],
-    minDensity: 0,
-    maxDensity: 0.62,
-    entry: 'safe',
-    exit: 'timed',
-    steps: [{ kinds: ['segment'] }, { kinds: ['beat', 'alternateBeat'] }, { kinds: ['segment'] }]
-  },
-  {
-    id: 'low_elevator_breath',
-    weight: 1,
-    energies: ['low', 'medium'],
-    minDensity: 0,
-    maxDensity: 0.6,
-    entry: 'safe',
-    exit: 'mobile',
-    steps: [{ kinds: ['segment'] }, { kinds: ['elevator'] }, { kinds: ['segment'] }]
-  },
-  {
-    id: 'medium_rewind_bridge',
-    weight: 1.25,
-    energies: ['medium', 'high'],
-    minDensity: 0.35,
-    maxDensity: 1,
-    entry: 'safe',
-    exit: 'rewind',
-    steps: [{ kinds: ['segment'] }, { kinds: ['ghost'] }, { kinds: ['reverseGhost'] }, { kinds: ['segment'] }]
-  },
-  {
-    id: 'medium_mobile_cross',
-    weight: 1.2,
-    energies: ['medium', 'high'],
-    minDensity: 0.4,
-    maxDensity: 1,
-    entry: 'safe',
-    exit: 'mobile',
-    steps: [{ kinds: ['segment'] }, { kinds: ['shuttle'] }, { kinds: ['cross'] }, { kinds: ['segment'] }]
-  },
-  {
-    id: 'medium_spring_setup',
-    weight: 1.1,
-    energies: ['medium', 'high'],
-    minDensity: 0.4,
-    maxDensity: 1,
-    entry: 'mobile',
-    exit: 'utility',
-    steps: [{ kinds: ['elevator'] }, { kinds: ['spring'] }, { kinds: ['segment'] }]
-  },
-  {
-    id: 'medium_timed_weave',
-    weight: 1.05,
-    energies: ['medium', 'high'],
-    minDensity: 0.4,
-    maxDensity: 1,
-    entry: 'timed',
-    exit: 'timed',
-    steps: [{ kinds: ['beat'] }, { kinds: ['segment'] }, { kinds: ['alternateBeat'] }]
-  },
-  {
-    id: 'high_hazard_window',
-    weight: 1.25,
-    energies: ['high'],
-    minDensity: 0.55,
-    maxDensity: 1,
-    entry: 'safe',
-    exit: 'hazard',
-    steps: [{ kinds: ['segment'] }, { kinds: ['hazard'] }, { kinds: ['segment'] }]
-  },
-  {
-    id: 'high_launch_30_arc',
-    weight: 1.4,
-    energies: ['high'],
-    minDensity: 0.65,
-    maxDensity: 1,
-    entry: 'safe',
-    exit: 'launch',
-    steps: [{ kinds: ['segment'] }, { kinds: ['launch30'] }, { kinds: ['segment'] }, { kinds: ['ghost'] }]
-  },
-  {
-    id: 'high_launch_60_arc',
-    weight: 1.35,
-    energies: ['high'],
-    minDensity: 0.7,
-    maxDensity: 1,
-    entry: 'safe',
-    exit: 'launch',
-    steps: [{ kinds: ['segment'] }, { kinds: ['launch60'] }, { kinds: ['segment'] }, { kinds: ['spring'] }]
-  },
-  {
-    id: 'high_rewind_launch_mix',
-    weight: 1.25,
-    energies: ['high'],
-    minDensity: 0.65,
-    maxDensity: 1,
-    entry: 'rewind',
-    exit: 'launch',
-    steps: [{ kinds: ['reverseGhost'] }, { kinds: ['segment'] }, { kinds: ['launch30'] }, { kinds: ['segment'] }]
-  },
-  {
-    id: 'high_pressure_mix',
-    weight: 1.3,
-    energies: ['high'],
-    minDensity: 0.72,
-    maxDensity: 1,
-    entry: 'mobile',
-    exit: 'safe',
-    steps: [{ kinds: ['shuttle'] }, { kinds: ['hazard'] }, { kinds: ['segment'] }, { kinds: ['cross'] }]
-  }
-];
-
-const energyGateKinds: Record<EnergyState, Set<RuntimePlatformKind>> = {
-  low: new Set<RuntimePlatformKind>(['segment', 'beat', 'alternateBeat', 'elevator']),
-  medium: new Set<RuntimePlatformKind>([
-    'segment',
-    'beat',
-    'alternateBeat',
-    'ghost',
-    'reverseGhost',
-    'elevator',
-    'shuttle',
-    'cross',
-    'spring'
-  ]),
-  high: new Set<RuntimePlatformKind>(allRuntimeKinds)
-};
-
-export function classifyEnergy(value: number): EnergyState {
-  if (value < 0.33) return 'low';
-  if (value < 0.66) return 'medium';
-  return 'high';
+interface DefinedPattern {
+  patternId: string;
+  energyHint: EnergyState;
+  weight: number;
+  tokens: PatternToken[];
 }
 
-function mapPlatformTypeToRuntimeKind(platformType: Segment['platformTypes'][number]): RuntimePlatformKind {
-  if (platformType === 'static') return 'segment';
-  if (allRuntimeKinds.includes(platformType)) return platformType;
-  return 'segment';
-}
-
-function deterministicUnit(seed: number): number {
-  const x = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
-  return x - Math.floor(x);
+interface PatternCatalogRow {
+  patternId?: unknown;
+  kind?: unknown;
+  tokens?: unknown;
+  weight?: unknown;
+  energyHint?: unknown;
 }
 
 function clampUnit(value: number): number {
@@ -231,272 +101,171 @@ function clampUnit(value: number): number {
   return Math.max(0, Math.min(1, n));
 }
 
-function trailingRunLength<T>(items: T[], predicate: (item: T) => boolean): number {
-  let count = 0;
-  for (let i = items.length - 1; i >= 0; i--) {
-    if (!predicate(items[i])) break;
-    count += 1;
-  }
-  return count;
+function deterministicUnit(seed: number): number {
+  const x = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
+  return x - Math.floor(x);
 }
 
-function weightedChoice<T>(candidates: T[], getWeight: (candidate: T) => number, roll: number): T {
-  if (candidates.length === 1) return candidates[0];
-  const weights = candidates.map((candidate) => Math.max(0.0001, getWeight(candidate)));
-  const total = weights.reduce((acc, w) => acc + w, 0);
-  let target = clampUnit(roll) * total;
-  for (let i = 0; i < candidates.length; i++) {
-    target -= weights[i];
-    if (target <= 0) return candidates[i];
+function weightedPick<T>(items: T[], getWeight: (item: T, index: number) => number, roll: number): T {
+  if (items.length <= 1) return items[0];
+  const weights = items.map((item, index) => Math.max(0.0001, getWeight(item, index)));
+  const total = weights.reduce((acc, value) => acc + value, 0);
+  let cursor = clampUnit(roll) * total;
+  for (let i = 0; i < items.length; i++) {
+    cursor -= weights[i];
+    if (cursor <= 0) return items[i];
   }
-  return candidates[candidates.length - 1];
+  return items[items.length - 1];
 }
 
-function kindWeight(kind: RuntimePlatformKind | null, seg: PatternSegmentInput): number {
-  const density = clampUnit(seg.rhythmDensity);
-  if (kind === null) {
-    return 0.03 + (1 - density) * 0.1;
-  }
-  if (kind === 'segment') {
-    return 0.5 + (1 - density) * 0.6;
-  }
-
-  let weight = 0.7 + density * 1.1;
-  if (seg.energyState === 'high') weight *= 1.2;
-  if (seg.energyState === 'low') weight *= 0.75;
-  if (timedKinds.has(kind)) weight *= 1 + density * 0.25;
-  return weight;
+function normalizePatternToken(token: unknown): PatternToken | null {
+  if (typeof token !== 'string') return null;
+  return (ALL_PATTERN_TOKENS as string[]).includes(token) ? (token as PatternToken) : null;
 }
 
-function toUniqueKinds(platformTypes: Segment['platformTypes']): RuntimePlatformKind[] {
-  const mappedKinds = platformTypes.map((platformType) => mapPlatformTypeToRuntimeKind(platformType));
-  const unique = new Set<RuntimePlatformKind>(mappedKinds);
-  unique.add('segment');
+function toPatternTokens(rawTokens: unknown): PatternToken[] {
+  if (!Array.isArray(rawTokens) || rawTokens.length <= 0) return [];
+
+  if (Array.isArray(rawTokens[0])) {
+    const rows = rawTokens as unknown[];
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const row = rows[i];
+      if (!Array.isArray(row) || row.length <= 0) continue;
+      const tokens = row.map(normalizePatternToken).filter((token): token is PatternToken => token !== null);
+      if (tokens.length > 0) return tokens;
+    }
+    return [];
+  }
+
+  return (rawTokens as unknown[]).map(normalizePatternToken).filter((token): token is PatternToken => token !== null);
+}
+
+function sanitizeEnergyHint(value: unknown): EnergyState {
+  if (value === 'low' || value === 'medium' || value === 'high') return value;
+  return 'medium';
+}
+
+function buildDefinedPatternCatalog(): DefinedPattern[] {
+  const source = (Array.isArray(RUNTIME_PATTERN_CATALOG) ? RUNTIME_PATTERN_CATALOG : []) as PatternCatalogRow[];
+  const patterns: DefinedPattern[] = [];
+
+  for (let i = 0; i < source.length; i++) {
+    const row = source[i];
+    const kind = row?.kind;
+    if (kind !== 'flow1d' && kind !== 'micro2d') continue;
+    const tokens = toPatternTokens(row?.tokens);
+    if (tokens.length <= 0) continue;
+    patterns.push({
+      patternId: String(row?.patternId || `pattern_${i + 1}`),
+      energyHint: sanitizeEnergyHint(row?.energyHint),
+      weight: Math.max(0.0001, Number(row?.weight) || 1),
+      tokens
+    });
+  }
+
+  if (patterns.length > 0) return patterns;
+  return [
+    { patternId: 'fallback_low', energyHint: 'low', weight: 1, tokens: ['segment'] },
+    { patternId: 'fallback_medium', energyHint: 'medium', weight: 1, tokens: ['segment'] },
+    { patternId: 'fallback_high', energyHint: 'high', weight: 1, tokens: ['segment'] }
+  ];
+}
+
+const DEFINED_PATTERNS = buildDefinedPatternCatalog();
+
+function patternPoolForEnergy(energy: EnergyState): DefinedPattern[] {
+  const pool = DEFINED_PATTERNS.filter((pattern) => pattern.energyHint === energy);
+  if (pool.length > 0) return pool;
+  return [{ patternId: `fallback_${energy}`, energyHint: energy, weight: 1, tokens: ['segment'] }];
+}
+
+function repeatPenaltyForPattern(patternId: string, recentPatternIds: string[]): number {
+  const lookback = Math.min(PATTERN_REPEAT_COOLDOWN_PICKS, recentPatternIds.length);
+  let penalty = 1;
+  for (let distance = 1; distance <= lookback; distance++) {
+    const prior = recentPatternIds[recentPatternIds.length - distance];
+    if (prior !== patternId) continue;
+    const progress = (distance - 1) / Math.max(1, PATTERN_REPEAT_COOLDOWN_PICKS);
+    const distancePenalty = PATTERN_REPEAT_MIN_WEIGHT_FACTOR + (1 - PATTERN_REPEAT_MIN_WEIGHT_FACTOR) * progress;
+    penalty = Math.min(penalty, distancePenalty);
+  }
+  return penalty;
+}
+
+function mapPlatformTypeToRuntimeKind(platformType: Segment['platformTypes'][number]): RuntimePlatformKind {
+  if (platformType === 'static') return 'segment';
+  return platformType;
+}
+
+function toUniqueRuntimePlatformTypes(platformTypes: Segment['platformTypes']): Segment['platformTypes'] {
+  const mapped = platformTypes.map((platformType) => mapPlatformTypeToRuntimeKind(platformType));
+  const unique = new Set<Segment['platformTypes'][number]>();
+  unique.add('static');
+  for (const kind of mapped) {
+    if (kind === 'segment') {
+      unique.add('static');
+    } else {
+      unique.add(kind as Segment['platformTypes'][number]);
+    }
+  }
   return [...unique];
 }
 
-function applyEnergyGate(kinds: Array<RuntimePlatformKind | null>, seg: PatternSegmentInput): Array<RuntimePlatformKind | null> {
-  const allowed = energyGateKinds[seg.energyState];
-  return kinds.filter((kind) => kind === null || allowed.has(kind));
+function hasRuntimeKind(seg: PatternSegmentInput, target: RuntimePlatformKind): boolean {
+  if (target === 'segment') return true;
+  return seg.platformTypes.includes(target as Segment['platformTypes'][number]);
 }
 
-function getSegmentKindCandidates(seg: PatternSegmentInput, rules: Required<KindSequenceRules>): Array<RuntimePlatformKind | null> {
-  const baseKinds = toUniqueKinds(seg.platformTypes);
-  const withBlanks: Array<RuntimePlatformKind | null> = [...baseKinds, null];
-  if (!rules.enableEnergyGate) return withBlanks;
-  return applyEnergyGate(withBlanks, seg);
-}
-
-function applyPairForbids(
-  kinds: Array<RuntimePlatformKind | null>,
-  history: Array<RuntimePlatformKind | null>,
-  rules: Required<KindSequenceRules>
-): Array<RuntimePlatformKind | null> {
-  const previous = history.length > 0 ? history[history.length - 1] : null;
-  if (previous === null) return kinds;
-  let filtered = kinds;
-  for (const [fromKind, toKind] of rules.forbidPairs) {
-    if (previous !== fromKind) continue;
-    filtered = filtered.filter((kind) => kind !== toKind);
-  }
-  return filtered;
-}
-
-function countSegmentsSinceLastLaunch(history: Array<RuntimePlatformKind | null>): number {
-  let segmentsSinceLastLaunch = 0;
-  for (let i = history.length - 1; i >= 0; i--) {
-    const kind = history[i];
-    if (kind !== null && launchKinds.has(kind)) return segmentsSinceLastLaunch;
-    if (kind === 'segment') segmentsSinceLastLaunch += 1;
-  }
-  return Number.POSITIVE_INFINITY;
-}
-
-function applyLaunchSpacingRule(
-  kinds: Array<RuntimePlatformKind | null>,
-  history: Array<RuntimePlatformKind | null>,
-  rules: Required<KindSequenceRules>
-): Array<RuntimePlatformKind | null> {
-  if (rules.minSegmentsBetweenLaunches <= 0) return kinds;
-  const segmentsSinceLastLaunch = countSegmentsSinceLastLaunch(history);
-  if (!Number.isFinite(segmentsSinceLastLaunch) || segmentsSinceLastLaunch >= rules.minSegmentsBetweenLaunches) return kinds;
-  return kinds.filter((kind) => kind === null || !launchKinds.has(kind));
-}
-
-function applyMaxRunRules(
-  kinds: Array<RuntimePlatformKind | null>,
-  history: Array<RuntimePlatformKind | null>,
-  rules: Required<KindSequenceRules>
-): Array<RuntimePlatformKind | null> {
-  let filtered = kinds;
-  const staticRun = trailingRunLength(history, (kind) => kind === 'segment');
-  const hasNonStaticAlternative = kinds.some((kind) => kind !== null && kind !== 'segment');
-  if (staticRun >= rules.maxStaticRun && hasNonStaticAlternative) {
-    filtered = filtered.filter((kind) => kind !== 'segment');
-  }
-
-  const timedRun = trailingRunLength(history, (kind) => kind !== null && timedKinds.has(kind));
-  if (timedRun >= rules.maxTimedRun) {
-    filtered = filtered.filter((kind) => kind === null || !timedKinds.has(kind));
-  }
-  return filtered;
-}
-
-function applyGlobalKindRules(
-  kinds: Array<RuntimePlatformKind | null>,
-  history: Array<RuntimePlatformKind | null>,
-  rules: Required<KindSequenceRules>
-): Array<RuntimePlatformKind | null> {
-  let filtered = applyPairForbids(kinds, history, rules);
-  filtered = applyLaunchSpacingRule(filtered, history, rules);
-  filtered = applyMaxRunRules(filtered, history, rules);
-  return filtered;
-}
-
-function isPatternTransitionAllowed(previousExit: PatternFlowTag, nextEntry: PatternFlowTag): boolean {
-  return patternTransitionMap[previousExit].has(nextEntry);
-}
-
-function isPatternCompatibleWithSegment(pattern: PatternTemplate, seg: PatternSegmentInput): boolean {
-  if (!pattern.energies.includes(seg.energyState)) return false;
-  const density = clampUnit(seg.rhythmDensity);
-  return density >= pattern.minDensity && density <= pattern.maxDensity;
-}
-
-function patternStepHasInterestingKind(step: PatternStep): boolean {
-  return step.kinds.some((kind) => kind !== null && kind !== 'segment');
-}
-
-function hasPatternInterestingKinds(pattern: PatternTemplate): boolean {
-  return pattern.steps.some((step) => patternStepHasInterestingKind(step));
-}
-
-function inferFlowTagFromKind(kind: RuntimePlatformKind | null): PatternFlowTag {
-  if (kind === 'ghost' || kind === 'reverseGhost') return 'rewind';
-  if (kind === 'beat' || kind === 'alternateBeat') return 'timed';
-  if (kind === 'elevator' || kind === 'shuttle' || kind === 'cross') return 'mobile';
-  if (kind === 'spring') return 'utility';
-  if (kind === 'hazard') return 'hazard';
-  if (kind !== null && launchKinds.has(kind)) return 'launch';
-  return 'safe';
-}
-
-function pickKindCandidate(
-  candidates: Array<RuntimePlatformKind | null>,
-  seg: PatternSegmentInput,
-  rollSeed: number,
-  prioritizeOrder = false
-): RuntimePlatformKind | null {
-  if (candidates.length === 1) return candidates[0];
-  const roll = deterministicUnit(rollSeed);
-  return weightedChoice(
-    candidates,
-    (kind) => {
-      const baseWeight = kindWeight(kind, seg);
-      if (!prioritizeOrder) return baseWeight;
-      const index = candidates.indexOf(kind);
-      const orderBoost = 1 + (candidates.length - index - 1) * 0.45;
-      return baseWeight * orderBoost;
-    },
-    roll
+function supportsTimed(seg: PatternSegmentInput): boolean {
+  return (
+    hasRuntimeKind(seg, 'beat') ||
+    hasRuntimeKind(seg, 'alternateBeat') ||
+    hasRuntimeKind(seg, 'ghost') ||
+    hasRuntimeKind(seg, 'reverseGhost')
   );
 }
 
-function tryPlacePattern(
-  pattern: PatternTemplate,
-  startIndex: number,
-  segments: PatternSegmentInput[],
-  history: Array<RuntimePlatformKind | null>,
-  rules: Required<KindSequenceRules>,
-  seed: number
-): Array<RuntimePlatformKind | null> | null {
-  const localHistory = [...history];
-  const placed: Array<RuntimePlatformKind | null> = [];
-  let interestingHits = 0;
-
-  for (let stepIndex = 0; stepIndex < pattern.steps.length; stepIndex++) {
-    const seg = segments[startIndex + stepIndex];
-    if (!seg) return null;
-    if (!isPatternCompatibleWithSegment(pattern, seg)) return null;
-
-    const baseCandidates = getSegmentKindCandidates(seg, rules);
-    const allowedCandidates = applyGlobalKindRules(baseCandidates, localHistory, rules);
-    if (allowedCandidates.length === 0) return null;
-
-    const preferredCandidates = pattern.steps[stepIndex].kinds.filter((kind) => allowedCandidates.includes(kind));
-    const chosenPool = preferredCandidates.length > 0 ? preferredCandidates : allowedCandidates;
-    const picked = pickKindCandidate(
-      chosenPool,
-      seg,
-      seed + (startIndex + 1) * 107.33 + (stepIndex + 1) * 41.71,
-      preferredCandidates.length > 0
-    );
-    placed.push(picked);
-    localHistory.push(picked);
-    if (picked !== null && picked !== 'segment') interestingHits += 1;
-  }
-
-  if (hasPatternInterestingKinds(pattern) && interestingHits === 0) {
-    return null;
-  }
-
-  return placed;
+function supportsMobile(seg: PatternSegmentInput): boolean {
+  return hasRuntimeKind(seg, 'elevator') || hasRuntimeKind(seg, 'shuttle') || hasRuntimeKind(seg, 'cross') || hasRuntimeKind(seg, 'spring');
 }
 
-function computePatternPickScore(pattern: PatternTemplate, segmentWindow: PatternSegmentInput[], rollSeed: number): number {
-  const avgDensity =
-    segmentWindow.length > 0
-      ? segmentWindow.reduce((acc, seg) => acc + clampUnit(seg.rhythmDensity), 0) / segmentWindow.length
-      : 0;
-  const targetDensity = (pattern.minDensity + pattern.maxDensity) * 0.5;
-  const densityCloseness = 1 - Math.min(1, Math.abs(avgDensity - targetDensity));
-  const complexityBoost = hasPatternInterestingKinds(pattern) ? 1.08 : 1;
-  const randomness = 0.75 + deterministicUnit(rollSeed) * 0.65;
-  return pattern.weight * (0.45 + densityCloseness * 0.85) * complexityBoost * randomness;
+function supportsLaunch(seg: PatternSegmentInput): boolean {
+  return hasRuntimeKind(seg, 'launch30') || hasRuntimeKind(seg, 'launch60');
 }
 
-function collectPatternCandidates(
-  startIndex: number,
-  segments: PatternSegmentInput[],
-  previousExit: PatternFlowTag,
-  recentPatternIds: string[],
-  seed: number
-): PatternTemplate[] {
-  const remaining = segments.length - startIndex;
-  const candidates = patternTemplates.filter((pattern) => {
-    if (pattern.steps.length <= 0 || pattern.steps.length > remaining) return false;
-    if (!isPatternTransitionAllowed(previousExit, pattern.entry)) return false;
-    if (recentPatternIds.includes(pattern.id)) return false;
-    for (let i = 0; i < pattern.steps.length; i++) {
-      const seg = segments[startIndex + i];
-      if (!seg || !isPatternCompatibleWithSegment(pattern, seg)) return false;
-    }
-    return true;
+function supportsHazard(seg: PatternSegmentInput): boolean {
+  return hasRuntimeKind(seg, 'hazard');
+}
+
+function applyEnergyGate(seg: PatternSegmentInput, enabled: boolean): PatternSegmentInput {
+  if (!enabled) return seg;
+  const allowedByEnergy: Record<EnergyState, Set<RuntimePlatformKind>> = {
+    low: new Set(['segment', 'beat', 'alternateBeat', 'elevator']),
+    medium: new Set(['segment', 'beat', 'alternateBeat', 'ghost', 'reverseGhost', 'elevator', 'shuttle', 'cross', 'spring']),
+    high: new Set([
+      'segment',
+      'beat',
+      'alternateBeat',
+      'ghost',
+      'reverseGhost',
+      'elevator',
+      'shuttle',
+      'cross',
+      'spring',
+      'hazard',
+      'launch30',
+      'launch60'
+    ])
+  };
+  const allowed = allowedByEnergy[seg.energyState];
+  const filtered = toUniqueRuntimePlatformTypes(seg.platformTypes).filter((platformType) => {
+    if (platformType === 'static') return true;
+    return allowed.has(platformType as RuntimePlatformKind);
   });
-
-  return candidates.sort((a, b) => {
-    const windowA = segments.slice(startIndex, startIndex + a.steps.length);
-    const windowB = segments.slice(startIndex, startIndex + b.steps.length);
-    const scoreA = computePatternPickScore(a, windowA, seed + (startIndex + 1) * 29.7 + a.steps.length * 7.3);
-    const scoreB = computePatternPickScore(b, windowB, seed + (startIndex + 1) * 29.7 + b.steps.length * 7.3);
-    return scoreB - scoreA;
-  });
-}
-
-function pickLegacyKind(
-  seg: PatternSegmentInput,
-  history: Array<RuntimePlatformKind | null>,
-  rules: Required<KindSequenceRules>,
-  seed: number
-): RuntimePlatformKind | null {
-  const baseCandidates = getSegmentKindCandidates(seg, rules);
-  let candidates = applyGlobalKindRules(baseCandidates, history, rules);
-  if (candidates.length === 0) {
-    const fallbackBase = getSegmentKindCandidates(seg, { ...rules, enableEnergyGate: false });
-    candidates = applyGlobalKindRules(fallbackBase, history, rules);
-  }
-  if (candidates.length === 0) return 'segment';
-  return pickKindCandidate(candidates, seg, seed);
+  return {
+    ...seg,
+    platformTypes: filtered.length > 0 ? filtered : ['static']
+  };
 }
 
 function resolveKindRules(rules: KindSequenceRules | undefined): Required<KindSequenceRules> {
@@ -508,8 +277,440 @@ function resolveKindRules(rules: KindSequenceRules | undefined): Required<KindSe
       0,
       Math.floor(rules?.minSegmentsBetweenLaunches ?? defaultKindSequenceRules.minSegmentsBetweenLaunches)
     ),
-    forbidPairs: Array.isArray(rules?.forbidPairs) && rules!.forbidPairs.length > 0 ? rules!.forbidPairs : defaultKindSequenceRules.forbidPairs
+    forbidPairs: Array.isArray(rules?.forbidPairs) && rules.forbidPairs.length > 0 ? rules.forbidPairs : defaultKindSequenceRules.forbidPairs
   };
+}
+
+function selectPatternTokens(
+  segments: PatternSegmentInput[],
+  seed: number
+): Pick<PatternSelectionTrace, 'patternPoolSizes' | 'patternPicks' | 'patternUsage' | 'tokens'> {
+  const patternPoolSizes: Record<EnergyState, number> = {
+    low: patternPoolForEnergy('low').length,
+    medium: patternPoolForEnergy('medium').length,
+    high: patternPoolForEnergy('high').length
+  };
+  const patternPicks: PatternSelectionTrace['patternPicks'] = [];
+  const tokens = new Array<PatternToken>(segments.length);
+  const eligiblePatterns = new Set<string>();
+  const recentPatternIds: string[] = [];
+
+  let index = 0;
+  while (index < segments.length) {
+    const seg = segments[index];
+    const pool = patternPoolForEnergy(seg.energyState);
+    for (const pattern of pool) {
+      eligiblePatterns.add(pattern.patternId);
+    }
+    const pickedPattern = weightedPick(
+      pool,
+      (pattern) =>
+        pattern.weight *
+        (0.75 + clampUnit(seg.rhythmDensity) * 0.5) *
+        repeatPenaltyForPattern(pattern.patternId, recentPatternIds),
+      deterministicUnit(seed + (index + 1) * 31.13)
+    );
+    recentPatternIds.push(pickedPattern.patternId);
+    if (recentPatternIds.length > PATTERN_REPEAT_COOLDOWN_PICKS) recentPatternIds.shift();
+    patternPicks.push({
+      segmentIndex: index,
+      patternId: pickedPattern.patternId,
+      energyHint: pickedPattern.energyHint,
+      weight: pickedPattern.weight,
+      length: pickedPattern.tokens.length
+    });
+    if (pickedPattern.tokens.length <= 0) {
+      tokens[index] = 'segment';
+      index += 1;
+      continue;
+    }
+    for (let tokenIdx = 0; tokenIdx < pickedPattern.tokens.length && index < segments.length; tokenIdx++) {
+      tokens[index] = pickedPattern.tokens[tokenIdx];
+      index += 1;
+    }
+  }
+
+  if (tokens.length > 0) {
+    if (tokens[0] === 'gap') tokens[0] = 'segment';
+    if (tokens[tokens.length - 1] === 'gap') tokens[tokens.length - 1] = 'segment';
+  }
+
+  const usageMap = new Map<string, { picks: number; segmentsCovered: number; weightTotal: number }>();
+  for (const pick of patternPicks) {
+    const stat = usageMap.get(pick.patternId) ?? { picks: 0, segmentsCovered: 0, weightTotal: 0 };
+    stat.picks += 1;
+    stat.segmentsCovered += Math.max(1, Math.floor(Number(pick.length) || 1));
+    stat.weightTotal += Number(pick.weight) || 0;
+    usageMap.set(pick.patternId, stat);
+  }
+  for (const patternId of eligiblePatterns) {
+    if (!usageMap.has(patternId)) {
+      usageMap.set(patternId, { picks: 0, segmentsCovered: 0, weightTotal: 0 });
+    }
+  }
+  const patternUsage = [...usageMap.entries()]
+    .map(([patternId, stat]) => ({
+      patternId,
+      picks: stat.picks,
+      segmentsCovered: stat.segmentsCovered,
+      avgWeight: stat.weightTotal / Math.max(1, stat.picks)
+    }))
+    .sort((a, b) => {
+      if (b.picks !== a.picks) return b.picks - a.picks;
+      if (b.segmentsCovered !== a.segmentsCovered) return b.segmentsCovered - a.segmentsCovered;
+      return a.patternId.localeCompare(b.patternId);
+    });
+
+  return { patternPoolSizes, patternPicks, patternUsage, tokens };
+}
+
+function chooseKindFromToken(token: PatternToken, seg: PatternSegmentInput, seed: number): RuntimePlatformKind | null {
+  if (token === 'segment') return 'segment';
+  if (token === 'gap') return null;
+
+  if (token === 'hazard') {
+    if (supportsHazard(seg)) return 'hazard';
+    if (supportsTimed(seg)) return chooseKindFromToken('timed', seg, seed + 7.1);
+    if (supportsMobile(seg)) return chooseKindFromToken('mobile', seg, seed + 11.7);
+    return 'segment';
+  }
+
+  if (token === 'launch') {
+    const candidates: RuntimePlatformKind[] = [];
+    if (hasRuntimeKind(seg, 'launch30')) candidates.push('launch30');
+    if (hasRuntimeKind(seg, 'launch60')) candidates.push('launch60');
+    if (candidates.length <= 0) return 'segment';
+    return weightedPick(candidates, () => 1, deterministicUnit(seed + 13.7));
+  }
+
+  if (token === 'mobile') {
+    const candidates: RuntimePlatformKind[] = [];
+    if (hasRuntimeKind(seg, 'elevator')) candidates.push('elevator');
+    if (hasRuntimeKind(seg, 'shuttle')) candidates.push('shuttle');
+    if (hasRuntimeKind(seg, 'cross')) candidates.push('cross');
+    if (hasRuntimeKind(seg, 'spring')) candidates.push('spring');
+    if (candidates.length <= 0) return 'segment';
+    return weightedPick(candidates, () => 1, deterministicUnit(seed + 31.9));
+  }
+
+  const timedCandidates: RuntimePlatformKind[] = [];
+  if (hasRuntimeKind(seg, 'beat')) timedCandidates.push('beat');
+  if (hasRuntimeKind(seg, 'alternateBeat')) timedCandidates.push('alternateBeat');
+  if (hasRuntimeKind(seg, 'ghost')) timedCandidates.push('ghost');
+  if (hasRuntimeKind(seg, 'reverseGhost')) timedCandidates.push('reverseGhost');
+  if (timedCandidates.length <= 0) return 'segment';
+  const density = clampUnit(seg.rhythmDensity);
+  return weightedPick(
+    timedCandidates,
+    (kind) => {
+      if (kind === 'beat' || kind === 'alternateBeat') return 0.8 + density * 1.1;
+      return 0.65 + density * 0.95;
+    },
+    deterministicUnit(seed + 71.2)
+  );
+}
+
+function pickAnyNonStaticKind(seg: PatternSegmentInput, seed: number): RuntimePlatformKind | null {
+  const candidates: RuntimePlatformKind[] = [];
+  for (const kind of DIVERSITY_KIND_PRIORITY) {
+    if (!hasRuntimeKind(seg, kind)) continue;
+    if (kind === 'hazard' && seg.energyState === 'low') continue;
+    if ((kind === 'launch30' || kind === 'launch60') && seg.energyState !== 'high') continue;
+    candidates.push(kind);
+  }
+  if (candidates.length <= 0) return null;
+  return weightedPick(candidates, () => 1, deterministicUnit(seed + 19.1));
+}
+
+function satisfiesResolvedConstraints(
+  kinds: Array<RuntimePlatformKind | null>,
+  config: Required<KindSequenceRules>
+): boolean {
+  if (kinds.length > 0 && (kinds[0] === null || kinds[kinds.length - 1] === null)) return false;
+
+  let segmentsSinceLaunch = Number.POSITIVE_INFINITY;
+  let timedRun = 0;
+
+  for (let i = 0; i < kinds.length; i++) {
+    const kind = kinds[i];
+
+    if (kind !== null && TIMED_KINDS.has(kind)) {
+      timedRun += 1;
+      if (timedRun > config.maxTimedRun) return false;
+    } else {
+      timedRun = 0;
+    }
+
+    if (i > 0) {
+      for (const [fromKind, toKind] of config.forbidPairs) {
+        if (kinds[i - 1] === fromKind && kind === toKind) return false;
+      }
+    }
+
+    if (kind !== null && LAUNCH_KINDS.has(kind)) {
+      if (segmentsSinceLaunch < config.minSegmentsBetweenLaunches) return false;
+      segmentsSinceLaunch = 0;
+    } else if (kind === 'segment' && Number.isFinite(segmentsSinceLaunch)) {
+      segmentsSinceLaunch += 1;
+    }
+  }
+
+  return true;
+}
+
+function enforceHighVarietyKinds(
+  kinds: Array<RuntimePlatformKind | null>,
+  segments: PatternSegmentInput[],
+  config: Required<KindSequenceRules>,
+  seed: number
+): Array<RuntimePlatformKind | null> {
+  const out = [...kinds];
+  const availableKinds = new Set<RuntimePlatformKind>();
+  for (const seg of segments) {
+    for (const kind of DIVERSITY_KIND_PRIORITY) {
+      if (hasRuntimeKind(seg, kind)) availableKinds.add(kind);
+    }
+  }
+  const targetDiversity = Math.min(6, availableKinds.size);
+  if (targetDiversity <= 0) return out;
+
+  const usedKinds = new Set(out.filter((kind): kind is RuntimePlatformKind => kind !== null && kind !== 'segment'));
+  if (usedKinds.size >= targetDiversity) return out;
+
+  for (const missingKind of DIVERSITY_KIND_PRIORITY) {
+    if (!availableKinds.has(missingKind) || usedKinds.has(missingKind)) continue;
+    const slots: number[] = [];
+    for (let i = 1; i < out.length - 1; i++) {
+      if (out[i] !== 'segment') continue;
+      const seg = segments[i];
+      if (!seg || !hasRuntimeKind(seg, missingKind)) continue;
+      if (missingKind === 'hazard' && seg.energyState === 'low') continue;
+      if ((missingKind === 'launch30' || missingKind === 'launch60') && seg.energyState !== 'high') continue;
+      slots.push(i);
+    }
+    if (slots.length <= 0) continue;
+
+    slots.sort((a, b) => {
+      const ra = deterministicUnit(seed + (a + 1) * 23.7 + missingKind.length * 7.1);
+      const rb = deterministicUnit(seed + (b + 1) * 23.7 + missingKind.length * 7.1);
+      return ra - rb;
+    });
+
+    for (const slot of slots) {
+      const trial = [...out];
+      trial[slot] = missingKind;
+      if (!satisfiesResolvedConstraints(trial, config)) continue;
+      out[slot] = missingKind;
+      usedKinds.add(missingKind);
+      break;
+    }
+
+    if (usedKinds.size >= targetDiversity) break;
+  }
+
+  return out;
+}
+
+function enforceMinimumLaunchKinds(
+  kinds: Array<RuntimePlatformKind | null>,
+  segments: PatternSegmentInput[],
+  config: Required<KindSequenceRules>,
+  seed: number
+): Array<RuntimePlatformKind | null> {
+  const out = [...kinds];
+  const desiredLaunches = segments.length >= 40 ? 2 : 1;
+  const currentLaunches = out.filter((kind) => kind !== null && LAUNCH_KINDS.has(kind)).length;
+  if (currentLaunches >= desiredLaunches) return out;
+
+  const launchSlots: number[] = [];
+  for (let i = 1; i < out.length - 1; i++) {
+    if (out[i] !== 'segment') continue;
+    const seg = segments[i];
+    if (!seg || seg.energyState !== 'high' || !supportsLaunch(seg)) continue;
+    launchSlots.push(i);
+  }
+  if (launchSlots.length <= 0) return out;
+
+  launchSlots.sort((a, b) => deterministicUnit(seed + a * 3.7) - deterministicUnit(seed + b * 3.7));
+  let launches = currentLaunches;
+  for (const slot of launchSlots) {
+    if (launches >= desiredLaunches) break;
+    const seg = segments[slot];
+    if (!seg) continue;
+    const launchKinds: RuntimePlatformKind[] = [];
+    if (hasRuntimeKind(seg, 'launch30')) launchKinds.push('launch30');
+    if (hasRuntimeKind(seg, 'launch60')) launchKinds.push('launch60');
+    if (launchKinds.length <= 0) continue;
+    const pickedLaunch = weightedPick(launchKinds, () => 1, deterministicUnit(seed + (slot + 1) * 17.3));
+    const trial = [...out];
+    trial[slot] = pickedLaunch;
+    if (!satisfiesResolvedConstraints(trial, config)) continue;
+    out[slot] = pickedLaunch;
+    launches += 1;
+  }
+
+  return out;
+}
+
+function enforceMinimumHazardKind(
+  kinds: Array<RuntimePlatformKind | null>,
+  segments: PatternSegmentInput[],
+  config: Required<KindSequenceRules>,
+  seed: number
+): Array<RuntimePlatformKind | null> {
+  const out = [...kinds];
+  const hasHazard = out.some((kind) => kind === 'hazard');
+  if (hasHazard) return out;
+
+  const slots: number[] = [];
+  for (let i = 1; i < out.length - 1; i++) {
+    if (out[i] !== 'segment') continue;
+    const seg = segments[i];
+    if (!seg || seg.energyState !== 'high' || !supportsHazard(seg)) continue;
+    slots.push(i);
+  }
+  if (slots.length <= 0) return out;
+
+  slots.sort((a, b) => deterministicUnit(seed + a * 5.3) - deterministicUnit(seed + b * 5.3));
+  for (const slot of slots) {
+    const trial = [...out];
+    trial[slot] = 'hazard';
+    if (!satisfiesResolvedConstraints(trial, config)) continue;
+    out[slot] = 'hazard';
+    break;
+  }
+  return out;
+}
+
+function applyKindConstraints(
+  kinds: Array<RuntimePlatformKind | null>,
+  segments: PatternSegmentInput[],
+  config: Required<KindSequenceRules>,
+  seed: number
+): Array<RuntimePlatformKind | null> {
+  const out = [...kinds];
+  if (out.length > 0) {
+    if (out[0] === null) out[0] = 'segment';
+    if (out[out.length - 1] === null) out[out.length - 1] = 'segment';
+  }
+
+  for (let pass = 0; pass < 3; pass++) {
+    let segmentsSinceLaunch = Number.POSITIVE_INFINITY;
+    let timedRun = 0;
+    let staticRun = 0;
+    let gapRun = 0;
+
+    for (let i = 0; i < out.length; i++) {
+      const seg = segments[i];
+      if (!seg) continue;
+
+      if (out[i] === null) {
+        gapRun += 1;
+        const gapLimit = seg.energyState === 'low' ? 1 : seg.energyState === 'medium' ? 2 : 3;
+        if (gapRun > gapLimit) out[i] = 'segment';
+      } else {
+        gapRun = 0;
+      }
+
+      if (i > 0) {
+        for (const [fromKind, toKind] of config.forbidPairs) {
+          if (out[i - 1] === fromKind && out[i] === toKind) {
+            out[i] = 'segment';
+            break;
+          }
+        }
+      }
+
+      const kind = out[i];
+      if (kind !== null && TIMED_KINDS.has(kind)) {
+        timedRun += 1;
+        if (timedRun > config.maxTimedRun) {
+          out[i] = 'segment';
+          timedRun = 0;
+        }
+      } else {
+        timedRun = 0;
+      }
+
+      if (out[i] === 'segment') {
+        staticRun += 1;
+        if (staticRun > config.maxStaticRun) {
+          const replacement = pickAnyNonStaticKind(seg, seed + pass * 101 + (i + 1) * 53.7);
+          if (replacement) {
+            out[i] = replacement;
+            staticRun = 0;
+            timedRun = TIMED_KINDS.has(replacement) ? 1 : 0;
+          }
+        }
+      } else {
+        staticRun = 0;
+      }
+
+      const postKind = out[i];
+      if (postKind !== null && LAUNCH_KINDS.has(postKind)) {
+        if (segmentsSinceLaunch < config.minSegmentsBetweenLaunches) {
+          out[i] = 'segment';
+        } else {
+          segmentsSinceLaunch = 0;
+        }
+      } else if (postKind === 'segment') {
+        if (Number.isFinite(segmentsSinceLaunch)) segmentsSinceLaunch += 1;
+      }
+    }
+  }
+
+  const varied = enforceHighVarietyKinds(out, segments, config, seed + 29.8);
+  const launchEnforced = enforceMinimumLaunchKinds(varied, segments, config, seed + 41.2);
+  const hazardEnforced = enforceMinimumHazardKind(launchEnforced, segments, config, seed + 53.9);
+
+  if (satisfiesResolvedConstraints(hazardEnforced, config)) return hazardEnforced;
+
+  // Final conservative cleanup: convert conflicting entries to static segments.
+  const safe = [...hazardEnforced];
+  if (safe.length > 0) {
+    if (safe[0] === null) safe[0] = 'segment';
+    if (safe[safe.length - 1] === null) safe[safe.length - 1] = 'segment';
+  }
+
+  let segmentsSinceLaunch = Number.POSITIVE_INFINITY;
+  let timedRun = 0;
+  for (let i = 0; i < safe.length; i++) {
+    if (i > 0) {
+      for (const [fromKind, toKind] of config.forbidPairs) {
+        if (safe[i - 1] === fromKind && safe[i] === toKind) {
+          safe[i] = 'segment';
+          break;
+        }
+      }
+    }
+    const kind = safe[i];
+    if (kind !== null && TIMED_KINDS.has(kind)) {
+      timedRun += 1;
+      if (timedRun > config.maxTimedRun) {
+        safe[i] = 'segment';
+        timedRun = 0;
+      }
+    } else {
+      timedRun = 0;
+    }
+    const postKind = safe[i];
+    if (postKind !== null && LAUNCH_KINDS.has(postKind)) {
+      if (segmentsSinceLaunch < config.minSegmentsBetweenLaunches) {
+        safe[i] = 'segment';
+      } else {
+        segmentsSinceLaunch = 0;
+      }
+    } else if (postKind === 'segment') {
+      if (Number.isFinite(segmentsSinceLaunch)) segmentsSinceLaunch += 1;
+    }
+  }
+  return safe;
+}
+
+export function classifyEnergy(value: number): EnergyState {
+  if (value < 0.33) return 'low';
+  if (value < 0.66) return 'medium';
+  return 'high';
 }
 
 export function generatePlatformKindSequence(
@@ -517,49 +718,44 @@ export function generatePlatformKindSequence(
   seed = 1,
   rules: KindSequenceRules = defaultKindSequenceRules
 ): Array<RuntimePlatformKind | null> {
-  const resolvedRules = resolveKindRules(rules);
-  const history: Array<RuntimePlatformKind | null> = [];
-  const result: Array<RuntimePlatformKind | null> = [];
-  const recentPatternIds: string[] = [];
-  let previousExit: PatternFlowTag = 'safe';
+  return generatePlatformKindSequenceWithTrace(segments, seed, rules).kinds;
+}
 
-  for (let i = 0; i < segments.length; ) {
-    const candidates = collectPatternCandidates(i, segments, previousExit, recentPatternIds, seed);
-    let pickedPattern: PatternTemplate | null = null;
-    let placement: Array<RuntimePlatformKind | null> | null = null;
+export function generatePlatformKindSequenceWithTrace(
+  segments: PatternSegmentInput[],
+  seed = 1,
+  rules: KindSequenceRules = defaultKindSequenceRules
+): { kinds: Array<RuntimePlatformKind | null>; trace: PatternSelectionTrace } {
+  const resolved = resolveKindRules(rules);
+  const gated = segments.map((seg) =>
+    applyEnergyGate(
+      {
+        ...seg,
+        rhythmDensity: clampUnit(seg.rhythmDensity),
+        platformTypes: toUniqueRuntimePlatformTypes(seg.platformTypes)
+      },
+      resolved.enableEnergyGate
+    )
+  );
+  const selected = selectPatternTokens(gated, seed);
+  const mappedKinds = selected.tokens.map((token, idx) => {
+    const seg = gated[idx] ?? { energyState: 'medium', platformTypes: ['static'], rhythmDensity: 0.5 };
+    return chooseKindFromToken(token, seg, seed + (idx + 1) * 37.1);
+  });
+  const finalKinds = applyKindConstraints(mappedKinds, gated, resolved, seed + 11.4);
 
-    for (const candidate of candidates) {
-      const trial = tryPlacePattern(candidate, i, segments, history, resolvedRules, seed);
-      if (!trial) continue;
-      pickedPattern = candidate;
-      placement = trial;
-      break;
-    }
-
-    if (!placement) {
-      const fallback = pickLegacyKind(segments[i], history, resolvedRules, seed + (i + 1) * 97.137);
-      result.push(fallback);
-      history.push(fallback);
-      previousExit = inferFlowTagFromKind(fallback);
-      i += 1;
-      continue;
-    }
-
-    for (const kind of placement) {
-      result.push(kind);
-      history.push(kind);
-    }
-    if (pickedPattern) {
-      recentPatternIds.unshift(pickedPattern.id);
-      if (recentPatternIds.length > patternReuseCooldown) recentPatternIds.pop();
-      previousExit = pickedPattern.exit;
-    } else {
-      previousExit = inferFlowTagFromKind(placement[placement.length - 1] ?? null);
-    }
-    i += placement.length;
-  }
-
-  return result;
+  const trace: PatternSelectionTrace = {
+    seed,
+    mode: 'pattern-random',
+    constraints: resolved,
+    patternPoolSizes: selected.patternPoolSizes,
+    patternPicks: selected.patternPicks,
+    patternUsage: selected.patternUsage,
+    tokens: [...selected.tokens],
+    mappedKinds: [...mappedKinds],
+    finalKinds: [...finalKinds]
+  };
+  return { kinds: finalKinds, trace };
 }
 
 export function generateSegments(analysis: AnalysisData, windowSize = 4): Segment[] {

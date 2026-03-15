@@ -558,6 +558,7 @@ Editor controls should use the same hard-edged UI language used by runtime overl
   * stop uses a square glyph (`■`)
   * keep `aria-label`/tooltip text in English (`Play MIDI`, `Stop MIDI`)
 * `Level Save` controls expose editable `Default BPM fallback` plus read-only `Grid columns (auto)` status text (no editable grid-columns input)
+* Editor top action stack includes `Back to Game` (warm primary) and `Open Pattern Editor` (cool action)
 * Segment BPM editing is first-class in the segments table and drives runtime tempo zoning
 * `Level Save` panel includes audio-quality authoring controls:
   * profile selector (`performance`, `balanced`, `high`)
@@ -568,6 +569,7 @@ Editor controls should use the same hard-edged UI language used by runtime overl
   * `Levels` box for level browsing/loading only
   * `Level Save` remains its own dedicated box (not merged with MIDI/Levels controls), and contains the base-name input plus `Save in Levels` / `Download Level` actions
   * `Debug` box is placed directly below `Level Save` and provides upload/conversion trace lines plus a `Clear debug log` action
+  * `Pattern Runtime Trace` box is placed below `Debug` and provides a scrollable monospace dump of the latest generation trace (pattern picks, usage stats, token mapping)
 * `MIDI` and `Levels` file selectors use an icon refresh control (`U+1F5D8`) positioned to the left of the dropdown; refresh button height must match the adjacent dropdown height and remain visually flush (no vertical step).
 * `Upload your file` opens a centered modal with:
   * dark backdrop overlay to preserve focus on upload flow
@@ -584,6 +586,12 @@ Editor controls should use the same hard-edged UI language used by runtime overl
   * scrollable dark panel with compact monospace lines and timestamps
   * neutral lines use secondary text color, success lines use cool accent, errors use danger red
   * latest log entry auto-scrolls into view
+* Pattern runtime trace presentation rules:
+  * use a fixed-height, scrollable monospace preformatted panel
+  * keep neutral text color (`#9DB6DE`) on dark background (`#0B0F1A`) with border (`#1B2A45`)
+  * preserve one-line-per-record formatting for scan speed (pattern picks, pattern usage, index mapping)
+  * usage stats must stay visible even when the source trace omits an explicit usage array (derived-from-picks fallback label is allowed)
+  * include an explicit `used/total` row and show unused eligible patterns as `picks=0` for full pool coverage
 
 Editor scrollbars must match runtime color families:
 
@@ -635,6 +643,25 @@ Segments table conventions:
 * Numeric platform fields use compact inputs (75% width) for dense editing
 * `Kind` uses the same platform naming shown in the context menu (`static`, `beat`, `alternateBeat`, `ghost`, `reverseGhost`, `elevator`, `shuttle`, `cross`, `spring`, `launch30`, `launch60`, `hazard`)
 * Enemy columns are active only for selected `static` platforms (runtime `segment`); for non-static rows they remain disabled to avoid ambiguous mapping
+
+---
+
+## Pattern Editor Visual Rules (`/pattern-editor.html`)
+
+Pattern editor is a standalone scene but must remain in the same visual family:
+
+* Dark panel/surface colors and monospace typography identical to level editor.
+* Token minimap uses high-contrast semantic fills:
+  * `segment`: slate blue
+  * `gap`: near-black
+  * `timed`: warm gold
+  * `mobile`: cyan
+  * `hazard`: red
+  * `launch`: mint/green
+* Token palette buttons are direct semantic swatches; active token has a clear highlight ring.
+* `Save Catalog` uses warm primary action style.
+* `Delete Pattern` uses danger style.
+* Constraint values (`maxGapRun`, `minSegmentBeforeLaunch`) are read-only telemetry and should be visibly grouped as derived metadata, not editable authoring fields.
 
 ---
 

@@ -143,7 +143,8 @@ This keeps pressure and readability coherent with the musical tempo of each zone
 
 Current prototype runtime tuning (Feb 2026):
 
-* traversal distance baseline: `35.2px` per beat equivalent
+* traversal distance baseline: `70.4px` per beat equivalent
+* traversal pacing target: about `2 beats` to cross a `120px` platform at sustained forward speed (previously ~4 beats)
 * logical tempo/grid column width: `32px`
 * dash tuning: `620px/s` for `150ms`, cooldown `3000ms`, tap window `240ms`
 * acceleration: `640 px/s² * tempo_scale`
@@ -600,7 +601,7 @@ audio_analysis.json:
 }
 ```
 
-Godot loads this data at level-generation time.
+The Phaser runtime/editor loads this data at level-generation time.
 
 ---
 
@@ -645,6 +646,37 @@ Segment {
 ```
 
 Procedural variation occurs **within authored constraints**.
+
+---
+
+## **5.5 Pattern-Driven Runtime Selection (Implemented)**
+
+Runtime generation now uses **deterministic random pattern picks**, not WFC.
+
+* Source catalog:
+  * `assets/procgen/runtime_patterns_v1.json` (authored pattern dataset)
+  * exported runtime mirror: `src/core/patternCatalog.ts`
+* Pattern pick model:
+  * generation iterates left-to-right and picks one predefined pattern at a time
+  * each picked pattern contributes a 1D token stream (`segment`, `gap`, `timed`, `mobile`, `hazard`, `launch`)
+  * token -> runtime platform mapping:
+    * `segment -> segment`
+    * `gap -> no platform in slot`
+    * `timed -> beat/alternateBeat/ghost/reverseGhost`
+    * `mobile -> elevator/shuttle/cross/spring`
+    * `hazard -> hazard`
+    * `launch -> launch30/launch60`
+* Energy-guided pools:
+  * pools are disjoint by design (`low`, `medium`, `high`)
+  * `low`: picks only low-energy patterns
+  * `medium`: picks only medium-energy patterns
+  * `high`: picks only high-energy patterns
+* Anti-repetition cooldown:
+  * the picker applies a recency penalty to recently used pattern IDs (lookback window of 3 picks)
+  * immediate repeats are strongly down-weighted; the penalty decays over the next picks
+* Compatibility policy:
+  * compatibility between consecutive motif chunks is authored manually in the pattern set
+  * runtime still applies minimal safety constraints (spawn/end support, launch spacing, timed-run cap, anti-stall cap, forbidden beat/alternate transitions)
 
 ---
 
@@ -837,16 +869,36 @@ The project includes a browser editor at `/editor.html` for runtime-oriented lev
 * Left control panel + right workspace layout.
 * User-facing sections:
   * top `Back to Game` action
+  * top `Open Pattern Editor` action (opens `/pattern-editor.html`)
   * dedicated `MIDI` box (MIDI folder list/load, `Upload your file` popup action, transport controls, playback quality selector, MIDI status)
   * dedicated `Levels` box (level folder list/load)
   * both `MIDI` and `Levels` selectors place a refresh icon button (`U+1F5D8`) on the left side of the file dropdown, with the same control height as the dropdown and flush top/bottom alignment (no visual step)
   * dedicated `Level Save` box (level base-name, runtime audio-quality profile, BPM fallback, `Save in Levels`, `Download Level`)
   * dedicated `Debug` box under `Level Save` with timestamped upload/conversion diagnostics and manual clear action
+  * dedicated `Pattern Runtime Trace` box under `Debug` that reports the latest generated pass (pattern picks, per-pattern usage stats, tokens, mapped kinds, final kinds)
+  * when `patternUsage` is unavailable in the trace payload, the editor derives per-pattern usage stats from `patternPicks` so the stats block remains visible
+  * usage stats include all patterns eligible for the current run (unused patterns are listed with `picks=0`) plus a compact `used/total` summary line
   * segment table editor
   * runtime platform layout canvas
 * Segment authoring source of truth:
   * segments are derived from MIDI or loaded JSON data
   * no manual `Load sample` / `Add segment` controls in the editor UI
+
+### Pattern Editor Scene (`/pattern-editor.html`)
+
+* Standalone browser scene dedicated to runtime pattern authoring.
+* Loads current catalog from `assets/procgen/runtime_patterns_v1.json`.
+* Supports add/duplicate/delete/edit of catalog entries.
+* Includes explicit selectors for:
+  * `flow1d` / `micro2d`
+  * `energyHint` (`low`, `medium`, `high`)
+* Includes a token minimap canvas for direct token placement:
+  * `segment`, `gap`, `timed`, `mobile`, `hazard`, `launch`
+* Pattern constraints are not manually edited:
+  * `Save Pattern` recomputes `maxGapRun` and `minSegmentBeforeLaunch` from tokens automatically.
+* `Save Catalog` persists JSON and regenerates runtime TS mirror:
+  * `assets/procgen/runtime_patterns_v1.json`
+  * `src/core/patternCatalog.ts`
 
 ### Layout Editor
 
@@ -939,12 +991,13 @@ The project includes a browser editor at `/editor.html` for runtime-oriented lev
   * if no generated `static` segment covers spawn, a fallback spawn-support segment is injected immediately left of spawn (its right edge aligns to spawn)
   * default platform width is 2 horizontal grid cells
   * each segment is fixed to 2 beats and generates exactly 1 platform slot
-  * platform kind generation uses a deterministic, sequence-aware motif system:
-    * generation samples from a curated catalog of short puzzle-like motifs (`2-4` slots each), not only independent per-slot picks
-    * each motif defines ordered kind preferences per step and flow contracts (`entry/exit`) used for motif-to-motif compatibility
-    * motif selection is weighted by segment energy, rhythm density, motif complexity, deterministic seed roll, and short reuse cooldown
-    * if a motif cannot be placed safely under current constraints, generation falls back to per-slot weighted sampling for that position
-  * hard constraints are enforced globally on every chosen slot (motif or fallback):
+  * platform kind generation uses deterministic random picks from the defined pattern catalog (energy-disjoint pools + anti-repeat cooldown weighting)
+  * every generation pass stores an editor-visible pattern trace payload with:
+    * selected pattern timeline (`segmentIndex`, `patternId`, `energyHint`, `weight`, `length`)
+    * aggregated usage stats per pattern (`picks`, `segmentsCovered`, `avgWeight`)
+    * generated token stream and mapped kinds
+    * final kinds after safety constraints
+  * hard constraints are enforced globally on every chosen slot:
     * `beat` cannot be followed by `beat` or `alternateBeat`
     * `alternateBeat` cannot be followed by `beat` or `alternateBeat`
     * timed-platform runs (`beat`, `alternateBeat`, `ghost`, `reverseGhost`) are capped at 2 in a row

@@ -49,7 +49,7 @@ import {
   isHazardPlatformDanger,
   isGhostPlatformSolid
 } from '../dist/src/core/platforms.js';
-import { classifyEnergy, generatePlatformKindSequence, generateSegments } from '../dist/src/core/levelGenerator.js';
+import { classifyEnergy, generatePlatformKindSequence, generatePlatformKindSequenceWithTrace, generateSegments } from '../dist/src/core/levelGenerator.js';
 import { resolveIntent } from '../dist/src/core/input.js';
 import { applyDamage, resolveEnemyCollision, updateFallingRockEnemy, updateFlyingEnemy, updatePatrolEnemy } from '../dist/src/core/enemies.js';
 
@@ -467,6 +467,27 @@ test('platform kind sequence applies energy gate to high-complexity kinds', () =
   for (const kind of sequence) {
     assert.ok(kind === null || kind === 'segment');
   }
+});
+
+test('pattern picker uses disjoint energy pools by segment energy', () => {
+  const makeSegments = (energyState) =>
+    Array.from({ length: 48 }, () => ({
+      energyState,
+      platformTypes: ['static', 'beat', 'alternateBeat', 'ghost', 'reverseGhost', 'elevator', 'shuttle', 'cross', 'spring', 'hazard', 'launch30', 'launch60'],
+      rhythmDensity: 0.8
+    }));
+
+  const lowTrace = generatePlatformKindSequenceWithTrace(makeSegments('low'), 111).trace;
+  const mediumTrace = generatePlatformKindSequenceWithTrace(makeSegments('medium'), 222).trace;
+  const highTrace = generatePlatformKindSequenceWithTrace(makeSegments('high'), 333).trace;
+
+  assert.ok(lowTrace.patternPicks.length > 0);
+  assert.ok(mediumTrace.patternPicks.length > 0);
+  assert.ok(highTrace.patternPicks.length > 0);
+
+  for (const pick of lowTrace.patternPicks) assert.equal(pick.energyHint, 'low');
+  for (const pick of mediumTrace.patternPicks) assert.equal(pick.energyHint, 'medium');
+  for (const pick of highTrace.patternPicks) assert.equal(pick.energyHint, 'high');
 });
 
 test('platform kind sequence anti-stall avoids long static runs when alternatives exist', () => {

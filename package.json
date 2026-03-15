@@ -7,6 +7,7 @@
     "build": "node node_modules/typescript/bin/tsc -p tsconfig.json",
     "test": "npm run build && node --test test/*.test.js",
     "test:cli:midi-scrub": "npm run build && node scripts/midi-scrub-cli-e2e.mjs",
+    "build:patterns": "node scripts/build-patterns.mjs --output assets/procgen/runtime_patterns_v1.json --ts-out src/core/patternCatalog.ts --target-count 50",
     "check": "node node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
     "start": "npm run build && node scripts/serve.mjs",
     "play:cli": "npm run build && node scripts/play-cli.mjs"

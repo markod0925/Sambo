@@ -14,6 +14,8 @@ const port = Number(process.env.PORT) || 4173;
 const host = process.env.HOST || '127.0.0.1';
 const midiDir = path.join(root, 'MIDI');
 const levelsDir = path.join(root, 'Levels');
+const patternCatalogJsonPath = path.join(root, 'assets', 'procgen', 'runtime_patterns_v1.json');
+const patternCatalogTsPath = path.join(root, 'src', 'core', 'patternCatalog.ts');
 const MAX_BODY_BYTES = 25_000_000;
 const UPLOAD_JOB_TTL_MS = 10 * 60 * 1000;
 const uploadJobs = new Map();
@@ -26,6 +28,9 @@ const types = {
   '.mid': 'audio/midi',
   '.midi': 'audio/midi'
 };
+const validPatternKinds = new Set(['flow1d', 'micro2d']);
+const validPatternTokens = new Set(['segment', 'gap', 'timed', 'mobile', 'hazard', 'launch']);
+const validPatternEnergies = new Set(['low', 'medium', 'high']);
 
 function sendJson(res, status, data) {
   res.writeHead(status, {
@@ -88,6 +93,146 @@ function compareLevelNames(a, b) {
   const bRuntime = bx.endsWith('.runtime.json') ? 0 : 1;
   if (aRuntime !== bRuntime) return aRuntime - bRuntime;
   return ax.localeCompare(bx, undefined, { numeric: true });
+}
+
+function normalizePatternToken(value) {
+  const token = String(value || '').trim().toLowerCase();
+  return validPatternTokens.has(token) ? token : 'segment';
+}
+
+function normalizePatternRows(kind, tokens) {
+  if (kind === 'flow1d') {
+    let row = [];
+    if (Array.isArray(tokens) && tokens.length > 0 && !Array.isArray(tokens[0])) {
+      row = tokens;
+    } else if (Array.isArray(tokens) && Array.isArray(tokens[0])) {
+      row = tokens[0];
+    }
+    const normalizedRow = row.map((token) => normalizePatternToken(token));
+    const trimmed = normalizedRow.slice(0, 32);
+    while (trimmed.length < 3) trimmed.push('segment');
+    return [trimmed];
+  }
+
+  let rows = [];
+  if (Array.isArray(tokens) && Array.isArray(tokens[0])) {
+    rows = tokens;
+  } else if (Array.isArray(tokens) && tokens.length > 0) {
+    rows = [tokens];
+  }
+  const normalizedRows = rows.slice(0, 6).map((row) => (Array.isArray(row) ? row.map((token) => normalizePatternToken(token)) : []));
+  const width = Math.max(3, Math.min(16, normalizedRows.reduce((max, row) => Math.max(max, row.length), 0) || 6));
+  const paddedRows = normalizedRows.slice(0, 6).map((row) => {
+    const copy = row.slice(0, width);
+    while (copy.length < width) copy.push('gap');
+    return copy;
+  });
+  while (paddedRows.length < 3) {
+    const fill = new Array(width).fill(paddedRows.length === 2 ? 'segment' : 'gap');
+    paddedRows.push(fill);
+  }
+  return paddedRows;
+}
+
+function derivePatternConstraints(rows) {
+  const flat = rows.flat();
+  let maxGapRun = 0;
+  let currentGapRun = 0;
+  let minSegmentBeforeLaunch = 1;
+  let currentSegmentLead = 0;
+  for (const token of flat) {
+    if (token === 'gap') {
+      currentGapRun += 1;
+      maxGapRun = Math.max(maxGapRun, currentGapRun);
+    } else {
+      currentGapRun = 0;
+    }
+
+    if (token === 'segment') {
+      currentSegmentLead += 1;
+    } else if (token === 'launch') {
+      minSegmentBeforeLaunch = Math.max(minSegmentBeforeLaunch, currentSegmentLead || 1);
+      currentSegmentLead = 0;
+    } else {
+      currentSegmentLead = 0;
+    }
+  }
+  return {
+    maxGapRun: Math.max(1, maxGapRun || 1),
+    minSegmentBeforeLaunch: Math.max(1, minSegmentBeforeLaunch || 1)
+  };
+}
+
+function normalizeSourceBreakdown(raw) {
+  const source = raw && typeof raw === 'object' ? raw : {};
+  return {
+    vglc: Math.max(0, Number(source.vglc) || 0),
+    mario: Math.max(0, Number(source.mario) || 0),
+    opensurge: Math.max(0, Number(source.opensurge) || 0),
+    supertux: Math.max(0, Number(source.supertux) || 0)
+  };
+}
+
+function normalizePatternRecord(raw, index) {
+  const kind = validPatternKinds.has(String(raw?.kind || '')) ? String(raw.kind) : 'flow1d';
+  const rows = normalizePatternRows(kind, raw?.tokens);
+  const constraints = derivePatternConstraints(rows);
+  const energyHint = validPatternEnergies.has(String(raw?.energyHint || '')) ? String(raw.energyHint) : 'medium';
+  const weight = Math.max(0.0001, Number(raw?.weight) || 1);
+  const sourceBreakdown = normalizeSourceBreakdown(raw?.sourceBreakdown);
+  return {
+    patternId: typeof raw?.patternId === 'string' && raw.patternId.trim() ? raw.patternId.trim() : `p${String(index + 1).padStart(3, '0')}`,
+    kind,
+    tokens: kind === 'flow1d' ? rows[0] : rows,
+    weight: Number(weight.toFixed(4)),
+    sourceBreakdown,
+    energyHint,
+    constraints
+  };
+}
+
+function normalizePatternCatalog(rawPatterns) {
+  const rows = Array.isArray(rawPatterns) ? rawPatterns : [];
+  const normalized = rows.map((entry, index) => normalizePatternRecord(entry, index));
+  const usedIds = new Set();
+  let counter = 1;
+  for (const row of normalized) {
+    let id = row.patternId;
+    while (!id || usedIds.has(id)) {
+      id = `p${String(counter).padStart(3, '0')}`;
+      counter += 1;
+    }
+    row.patternId = id;
+    usedIds.add(id);
+  }
+  return normalized;
+}
+
+function readPatternCatalog() {
+  if (!fs.existsSync(patternCatalogJsonPath)) return [];
+  const parsed = JSON.parse(fs.readFileSync(patternCatalogJsonPath, 'utf8'));
+  return normalizePatternCatalog(parsed);
+}
+
+function writePatternCatalog(patterns) {
+  fs.mkdirSync(path.dirname(patternCatalogJsonPath), { recursive: true });
+  fs.mkdirSync(path.dirname(patternCatalogTsPath), { recursive: true });
+  fs.writeFileSync(patternCatalogJsonPath, `${JSON.stringify(patterns, null, 2)}\n`, 'utf8');
+  const tsSource = [
+    "export interface RuntimePatternRecord {",
+    "  patternId: string;",
+    "  kind: 'flow1d' | 'micro2d';",
+    "  tokens: Array<'segment' | 'gap' | 'timed' | 'mobile' | 'hazard' | 'launch'> | Array<Array<'segment' | 'gap' | 'timed' | 'mobile' | 'hazard' | 'launch'>>;",
+    "  weight: number;",
+    "  sourceBreakdown: { vglc: number; mario: number; opensurge: number; supertux: number; };",
+    "  energyHint: 'low' | 'medium' | 'high';",
+    "  constraints: { maxGapRun: number; minSegmentBeforeLaunch: number; };",
+    "}",
+    '',
+    `export const RUNTIME_PATTERN_CATALOG: RuntimePatternRecord[] = ${JSON.stringify(patterns, null, 2)};`,
+    ''
+  ].join('\n');
+  fs.writeFileSync(patternCatalogTsPath, tsSource, 'utf8');
 }
 
 function clampProgress(value) {
@@ -358,6 +503,16 @@ http
         return;
       }
 
+      if (req.method === 'GET' && requestUrl.pathname === '/api/patterns') {
+        try {
+          const patterns = readPatternCatalog();
+          sendJson(res, 200, { patterns });
+        } catch (err) {
+          sendJson(res, 500, { error: err instanceof Error ? err.message : 'Unable to load pattern catalog' });
+        }
+        return;
+      }
+
       if (req.method === 'GET' && requestUrl.pathname === '/api/midi-file') {
         const requested = safeBasename(requestUrl.searchParams.get('name') || '');
         if (!isMidiFile(requested)) {
@@ -535,6 +690,33 @@ http
 
         fs.writeFileSync(targetPath, JSON.stringify(data, null, 2));
         sendJson(res, 200, { ok: true, path: `Levels/${filename}` });
+        return;
+      }
+
+      if (req.method === 'POST' && requestUrl.pathname === '/api/save-patterns') {
+        let payload;
+        try {
+          const body = await parseBody(req);
+          payload = JSON.parse(body || '{}');
+        } catch (err) {
+          const statusCode = err && typeof err === 'object' && 'statusCode' in err ? Number(err.statusCode) : 400;
+          sendJson(res, Number.isFinite(statusCode) ? statusCode : 400, {
+            error: err instanceof Error ? err.message : 'Invalid JSON payload'
+          });
+          return;
+        }
+        const patterns = normalizePatternCatalog(payload?.patterns);
+        if (!Array.isArray(patterns) || patterns.length <= 0) {
+          sendJson(res, 400, { error: 'patterns must be a non-empty array' });
+          return;
+        }
+        writePatternCatalog(patterns);
+        sendJson(res, 200, {
+          ok: true,
+          path: 'assets/procgen/runtime_patterns_v1.json',
+          tsMirror: 'src/core/patternCatalog.ts',
+          count: patterns.length
+        });
         return;
       }
 

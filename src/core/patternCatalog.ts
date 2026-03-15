@@ -1,0 +1,1981 @@
+export interface RuntimePatternRecord {
+  patternId: string;
+  kind: 'flow1d' | 'micro2d';
+  tokens: Array<'segment' | 'gap' | 'timed' | 'mobile' | 'hazard' | 'launch'> | Array<Array<'segment' | 'gap' | 'timed' | 'mobile' | 'hazard' | 'launch'>>;
+  weight: number;
+  sourceBreakdown: { vglc: number; mario: number; opensurge: number; supertux: number; };
+  energyHint: 'low' | 'medium' | 'high';
+  constraints: { maxGapRun: number; minSegmentBeforeLaunch: number; };
+}
+
+export const RUNTIME_PATTERN_CATALOG: RuntimePatternRecord[] = [
+  {
+    "patternId": "p001",
+    "kind": "flow1d",
+    "tokens": [
+      "segment",
+      "gap",
+      "segment",
+      "gap",
+      "segment",
+      "segment"
+    ],
+    "weight": 1.2,
+    "sourceBreakdown": {
+      "vglc": 0.3934,
+      "mario": 0.5005,
+      "opensurge": 0.0332,
+      "supertux": 0.0728
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 1,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p002",
+    "kind": "micro2d",
+    "tokens": [
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "segment",
+        "gap",
+        "segment",
+        "gap",
+        "segment",
+        "segment"
+      ]
+    ],
+    "weight": 1.4712,
+    "sourceBreakdown": {
+      "vglc": 0.2473,
+      "mario": 0.6271,
+      "opensurge": 0.1201,
+      "supertux": 0.0055
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 12,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p003",
+    "kind": "flow1d",
+    "tokens": [
+      "segment",
+      "segment",
+      "segment",
+      "segment",
+      "segment",
+      "segment",
+      "segment"
+    ],
+    "weight": 1.2912,
+    "sourceBreakdown": {
+      "vglc": 0.3877,
+      "mario": 0.513,
+      "opensurge": 0.0313,
+      "supertux": 0.0679
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 1,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p004",
+    "kind": "micro2d",
+    "tokens": [
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment"
+      ]
+    ],
+    "weight": 1.2183,
+    "sourceBreakdown": {
+      "vglc": 0.2325,
+      "mario": 0.6313,
+      "opensurge": 0.1316,
+      "supertux": 0.0046
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 14,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p005",
+    "kind": "flow1d",
+    "tokens": [
+      "segment",
+      "segment",
+      "segment",
+      "segment",
+      "segment",
+      "segment",
+      "segment",
+      "segment"
+    ],
+    "weight": 1.1377,
+    "sourceBreakdown": {
+      "vglc": 0.3826,
+      "mario": 0.524,
+      "opensurge": 0.0296,
+      "supertux": 0.0638
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 1,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p006",
+    "kind": "micro2d",
+    "tokens": [
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment"
+      ]
+    ],
+    "weight": 1.1227,
+    "sourceBreakdown": {
+      "vglc": 0.2663,
+      "mario": 0.7269,
+      "opensurge": 0.0031,
+      "supertux": 0.0037
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 18,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p007",
+    "kind": "micro2d",
+    "tokens": [
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment"
+      ]
+    ],
+    "weight": 1.0521,
+    "sourceBreakdown": {
+      "vglc": 0.2191,
+      "mario": 0.6337,
+      "opensurge": 0.1432,
+      "supertux": 0.004
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 16,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p008",
+    "kind": "flow1d",
+    "tokens": [
+      "segment",
+      "segment",
+      "segment",
+      "segment",
+      "segment",
+      "segment",
+      "segment",
+      "segment",
+      "segment"
+    ],
+    "weight": 1.0223,
+    "sourceBreakdown": {
+      "vglc": 0.3796,
+      "mario": 0.5318,
+      "opensurge": 0.0283,
+      "supertux": 0.0603
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 1,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p009",
+    "kind": "micro2d",
+    "tokens": [
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment"
+      ]
+    ],
+    "weight": 0.969,
+    "sourceBreakdown": {
+      "vglc": 0.2527,
+      "mario": 0.7417,
+      "opensurge": 0.002,
+      "supertux": 0.0035
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 21,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p010",
+    "kind": "flow1d",
+    "tokens": [
+      "segment",
+      "segment",
+      "segment",
+      "segment",
+      "segment",
+      "segment",
+      "segment",
+      "segment",
+      "segment",
+      "segment"
+    ],
+    "weight": 0.9035,
+    "sourceBreakdown": {
+      "vglc": 0.377,
+      "mario": 0.5378,
+      "opensurge": 0.0269,
+      "supertux": 0.0584
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 1,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p011",
+    "kind": "micro2d",
+    "tokens": [
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment"
+      ]
+    ],
+    "weight": 0.8604,
+    "sourceBreakdown": {
+      "vglc": 0.2407,
+      "mario": 0.7549,
+      "opensurge": 0.0011,
+      "supertux": 0.0033
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 24,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p012",
+    "kind": "micro2d",
+    "tokens": [
+      [
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment"
+      ],
+      [
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment"
+      ],
+      [
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment"
+      ]
+    ],
+    "weight": 0.1603,
+    "sourceBreakdown": {
+      "vglc": 0.9599,
+      "mario": 0,
+      "opensurge": 0,
+      "supertux": 0.0401
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 1,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p013",
+    "kind": "micro2d",
+    "tokens": [
+      [
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment"
+      ],
+      [
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment"
+      ],
+      [
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment"
+      ]
+    ],
+    "weight": 0.1364,
+    "sourceBreakdown": {
+      "vglc": 0.9561,
+      "mario": 0,
+      "opensurge": 0,
+      "supertux": 0.0439
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 1,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p014",
+    "kind": "micro2d",
+    "tokens": [
+      [
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment"
+      ],
+      [
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment"
+      ],
+      [
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment"
+      ]
+    ],
+    "weight": 0.1177,
+    "sourceBreakdown": {
+      "vglc": 0.9517,
+      "mario": 0,
+      "opensurge": 0,
+      "supertux": 0.0483
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 1,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p015",
+    "kind": "micro2d",
+    "tokens": [
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "segment"
+      ]
+    ],
+    "weight": 0.1125,
+    "sourceBreakdown": {
+      "vglc": 0.2283,
+      "mario": 0.639,
+      "opensurge": 0,
+      "supertux": 0.1327
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 17,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p016",
+    "kind": "micro2d",
+    "tokens": [
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "segment",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ]
+    ],
+    "weight": 0.1081,
+    "sourceBreakdown": {
+      "vglc": 0.15,
+      "mario": 0.7039,
+      "opensurge": 0,
+      "supertux": 0.1461
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 12,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p017",
+    "kind": "flow1d",
+    "tokens": [
+      "hazard",
+      "hazard",
+      "hazard",
+      "hazard",
+      "hazard",
+      "hazard"
+    ],
+    "weight": 0.0998,
+    "sourceBreakdown": {
+      "vglc": 0.2915,
+      "mario": 0.7068,
+      "opensurge": 0.0017,
+      "supertux": 0
+    },
+    "energyHint": "high",
+    "constraints": {
+      "maxGapRun": 1,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p018",
+    "kind": "flow1d",
+    "tokens": [
+      "segment",
+      "gap",
+      "gap",
+      "gap",
+      "gap",
+      "gap"
+    ],
+    "weight": 0.1005,
+    "sourceBreakdown": {
+      "vglc": 0.0559,
+      "mario": 0.6017,
+      "opensurge": 0,
+      "supertux": 0.3424
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 5,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p019",
+    "kind": "flow1d",
+    "tokens": [
+      "gap",
+      "gap",
+      "gap",
+      "gap",
+      "gap",
+      "segment"
+    ],
+    "weight": 0.096,
+    "sourceBreakdown": {
+      "vglc": 0.061,
+      "mario": 0.5997,
+      "opensurge": 0,
+      "supertux": 0.3393
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 5,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p020",
+    "kind": "flow1d",
+    "tokens": [
+      "segment",
+      "segment",
+      "segment",
+      "segment",
+      "segment",
+      "gap"
+    ],
+    "weight": 0.0951,
+    "sourceBreakdown": {
+      "vglc": 0.1791,
+      "mario": 0.5299,
+      "opensurge": 0.0015,
+      "supertux": 0.2896
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 1,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p021",
+    "kind": "micro2d",
+    "tokens": [
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "segment"
+      ]
+    ],
+    "weight": 0.0918,
+    "sourceBreakdown": {
+      "vglc": 0.235,
+      "mario": 0.6359,
+      "opensurge": 0,
+      "supertux": 0.129
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 20,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p022",
+    "kind": "flow1d",
+    "tokens": [
+      "gap",
+      "segment",
+      "segment",
+      "segment",
+      "segment",
+      "segment"
+    ],
+    "weight": 0.0888,
+    "sourceBreakdown": {
+      "vglc": 0.2085,
+      "mario": 0.4897,
+      "opensurge": 0.0016,
+      "supertux": 0.3002
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 1,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p023",
+    "kind": "micro2d",
+    "tokens": [
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "segment",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ]
+    ],
+    "weight": 0.0825,
+    "sourceBreakdown": {
+      "vglc": 0.1591,
+      "mario": 0.6937,
+      "opensurge": 0,
+      "supertux": 0.1472
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 14,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p024",
+    "kind": "micro2d",
+    "tokens": [
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "segment"
+      ]
+    ],
+    "weight": 0.0807,
+    "sourceBreakdown": {
+      "vglc": 0.2117,
+      "mario": 0.6799,
+      "opensurge": 0,
+      "supertux": 0.1084
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 23,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p025",
+    "kind": "flow1d",
+    "tokens": [
+      "segment",
+      "segment",
+      "segment",
+      "segment",
+      "gap",
+      "gap"
+    ],
+    "weight": 0.0798,
+    "sourceBreakdown": {
+      "vglc": 0.1681,
+      "mario": 0.6326,
+      "opensurge": 0,
+      "supertux": 0.1993
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 2,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p026",
+    "kind": "flow1d",
+    "tokens": [
+      "segment",
+      "segment",
+      "segment",
+      "gap",
+      "gap",
+      "gap"
+    ],
+    "weight": 0.0762,
+    "sourceBreakdown": {
+      "vglc": 0.132,
+      "mario": 0.6564,
+      "opensurge": 0.0018,
+      "supertux": 0.2098
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 3,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p027",
+    "kind": "flow1d",
+    "tokens": [
+      "segment",
+      "segment",
+      "segment",
+      "segment",
+      "segment",
+      "segment",
+      "gap"
+    ],
+    "weight": 0.0759,
+    "sourceBreakdown": {
+      "vglc": 0.1953,
+      "mario": 0.5606,
+      "opensurge": 0.0018,
+      "supertux": 0.2423
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 1,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p028",
+    "kind": "flow1d",
+    "tokens": [
+      "segment",
+      "segment",
+      "gap",
+      "gap",
+      "gap",
+      "gap"
+    ],
+    "weight": 0.0747,
+    "sourceBreakdown": {
+      "vglc": 0.0879,
+      "mario": 0.6593,
+      "opensurge": 0.0018,
+      "supertux": 0.2509
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 4,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p029",
+    "kind": "flow1d",
+    "tokens": [
+      "hazard",
+      "hazard",
+      "hazard",
+      "hazard",
+      "hazard",
+      "hazard",
+      "hazard"
+    ],
+    "weight": 0.0744,
+    "sourceBreakdown": {
+      "vglc": 0.2135,
+      "mario": 0.7865,
+      "opensurge": 0,
+      "supertux": 0
+    },
+    "energyHint": "high",
+    "constraints": {
+      "maxGapRun": 1,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p030",
+    "kind": "flow1d",
+    "tokens": [
+      "timed",
+      "timed",
+      "timed",
+      "timed",
+      "timed",
+      "timed"
+    ],
+    "weight": 0.0729,
+    "sourceBreakdown": {
+      "vglc": 0.1926,
+      "mario": 0.8074,
+      "opensurge": 0,
+      "supertux": 0
+    },
+    "energyHint": "medium",
+    "constraints": {
+      "maxGapRun": 1,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p031",
+    "kind": "micro2d",
+    "tokens": [
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "segment",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ]
+    ],
+    "weight": 0.0738,
+    "sourceBreakdown": {
+      "vglc": 0.1518,
+      "mario": 0.7211,
+      "opensurge": 0,
+      "supertux": 0.1271
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 16,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p032",
+    "kind": "micro2d",
+    "tokens": [
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "segment",
+        "segment"
+      ]
+    ],
+    "weight": 0.0724,
+    "sourceBreakdown": {
+      "vglc": 0.2601,
+      "mario": 0.6763,
+      "opensurge": 0,
+      "supertux": 0.0636
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 16,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p033",
+    "kind": "flow1d",
+    "tokens": [
+      "gap",
+      "gap",
+      "segment",
+      "segment",
+      "segment",
+      "segment"
+    ],
+    "weight": 0.0716,
+    "sourceBreakdown": {
+      "vglc": 0.2175,
+      "mario": 0.6078,
+      "opensurge": 0,
+      "supertux": 0.1748
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 2,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p034",
+    "kind": "flow1d",
+    "tokens": [
+      "gap",
+      "gap",
+      "gap",
+      "gap",
+      "gap",
+      "gap",
+      "segment"
+    ],
+    "weight": 0.0704,
+    "sourceBreakdown": {
+      "vglc": 0.0492,
+      "mario": 0.6555,
+      "opensurge": 0,
+      "supertux": 0.2953
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 6,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p035",
+    "kind": "flow1d",
+    "tokens": [
+      "gap",
+      "segment",
+      "segment",
+      "segment",
+      "segment",
+      "segment",
+      "segment"
+    ],
+    "weight": 0.0699,
+    "sourceBreakdown": {
+      "vglc": 0.2292,
+      "mario": 0.5257,
+      "opensurge": 0.002,
+      "supertux": 0.2431
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 1,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p036",
+    "kind": "flow1d",
+    "tokens": [
+      "segment",
+      "gap",
+      "gap",
+      "gap",
+      "gap",
+      "gap",
+      "gap"
+    ],
+    "weight": 0.0695,
+    "sourceBreakdown": {
+      "vglc": 0.0436,
+      "mario": 0.6436,
+      "opensurge": 0,
+      "supertux": 0.3129
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 6,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p037",
+    "kind": "flow1d",
+    "tokens": [
+      "gap",
+      "gap",
+      "gap",
+      "gap",
+      "segment",
+      "segment"
+    ],
+    "weight": 0.0691,
+    "sourceBreakdown": {
+      "vglc": 0.1034,
+      "mario": 0.6203,
+      "opensurge": 0,
+      "supertux": 0.2763
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 4,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p038",
+    "kind": "micro2d",
+    "tokens": [
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "segment",
+        "segment",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ]
+    ],
+    "weight": 0.0686,
+    "sourceBreakdown": {
+      "vglc": 0.1637,
+      "mario": 0.7745,
+      "opensurge": 0.002,
+      "supertux": 0.0599
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 12,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p039",
+    "kind": "flow1d",
+    "tokens": [
+      "segment",
+      "segment",
+      "segment",
+      "segment",
+      "segment",
+      "gap",
+      "gap"
+    ],
+    "weight": 0.0655,
+    "sourceBreakdown": {
+      "vglc": 0.1587,
+      "mario": 0.6889,
+      "opensurge": 0,
+      "supertux": 0.1524
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 2,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p040",
+    "kind": "micro2d",
+    "tokens": [
+      [
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment"
+      ],
+      [
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment"
+      ],
+      [
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment"
+      ],
+      [
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment"
+      ]
+    ],
+    "weight": 0.0644,
+    "sourceBreakdown": {
+      "vglc": 0.9473,
+      "mario": 0,
+      "opensurge": 0,
+      "supertux": 0.0527
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 1,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p041",
+    "kind": "micro2d",
+    "tokens": [
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "gap"
+      ]
+    ],
+    "weight": 0.0645,
+    "sourceBreakdown": {
+      "vglc": 0.1996,
+      "mario": 0.7665,
+      "opensurge": 0.0064,
+      "supertux": 0.0276
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 12,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p042",
+    "kind": "micro2d",
+    "tokens": [
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "gap",
+        "gap"
+      ]
+    ],
+    "weight": 0.0641,
+    "sourceBreakdown": {
+      "vglc": 0.1706,
+      "mario": 0.7996,
+      "opensurge": 0.0107,
+      "supertux": 0.0192
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 12,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p043",
+    "kind": "micro2d",
+    "tokens": [
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "segment",
+        "segment",
+        "segment",
+        "gap",
+        "gap",
+        "gap"
+      ]
+    ],
+    "weight": 0.0635,
+    "sourceBreakdown": {
+      "vglc": 0.191,
+      "mario": 0.7811,
+      "opensurge": 0.0043,
+      "supertux": 0.0236
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 12,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p044",
+    "kind": "flow1d",
+    "tokens": [
+      "gap",
+      "gap",
+      "gap",
+      "segment",
+      "segment",
+      "segment"
+    ],
+    "weight": 0.0634,
+    "sourceBreakdown": {
+      "vglc": 0.1588,
+      "mario": 0.6459,
+      "opensurge": 0,
+      "supertux": 0.1953
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 3,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p045",
+    "kind": "flow1d",
+    "tokens": [
+      "segment",
+      "segment",
+      "segment",
+      "segment",
+      "segment",
+      "segment",
+      "segment",
+      "gap"
+    ],
+    "weight": 0.0631,
+    "sourceBreakdown": {
+      "vglc": 0.1978,
+      "mario": 0.5849,
+      "opensurge": 0.0022,
+      "supertux": 0.2151
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 1,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p046",
+    "kind": "flow1d",
+    "tokens": [
+      "timed",
+      "timed",
+      "timed",
+      "timed",
+      "timed",
+      "timed",
+      "timed"
+    ],
+    "weight": 0.0616,
+    "sourceBreakdown": {
+      "vglc": 0.1744,
+      "mario": 0.8256,
+      "opensurge": 0,
+      "supertux": 0
+    },
+    "energyHint": "medium",
+    "constraints": {
+      "maxGapRun": 1,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p047",
+    "kind": "micro2d",
+    "tokens": [
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "gap",
+        "gap",
+        "gap",
+        "segment",
+        "segment",
+        "segment"
+      ]
+    ],
+    "weight": 0.0621,
+    "sourceBreakdown": {
+      "vglc": 0.2731,
+      "mario": 0.6938,
+      "opensurge": 0.0044,
+      "supertux": 0.0286
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 15,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p048",
+    "kind": "micro2d",
+    "tokens": [
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "gap",
+        "gap",
+        "segment",
+        "segment",
+        "segment",
+        "segment"
+      ]
+    ],
+    "weight": 0.0618,
+    "sourceBreakdown": {
+      "vglc": 0.2406,
+      "mario": 0.7219,
+      "opensurge": 0.0088,
+      "supertux": 0.0287
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 14,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p049",
+    "kind": "micro2d",
+    "tokens": [
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "segment",
+        "segment"
+      ]
+    ],
+    "weight": 0.0606,
+    "sourceBreakdown": {
+      "vglc": 0.2517,
+      "mario": 0.6989,
+      "opensurge": 0,
+      "supertux": 0.0494
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 19,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p050",
+    "kind": "micro2d",
+    "tokens": [
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "gap",
+        "segment",
+        "segment",
+        "segment",
+        "segment",
+        "segment"
+      ]
+    ],
+    "weight": 0.0601,
+    "sourceBreakdown": {
+      "vglc": 0.2398,
+      "mario": 0.7149,
+      "opensurge": 0.009,
+      "supertux": 0.0362
+    },
+    "energyHint": "low",
+    "constraints": {
+      "maxGapRun": 13,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p051",
+    "kind": "flow1d",
+    "tokens": [
+      "segment",
+      "launch",
+      "gap",
+      "gap",
+      "mobile",
+      "gap",
+      "gap",
+      "segment",
+      "timed",
+      "segment"
+    ],
+    "weight": 1.0001,
+    "sourceBreakdown": {
+      "vglc": 0,
+      "mario": 0,
+      "opensurge": 0,
+      "supertux": 0
+    },
+    "energyHint": "medium",
+    "constraints": {
+      "maxGapRun": 2,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p052",
+    "kind": "micro2d",
+    "tokens": [
+      [
+        "gap",
+        "gap",
+        "timed",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "gap",
+        "timed",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "segment",
+        "gap",
+        "gap",
+        "gap",
+        "hazard",
+        "segment"
+      ]
+    ],
+    "weight": 1,
+    "sourceBreakdown": {
+      "vglc": 0,
+      "mario": 0,
+      "opensurge": 0,
+      "supertux": 0
+    },
+    "energyHint": "medium",
+    "constraints": {
+      "maxGapRun": 4,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p053",
+    "kind": "flow1d",
+    "tokens": [
+      "segment",
+      "mobile",
+      "gap",
+      "gap",
+      "mobile",
+      "gap",
+      "gap",
+      "segment"
+    ],
+    "weight": 1,
+    "sourceBreakdown": {
+      "vglc": 0,
+      "mario": 0,
+      "opensurge": 0,
+      "supertux": 0
+    },
+    "energyHint": "medium",
+    "constraints": {
+      "maxGapRun": 2,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p054",
+    "kind": "flow1d",
+    "tokens": [
+      "segment",
+      "launch",
+      "gap",
+      "gap",
+      "segment"
+    ],
+    "weight": 1,
+    "sourceBreakdown": {
+      "vglc": 0,
+      "mario": 0,
+      "opensurge": 0,
+      "supertux": 0
+    },
+    "energyHint": "high",
+    "constraints": {
+      "maxGapRun": 2,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p055",
+    "kind": "micro2d",
+    "tokens": [
+      [
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "gap",
+        "launch",
+        "gap",
+        "gap",
+        "gap",
+        "gap"
+      ],
+      [
+        "segment",
+        "gap",
+        "gap",
+        "gap",
+        "gap",
+        "segment"
+      ]
+    ],
+    "weight": 1,
+    "sourceBreakdown": {
+      "vglc": 0,
+      "mario": 0,
+      "opensurge": 0,
+      "supertux": 0
+    },
+    "energyHint": "high",
+    "constraints": {
+      "maxGapRun": 7,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p056",
+    "kind": "flow1d",
+    "tokens": [
+      "segment",
+      "timed",
+      "timed",
+      "timed",
+      "timed",
+      "segment"
+    ],
+    "weight": 1,
+    "sourceBreakdown": {
+      "vglc": 0,
+      "mario": 0,
+      "opensurge": 0,
+      "supertux": 0
+    },
+    "energyHint": "medium",
+    "constraints": {
+      "maxGapRun": 1,
+      "minSegmentBeforeLaunch": 1
+    }
+  },
+  {
+    "patternId": "p057",
+    "kind": "flow1d",
+    "tokens": [
+      "segment",
+      "hazard",
+      "hazard",
+      "segment",
+      "mobile",
+      "gap",
+      "gap",
+      "segment",
+      "hazard",
+      "segment",
+      "hazard",
+      "segment",
+      "hazard",
+      "segment"
+    ],
+    "weight": 1,
+    "sourceBreakdown": {
+      "vglc": 0,
+      "mario": 0,
+      "opensurge": 0,
+      "supertux": 0
+    },
+    "energyHint": "medium",
+    "constraints": {
+      "maxGapRun": 2,
+      "minSegmentBeforeLaunch": 1
+    }
+  }
+];
