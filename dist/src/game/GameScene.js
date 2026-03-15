@@ -33,7 +33,7 @@ const FLYING_ENEMY_HEIGHT = 10;
 const FALLING_ROCK_RADIUS = 7;
 const ENEMY_COLLISION_BOX_SCALE = 0.9;
 const PATROL_SPAWN_CLEARANCE_PX = 1;
-const PLAYER_CAMERA_ZOOM = 2;
+const PLAYER_CAMERA_ZOOM = 1.28;
 const PLAYER_CAMERA_FOLLOW_OFFSET_Y = 50;
 const VOICE_RETRIGGER_WINDOW_MS = 90;
 const MIN_VOICE_HOLD_SEC = 0.03;
@@ -43,7 +43,8 @@ const AUDIO_EVENT_KEY_TTL_MS = 2400;
 const BASE_JUMP_VELOCITY = -560;
 const SPRING_JUMP_HEIGHT_MULTIPLIER = 2;
 const SPRING_JUMP_VELOCITY = BASE_JUMP_VELOCITY * Math.sqrt(SPRING_JUMP_HEIGHT_MULTIPLIER);
-const LAUNCH_PLATFORM_SPEED_MULTIPLIER = 25.2;
+const LAUNCH30_PLATFORM_SPEED_MULTIPLIER = 7.5;
+const LAUNCH60_PLATFORM_SPEED_MULTIPLIER = 8.5;
 const PLAYER_JUMP_STRETCH_MAX_SPEED = Math.abs(SPRING_JUMP_VELOCITY) * 1.05;
 const PLAYER_JUMP_STRETCH_MAX = 0.34;
 const PLAYER_JUMP_SQUEEZE_COUPLING = 0.7;
@@ -1488,7 +1489,8 @@ export class GameScene extends Phaser.Scene {
     }
     applyLaunchImpulse(platform) {
         const radians = Phaser.Math.DegToRad(platform.angleDeg);
-        const launchSpeed = this.mover.maxSpeedPxPerSec * LAUNCH_PLATFORM_SPEED_MULTIPLIER;
+        const launchSpeedMultiplier = platform.kind === 'launch60' ? LAUNCH60_PLATFORM_SPEED_MULTIPLIER : LAUNCH30_PLATFORM_SPEED_MULTIPLIER;
+        const launchSpeed = this.mover.maxSpeedPxPerSec * launchSpeedMultiplier;
         const launchVx = Math.cos(radians) * launchSpeed;
         const launchVy = -Math.sin(radians) * launchSpeed;
         this.mover.setVelocityPxPerSec(launchVx);

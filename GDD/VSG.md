@@ -484,7 +484,7 @@ Kill counter format:
 
 * Bottom HUD score must render as `kills (-Xs)` with one decimal place (example: `6 (-1.2s)`), matching the runtime time-bonus rule.
 * Timer must stay top-center and screen-anchored (independent from world width/camera scroll).
-* Gameplay camera must follow the player with runtime zoom fixed at `2.0x` and a 20% stronger upward follow offset (`y = -57.6`, previously `-48`).
+* Gameplay camera must follow the player with runtime zoom fixed at `1.28x` and a 20% stronger upward follow offset (`y = -57.6`, previously `-48`).
 * Runtime player blockout size is `12x19`.
 * HUD/overlay screen UI must remain fully readable with camera zoom active (zoom-compensated position + scale for screen-anchored labels/panels).
 

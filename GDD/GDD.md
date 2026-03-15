@@ -467,7 +467,9 @@ Launch platforms apply a directional impulse only when landed on from above.
   * `launch30` (`30°`)
   * `launch60` (`60°`)
 * Launch vector (`vx`, `vy`) is predefined per angle and scaled by BPM-driven traversal speed, so launch energy stays musically coherent across tempo zones.
-* Current launch impulse magnitude tuning is `3x` the previous baseline (`LAUNCH_PLATFORM_SPEED_MULTIPLIER = 25.2`).
+* Current launch impulse magnitude tuning is variant-specific to avoid excessive acceleration while preserving angle identity:
+  * `launch30`: `LAUNCH30_PLATFORM_SPEED_MULTIPLIER = 7.5`
+  * `launch60`: `LAUNCH60_PLATFORM_SPEED_MULTIPLIER = 8.5`
 * Each launch platform renders a small line overlay showing launch angle.
 
 ---
@@ -701,7 +703,7 @@ Runtime generation now uses **deterministic random pattern picks**, not WFC.
 ### Global Look & UI Theme
 
 * Runtime resolution: **960x540**
-* Gameplay camera follows the player with **2.0x zoom** and a 20% stronger upward follow offset (`y = -57.6`, previously `-48`).
+* Gameplay camera follows the player with **1.28x zoom** and a 20% stronger upward follow offset (`y = -57.6`, previously `-48`).
 * Runtime blockout scale tuning:
   * player body: `12x19`
   * player heart marker: `3x3` blue square on torso (`#3A86FF`), pulse-synced to current BPM
